@@ -1,0 +1,46 @@
+[project]
+name = "controlel"
+version = "0.1.0"
+description = "Adaptive building heating control platform"
+requires-python = ">=3.13"
+authors = [
+    {name = "vmshops"}
+]
+
+dependencies = [
+    "pydantic>=2.0",
+    "pyyaml>=6.0"
+]
+
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "ruff",
+    "mypy"
+]
+
+
+[tool.ruff]
+line-length = 120
+target-version = "py313"
+
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "F",
+    "I",
+    "UP"
+]
+
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+
+
+[tool.pytest.ini_options]
+testpaths = [
+    "tests"
+]

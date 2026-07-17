@@ -1,0 +1,23 @@
+.gitignore# Python cache
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+.venv/
+
+# VS Code
+.vscode/*.log
+
+# Test
+.pytest_cache/
+
+# Type checking
+.mypy_cache/
+
+# Ruff
+.ruff_cache/
+
+# Build
+dist/
+build/
+*.egg-info/
