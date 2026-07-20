@@ -1,13 +1,11 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 
 class Decision(BaseModel):
     """
-    Represents a result of a regulation evaluation.
+    Represents a regulation decision.
     """
 
     action: str
 
-    model_config = ConfigDict(
-        frozen=True,
-    )
+    reason: str | None = None
