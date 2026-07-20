@@ -1,13 +1,12 @@
 class EventBus:
-    """
-    Simple in-memory event bus.
-    """
-
     def __init__(self):
         self._handlers = {}
 
     def subscribe(self, event_type, handler):
-        self._handlers.setdefault(event_type, []).append(handler)
+        if event_type not in self._handlers:
+            self._handlers[event_type] = []
+
+        self._handlers[event_type].append(handler)
 
     def publish(self, event):
         if isinstance(event, dict):
@@ -15,5 +14,14 @@ class EventBus:
         else:
             event_type = type(event)
 
-        for handler in self._handlers.get(event_type, []):
-            handler(event)
+        handlers = self._handlers.get(event_type, [])
+
+        results = []
+
+        for handler in handlers:
+            results.append(handler(event))
+
+        if len(results) == 1:
+            return results[0]
+
+        return results
