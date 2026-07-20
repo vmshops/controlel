@@ -1,8 +1,9 @@
 from controlel.domain.decisions.decision import Decision
 from controlel.domain.regulation.context import ControlContext
+from controlel.domain.regulation.strategy import RegulationStrategy
 
 
-class HeatingStrategy:
+class HeatingStrategy(RegulationStrategy):
     """
     Strategy for heating regulation.
     """
