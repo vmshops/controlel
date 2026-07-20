@@ -3,9 +3,7 @@ class EventBus:
         self._handlers = {}
 
     def subscribe(self, event_type, handler):
-        if event_type not in self._handlers:
-            self._handlers[event_type] = []
-
+        self._handlers.setdefault(event_type, [])
         self._handlers[event_type].append(handler)
 
     def publish(self, event):
@@ -16,12 +14,9 @@ class EventBus:
 
         handlers = self._handlers.get(event_type, [])
 
-        results = []
+        result = None
 
         for handler in handlers:
-            results.append(handler(event))
+            result = handler(event)
 
-        if len(results) == 1:
-            return results[0]
-
-        return results
+        return result
