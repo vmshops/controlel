@@ -12,3 +12,15 @@ def test_engine_enables_heating_when_temperature_is_low():
     decision = RegulationEngine.evaluate(context)
 
     assert decision.action == "enable_heating"
+
+
+def test_engine_respects_hysteresis():
+    context = ControlContext(
+        current_temperature=Temperature(21.8),
+        target_temperature=Temperature(22),
+        hysteresis=Temperature(0.3),
+    )
+
+    decision = RegulationEngine.evaluate(context)
+
+    assert decision.action == "disable_heating"

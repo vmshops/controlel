@@ -12,6 +12,8 @@ class ControlContext(BaseModel):
 
     target_temperature: Temperature
 
+    hysteresis: Temperature = Temperature(0)
+
     model_config = ConfigDict(
         frozen=True,
     )

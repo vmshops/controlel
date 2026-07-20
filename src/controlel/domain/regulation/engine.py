@@ -9,7 +9,9 @@ class RegulationEngine:
 
     @staticmethod
     def evaluate(context: ControlContext) -> Decision:
-        if context.current_temperature.value < context.target_temperature.value:
+        lower_limit = context.target_temperature.value - context.hysteresis.value
+
+        if context.current_temperature.value < lower_limit:
             return Decision(action="enable_heating")
 
         return Decision(action="disable_heating")
