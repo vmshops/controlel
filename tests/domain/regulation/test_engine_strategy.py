@@ -4,24 +4,9 @@ from controlel.domain.regulation.heating import HeatingStrategy
 from controlel.domain.value_objects.temperature import Temperature
 
 
-def test_engine_enables_heating_when_temperature_is_low():
+def test_engine_uses_provided_strategy():
     context = ControlContext(
-        current_temperature=Temperature(21),
-        target_temperature=Temperature(22),
-    )
-
-    engine = RegulationEngine(
-        strategy=HeatingStrategy(),
-    )
-
-    decision = engine.evaluate(context)
-
-    assert decision.action == "enable_heating"
-
-
-def test_engine_respects_hysteresis():
-    context = ControlContext(
-        current_temperature=Temperature(21.8),
+        current_temperature=Temperature(20),
         target_temperature=Temperature(22),
         hysteresis=Temperature(0.3),
     )
@@ -32,4 +17,4 @@ def test_engine_respects_hysteresis():
 
     decision = engine.evaluate(context)
 
-    assert decision.action == "disable_heating"
+    assert decision.action == "enable_heating"

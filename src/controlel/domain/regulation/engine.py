@@ -1,17 +1,15 @@
 from controlel.domain.decisions.decision import Decision
 from controlel.domain.regulation.context import ControlContext
+from controlel.domain.regulation.strategy import RegulationStrategy
 
 
 class RegulationEngine:
     """
-    Evaluates control context and produces a decision.
+    Engine responsible for executing regulation strategies.
     """
 
-    @staticmethod
-    def evaluate(context: ControlContext) -> Decision:
-        lower_limit = context.target_temperature.value - context.hysteresis.value
+    def __init__(self, strategy: RegulationStrategy):
+        self.strategy = strategy
 
-        if context.current_temperature.value < lower_limit:
-            return Decision(action="enable_heating")
-
-        return Decision(action="disable_heating")
+    def evaluate(self, context: ControlContext) -> Decision:
+        return self.strategy.evaluate(context)
