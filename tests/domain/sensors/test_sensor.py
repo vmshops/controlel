@@ -1,12 +1,15 @@
+from controlel.domain.capabilities.capability import Capability
 from controlel.domain.sensors.sensor import Sensor
 
 
-def test_sensor_creation():
+def test_sensor_with_capabilities():
     sensor = Sensor(
-        name="Living room temperature",
-        sensor_type="temperature",
+        name="Living room sensor",
+        capabilities=[
+            Capability(name="temperature"),
+            Capability(name="humidity"),
+        ],
     )
 
-    assert sensor.name == "Living room temperature"
-    assert sensor.sensor_type == "temperature"
-    assert sensor.enabled is True
+    assert len(sensor.capabilities) == 2
+    assert sensor.capabilities[0].name == "temperature"
