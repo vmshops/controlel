@@ -6,12 +6,9 @@ from controlel.domain.value_objects.temperature import Temperature
 
 
 class Measurement(BaseModel):
-    """
-    Represents a measured value from a source.
-    """
-
     value: Temperature
-
-    source: str
+    source: str | None = None
 
     timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+    target: Temperature | None = None
