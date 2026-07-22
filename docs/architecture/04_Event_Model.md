@@ -51,9 +51,9 @@ exceptions.
 
 The result references the existing `DecisionCreatedEvent` and `Command` when
 present; it does not copy their fields. Result objects exist only when
-processing completes normally. Configuration, clock, observer, actuator,
-validation and unexpected failures remain exceptions, so no misleading result
-is returned when they interrupt processing.
+processing completes normally. Configuration, routing, clock, observer,
+actuator, validation and unexpected failures remain exceptions, so no
+misleading result is returned when they interrupt processing.
 
 Event-only observers do not receive the synchronous runtime result. No
 diagnostic events, logging, persistence or correlation identifiers are
@@ -77,8 +77,11 @@ observation provenance and `ZoneId` regulated-subject identity.
 Decision notification remains independent of command execution. A decision
 event is still published when its mapped command is later suppressed because
 the same zone action is already applied, and it is published before an
-actuator execution that may fail. The caller receives `command_suppressed` or
-`command_executed` only after dispatch completes normally.
+actuator route is resolved or execution is attempted. A missing route therefore
+propagates `ActuatorRouteNotFoundError` after decision publication, without a
+runtime result or applied-state change. The caller receives
+`command_suppressed` or `command_executed` only after dispatch completes
+normally.
 
 The handler is the explicit typed mapping boundary. It maps
 `DecisionAction.ENABLE_HEATING` to `HeatingAction.ENABLE_HEATING` and
@@ -98,3 +101,8 @@ A `Command` is an explicit request, not an event describing something that
 already happened. No command-created event is introduced in the current flow.
 Commands carry the decision's `ZoneId` as a logical execution target but do not
 carry `SensorId`.
+
+`ZoneActuatorRouter` is application runtime composition, not event processing.
+It maps `Command.zone_id` directly to one configured `ActuatorPort`, has no
+default, and distinguishes missing routing configuration from exceptions raised
+by a resolved port during execution.

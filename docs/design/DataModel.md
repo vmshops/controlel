@@ -53,15 +53,19 @@ fail validation. There are no aliases, generic action registry, routing or
 physical-target taxonomy, or plugin action system; future vocabulary growth
 requires an explicit mapping decision.
 
-Zone configuration contains no latest measurement or applied heating state.
-Scheduling, persistence, disabled-state semantics, actuator routing and
+Zone configuration contains no latest measurement, applied heating state or
+live actuator port. Scheduling, persistence, disabled-state semantics and
 configuration mutation are intentionally absent.
 
-`ZoneId` is not a physical actuator identifier. Commands for every zone still
-use one injected `ActuatorPort`; no zone-to-actuator routing exists. Multiple
-sensors in one zone may produce repeated or conflicting commands. Future
-durable causal tracing should introduce correlation or causation identity
-rather than reuse `SensorId` for that purpose.
+`ZoneId` is not a physical actuator identifier. The application-layer
+`ZoneActuatorRouter` copies runtime bindings from each `ZoneId` directly to
+exactly one `ActuatorPort`; one port may be shared by several zones. Routes have
+no default, listing or mutation contract. A shared port receives each complete
+typed command and must understand its logical zone target. This is not global
+boiler-demand arbitration. No `ActuatorId`, registry, discovery, physical
+topology, family routing or multiple-port fan-out exists. Future durable causal
+tracing should introduce correlation or causation identity rather than reuse
+`SensorId` for that purpose.
 
 # 5. Runtime Model
 
@@ -142,15 +146,19 @@ latest successfully executed typed `HeatingAction`, the successful command ident
 and the application time. It does not contain measurements, targets or desired
 decisions and never stores the non-executable `DecisionAction.OBSERVE_ONLY`.
 
-An identical already-applied action is suppressed per zone. State changes only
-after the actuator port returns normally; a failure leaves prior state intact
-and permits a later request to retry. Decisions and decision events remain
-observable even when execution is suppressed.
+Routing is resolved before suppression, so missing configuration raises
+`ActuatorRouteNotFoundError` even when the same action was previously applied.
+With a valid route, an identical already-applied action is suppressed per zone.
+State changes only after the resolved actuator port returns normally; routing
+or execution failure leaves prior state intact and permits a later request to
+retry. Decisions and decision events remain observable before routing and even
+when execution is suppressed.
 
 Applied state is in-memory and is lost on restart. A normal adapter return does
 not physically confirm hardware state, and external changes can make the view
-inaccurate. Persistence, state history, retries, physical feedback, routing and
-concurrency protection are not implemented.
+inaccurate. Persistence, state history, retries, physical feedback, dynamic
+route mutation and concurrency protection are not implemented. Changing routes
+would require route identity and applied-state invalidation semantics.
 
 # 6. Historical Data Model
 

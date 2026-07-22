@@ -57,10 +57,11 @@ def create_runtime(sensor_targets: dict[str, float]) -> ControlRuntime:
             )
         )
 
+    actuator = NoOpActuator()
     return ControlRuntime(
         sensor_repository=sensors,
         zone_repository=zones,
-        actuator=NoOpActuator(),
+        actuator_routes={zone.zone_id: actuator for zone in zones.list_all()},
         clock=FixedClock(),
         max_future_skew=timedelta(0),
     )
@@ -177,3 +178,13 @@ def test_control_runtime_requires_explicit_max_future_skew():
     parameter = signature(ControlRuntime).parameters["max_future_skew"]
 
     assert parameter.default is parameter.empty
+
+
+def test_control_runtime_requires_explicit_actuator_routes():
+    parameter = signature(ControlRuntime).parameters["actuator_routes"]
+
+    assert parameter.default is parameter.empty
+
+
+def test_control_runtime_no_longer_accepts_single_actuator():
+    assert "actuator" not in signature(ControlRuntime).parameters

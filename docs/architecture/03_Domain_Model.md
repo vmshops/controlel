@@ -41,6 +41,13 @@ carry `SensorId`, because sensor provenance is not currently execution data.
 `ZoneId` is not a physical actuator identifier, and the domain defines no
 generic target abstraction.
 
+At runtime, the application-layer `ZoneActuatorRouter` maps each configured
+`ZoneId` directly to exactly one `ActuatorPort`. A port may serve multiple
+zones, but a zone does not fan out to multiple ports. The router copies its
+runtime configuration and exposes no mutation or default route. This adds no
+`ActuatorId`, actuator registry, persistence, discovery, physical topology or
+family-based routing to the domain model.
+
 ## Heating decision and command vocabulary
 
 `DecisionAction` is the typed regulation vocabulary. Its stable serialized
@@ -70,3 +77,7 @@ configuration.
 Applied state is distinct from a `Decision`, which describes what regulation
 wants, and from a `Command`, which is an executable request that may still fail
 or be suppressed.
+
+Actuator routing is resolved before applied-state suppression. Applied state
+remains keyed by logical `ZoneId`; it does not identify a physical actuator or
+store routing configuration.

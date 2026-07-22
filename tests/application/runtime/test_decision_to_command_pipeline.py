@@ -10,6 +10,9 @@ from controlel.application.runtime.runtime_processing_result import (
     RuntimeProcessingStatus,
     TemperatureNoDecisionReason,
 )
+from controlel.application.services.zone_actuator_router import (
+    ActuatorRouteNotFoundError,
+)
 from controlel.domain.actuators.actuator_port import ActuatorPort
 from controlel.domain.commands.command import Command
 from controlel.domain.commands.command_family import CommandFamily
@@ -92,6 +95,7 @@ def create_runtime(
     maximum_ages: dict[str, timedelta] | None = None,
     max_future_skew: timedelta = timedelta(0),
     clock: FixedClock | None = None,
+    actuator_routes: dict[ZoneId, ActuatorPort] | None = None,
 ) -> ControlRuntime:
     configurations = configurations or {
         "living_room_temperature": ("living_room", 22),
@@ -120,10 +124,15 @@ def create_runtime(
             )
         )
 
+    configured_routes = (
+        actuator_routes
+        if actuator_routes is not None
+        else {ZoneId(value=zone_id): actuator for zone_id, _target in configurations.values()}
+    )
     return ControlRuntime(
         sensor_repository=sensors,
         zone_repository=zones,
-        actuator=actuator,
+        actuator_routes=configured_routes,
         clock=clock or FixedClock(),
         max_future_skew=max_future_skew,
     )
@@ -152,7 +161,7 @@ def create_shared_zone_runtime(actuator: ActuatorPort) -> ControlRuntime:
     return ControlRuntime(
         sensor_repository=sensors,
         zone_repository=zones,
-        actuator=actuator,
+        actuator_routes={ZoneId(value="living_room"): actuator},
         clock=FixedClock(),
         max_future_skew=timedelta(0),
     )
@@ -199,7 +208,7 @@ def test_high_temperature_produces_disable_heating_command():
     )
 
 
-def test_two_zones_dispatch_differently_targeted_commands_to_same_actuator():
+def test_two_zones_route_end_to_end_through_one_shared_port():
     actuator = RecordingActuator()
     runtime = create_runtime(
         actuator,
@@ -222,6 +231,31 @@ def test_two_zones_dispatch_differently_targeted_commands_to_same_actuator():
     ]
     assert runtime.control_state_repository.get(ZoneId(value="living_room")).command_id == actuator.commands[0].id
     assert runtime.control_state_repository.get(ZoneId(value="bedroom")).command_id == actuator.commands[1].id
+
+
+def test_two_zones_route_end_to_end_to_different_ports():
+    living_room_actuator = RecordingActuator()
+    bedroom_actuator = RecordingActuator()
+    configurations = {
+        "living_room_temperature": ("living_room", 22),
+        "bedroom_temperature": ("bedroom", 22),
+    }
+    runtime = create_runtime(
+        living_room_actuator,
+        configurations,
+        actuator_routes={
+            ZoneId(value="living_room"): living_room_actuator,
+            ZoneId(value="bedroom"): bedroom_actuator,
+        },
+    )
+
+    living_room_result = runtime.process_temperature(create_measurement(19, sensor_id="living_room_temperature"))
+    bedroom_result = runtime.process_temperature(create_measurement(19, sensor_id="bedroom_temperature"))
+
+    assert living_room_result.status is RuntimeProcessingStatus.COMMAND_EXECUTED
+    assert bedroom_result.status is RuntimeProcessingStatus.COMMAND_EXECUTED
+    assert [command.zone_id for command in living_room_actuator.commands] == [ZoneId(value="living_room")]
+    assert [command.zone_id for command in bedroom_actuator.commands] == [ZoneId(value="bedroom")]
 
 
 def test_secondary_measurement_is_observable_without_decision_or_command():
@@ -429,7 +463,7 @@ def test_missing_configuration_stops_before_decision_or_command():
     runtime = ControlRuntime(
         sensor_repository=SensorRepository(),
         zone_repository=ZoneRepository(),
-        actuator=actuator,
+        actuator_routes={},
         clock=FixedClock(),
         max_future_skew=timedelta(0),
     )
@@ -443,6 +477,27 @@ def test_missing_configuration_stops_before_decision_or_command():
     assert runtime.state_store.get_latest(measurement.sensor_id) == measurement
     assert published_decisions == []
     assert actuator.commands == []
+
+
+def test_missing_actuator_route_propagates_after_decision_publication_without_state_change():
+    unrelated_actuator = RecordingActuator()
+    runtime = create_runtime(
+        unrelated_actuator,
+        actuator_routes={ZoneId(value="bedroom"): unrelated_actuator},
+    )
+    published_decisions = []
+    runtime.event_bus.subscribe(DecisionCreatedEvent, published_decisions.append)
+    result = None
+
+    with pytest.raises(ActuatorRouteNotFoundError) as raised:
+        result = runtime.process_temperature(create_measurement(19))
+
+    assert raised.value.zone_id == ZoneId(value="living_room")
+    assert result is None
+    assert len(published_decisions) == 1
+    assert published_decisions[0].decision.zone_id == ZoneId(value="living_room")
+    assert unrelated_actuator.commands == []
+    assert runtime.control_state_repository.get(ZoneId(value="living_room")) is None
 
 
 def test_unsupported_decision_does_not_invoke_actuator():

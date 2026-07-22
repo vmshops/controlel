@@ -21,6 +21,7 @@ Measurement
 -> DecisionEventHandler
 -> Command(zone_id, CommandFamily, HeatingAction) | None
 -> CommandDispatcher
+-> ZoneActuatorRouter lookup by ZoneId
 -> StateRepository lookup by ZoneId
 -> suppress identical applied action | ActuatorPort
 -> StateRepository update after success
@@ -134,12 +135,14 @@ use explicit correlation or causation identity rather than overload
 explicitly invokes command mapping. Decision publication is not a
 request/response operation.
 
-`CommandDispatcher` compares a command with the latest successfully applied
-typed `HeatingAction` for its `ZoneId`. An identical action is suppressed without actuator
-execution or state mutation. A different action executes through the injected
-`ActuatorPort`, then becomes the new immutable `ControlState` only after normal
-return. Execution exceptions propagate unchanged and preserve the previous
-state, so a later measurement may retry the action.
+`CommandDispatcher` first resolves `Command.zone_id` through the
+application-layer `ZoneActuatorRouter`, then compares the command with the
+latest successfully applied typed `HeatingAction` for that zone. An identical
+action is suppressed without actuator execution or state mutation. A different
+action executes through the exact resolved `ActuatorPort`, then becomes the new
+immutable `ControlState` only after normal return. Routing and execution
+exceptions preserve the previous state, so a later measurement may retry the
+action.
 
 Suppression does not remove the regulation result: repeated accepted primary
 measurements may still produce and publish decisions and create commands. The
@@ -152,18 +155,23 @@ and unexpected failures propagate as exceptions and produce no result object.
 No logging, persistence, correlation identifiers or diagnostic events are
 introduced.
 
-The current flow has no command routing, retry policy, persistence, physical
-feedback or concurrency protection. A normal adapter return records logical
+The current flow has no retry policy, persistence, physical feedback or
+concurrency protection. A normal adapter return records logical
 application-level success but does not confirm physical hardware state.
 
-`ZoneId` is not a physical actuator identifier. Commands targeted to different
-zones still pass through the same injected `ActuatorPort`; zone-to-actuator
-routing is intentionally absent. Multiple sensors associated with one zone may
-currently produce repeated or conflicting commands.
+`ZoneId` is not a physical actuator identifier. Runtime configuration maps each
+zone directly to exactly one port, copies those routes at construction and
+offers no default or dynamic mutation. Different zones may use different ports
+or the same port. A shared port must interpret the complete command's
+`ZoneId`; independent zone commands are not global boiler-demand arbitration.
+There is no `ActuatorId`, registry, discovery, family routing, physical topology
+or multiple-port fan-out.
 
 Observers may delay runtime processing, and observer exceptions currently
 propagate to the caller. Observer isolation and concurrency are outside the
 current design.
 
-Scheduling, disabled-state behavior, configuration persistence and mutation,
-and zone-based actuator routing are also outside the current flow.
+Scheduling, disabled-state behavior, configuration persistence, dynamic route
+changes and global demand arbitration are outside the current flow. Dynamic
+route changes would require route identity and applied-state invalidation
+semantics.

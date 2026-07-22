@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from datetime import timedelta
 
 from controlel.application.configuration.zone_target_resolver import (
@@ -16,6 +17,7 @@ from controlel.application.services.command_dispatcher import CommandDispatcher
 from controlel.application.services.measurement_timestamp_validator import (
     MeasurementTimestampValidator,
 )
+from controlel.application.services.zone_actuator_router import ZoneActuatorRouter
 from controlel.application.state.runtime_state_store import RuntimeStateStore
 from controlel.application.state.zone_temperature_aggregator import (
     ZoneTemperatureAggregator,
@@ -29,6 +31,7 @@ from controlel.domain.measurements.measurement import Measurement
 from controlel.domain.repositories.sensor_repository import SensorRepository
 from controlel.domain.repositories.state_repository import StateRepository
 from controlel.domain.repositories.zone_repository import ZoneRepository
+from controlel.domain.value_objects.zone_id import ZoneId
 
 
 class ControlRuntime:
@@ -41,16 +44,17 @@ class ControlRuntime:
         self,
         sensor_repository: SensorRepository,
         zone_repository: ZoneRepository,
-        actuator: ActuatorPort,
+        actuator_routes: Mapping[ZoneId, ActuatorPort],
         clock: Clock,
         max_future_skew: timedelta,
-    ):
+    ) -> None:
         self.event_bus = EventBus()
         self.state_store = RuntimeStateStore()
         self.control_state_repository = StateRepository()
         self.decision_handler = DecisionEventHandler()
+        self.actuator_router = ZoneActuatorRouter(actuator_routes)
         self.command_dispatcher = CommandDispatcher(
-            actuator=actuator,
+            actuator_router=self.actuator_router,
             state_repository=self.control_state_repository,
         )
         self.target_resolver = ZoneTargetResolver(

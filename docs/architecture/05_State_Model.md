@@ -30,7 +30,8 @@ prepared. This preserves the flow:
 
 ```text
 Sensor -> Measurement -> Event -> RuntimeStateStore -> ControlContext
-       -> Decision -> DecisionCreatedEvent -> Command | None -> ActuatorPort
+       -> Decision -> DecisionCreatedEvent -> Command | None
+       -> ZoneActuatorRouter -> ActuatorPort
 ```
 
 The measurement's `SensorId` is observation provenance. Target resolution adds
@@ -118,12 +119,14 @@ time. It contains no current measurement or target configuration and is not
 stored in `RuntimeStateStore`. It does not store `DecisionAction`, because an
 applied state records execution rather than regulation intent.
 
-Before actuator execution, the application checks the zone's applied state. An
-identical action is suppressed without changing state. A different or missing
-state permits execution, and the repository is updated only after
-`ActuatorPort.execute()` returns normally. A failure propagates and leaves any
-previous state unchanged, allowing a later measurement to request the action
-again.
+Before reading applied state, the application resolves the command's logical
+`ZoneId` through `ZoneActuatorRouter`. A missing route raises
+`ActuatorRouteNotFoundError`, even when an identical action was previously
+applied. With a valid route, an identical action is suppressed without changing
+state. A different or missing state permits execution, and the repository is
+updated only after `ActuatorPort.execute()` returns normally. Routing and
+execution failures leave any previous state unchanged, allowing a later
+measurement to request the action again.
 
 Applied state is in-memory and lost on restart, so the first command after a
 restart may execute again. A normal adapter return is application-level
@@ -148,13 +151,22 @@ configuration error. No fallback target is applied. Because the measurement is
 recorded before configuration resolution, an accepted observation remains in
 runtime state when resolution fails, but no regulation decision is produced.
 
-All commands are still dispatched through one injected `ActuatorPort`.
-`ZoneId` is not a physical actuator identifier, and zone-to-actuator routing is
-not part of the current state or configuration model.
+Runtime application configuration maps each `ZoneId` directly to one
+`ActuatorPort`. Routes are copied when the runtime is constructed and cannot be
+dynamically changed or defaulted. One port may serve multiple zones and receives
+each complete command with its distinct logical `ZoneId`; applied state remains
+independent per zone. Shared routing is valid only for a zone-aware execution
+adapter and is not global boiler-demand arbitration.
+
+`ZoneId` is not a physical actuator identifier. There is no `ActuatorId`,
+actuator registry, persistence, discovery, physical topology, command-family
+routing or multiple-port fan-out.
 
 ## Persistence boundary
 
 `RuntimeStateStore` has no database, integration or plugin dependency. Process
 restart recovery and durable storage are outside the current state model.
-Applied control state is also non-persistent. There is no applied-state history,
-retry mechanism, physical feedback, routing or concurrency protection.
+Applied control state and routing configuration are also non-persistent. There
+is no applied-state history, retry mechanism, physical feedback, dynamic route
+mutation or concurrency protection. Dynamic routing would require route
+identity and applied-state invalidation semantics.
