@@ -5,6 +5,7 @@ from controlel.domain.repositories.zone_repository import (
     DuplicateZoneIdError,
     ZoneRepository,
 )
+from controlel.domain.value_objects.sensor_id import SensorId
 from controlel.domain.value_objects.temperature import Temperature
 from controlel.domain.value_objects.zone_id import ZoneId
 
@@ -12,6 +13,7 @@ from controlel.domain.value_objects.zone_id import ZoneId
 def create_zone(zone_id: str, target: float = 22) -> Zone:
     return Zone(
         zone_id=ZoneId(value=zone_id),
+        primary_sensor_id=SensorId(value=f"{zone_id}_temperature"),
         name=zone_id,
         target_temperature=Temperature(target),
     )

@@ -16,6 +16,11 @@ is published. Observers therefore cannot alter the event before runtime state
 and regulation have processed it. Rejected stale measurement events are still
 published and remain observable.
 
+Accepted measurements from secondary zone sensors are also published and
+remain observable after being stored, but they produce no `ControlContext`,
+decision event or command. A zone with no latest primary measurement likewise
+produces no decision.
+
 Subscribers run synchronously and may delay runtime processing. Subscriber
 exceptions currently propagate unchanged.
 

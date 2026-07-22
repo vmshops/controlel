@@ -3,6 +3,9 @@ from controlel.application.configuration.zone_target_resolver import (
 )
 from controlel.application.services.control_loop_service import ControlLoopService
 from controlel.application.state.runtime_state_store import RuntimeStateStore
+from controlel.application.state.zone_temperature_aggregator import (
+    ZoneTemperatureAggregator,
+)
 from controlel.domain.events.temperature_measured_event import TemperatureMeasuredEvent
 from controlel.domain.regulation.context import ControlContext
 
@@ -16,9 +19,11 @@ class TemperatureEventHandler:
         self,
         state_store: RuntimeStateStore,
         target_resolver: ZoneTargetResolver,
+        temperature_aggregator: ZoneTemperatureAggregator,
     ):
         self.state_store = state_store
         self.target_resolver = target_resolver
+        self.temperature_aggregator = temperature_aggregator
         self.control_loop = ControlLoopService()
 
     def handle(self, event: TemperatureMeasuredEvent):
@@ -26,11 +31,18 @@ class TemperatureEventHandler:
             return None
 
         zone = self.target_resolver.resolve(event.measurement.sensor_id)
+        effective_measurement = self.temperature_aggregator.get_effective(zone)
+
+        if effective_measurement is None:
+            return None
+
+        if event.measurement.sensor_id != zone.primary_sensor_id:
+            return None
 
         context = ControlContext(
-            sensor_id=event.measurement.sensor_id,
+            sensor_id=effective_measurement.sensor_id,
             zone_id=zone.zone_id,
-            current_temperature=event.measurement.value,
+            current_temperature=effective_measurement.value,
             target_temperature=zone.target_temperature,
         )
 

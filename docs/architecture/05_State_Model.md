@@ -25,6 +25,22 @@ the configured `ZoneId`, and both identifiers are preserved in
 its logical execution target; these identifiers are not runtime state fields
 added by the store.
 
+## Effective zone temperature
+
+Each zone configures one required `primary_sensor_id`. The application validates
+that this sensor is registered and belongs to the zone, then reads its exact
+latest `Measurement` from `RuntimeStateStore`. That observation is the sole
+current-temperature input for zone regulation.
+
+Secondary sensor measurements remain per-`SensorId` runtime observations but
+do not initiate regulation. There is no automatic fallback when primary state
+is missing, and invalid primary configuration raises an explicit application
+error. The store contains no synthetic zone measurement and is not mutated by
+effective-temperature selection.
+
+Staleness remains a same-sensor ordering rule. No timestamps are compared
+across sensors, and no elapsed-time freshness threshold exists.
+
 ## Historical measurements
 
 Latest runtime state is not measurement history. The runtime store overwrites

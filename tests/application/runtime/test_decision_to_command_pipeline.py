@@ -74,11 +74,38 @@ def create_runtime(
         zones.add(
             Zone(
                 zone_id=ZoneId(value=zone_id),
+                primary_sensor_id=SensorId(value=sensor_id),
                 name=zone_id,
                 target_temperature=Temperature(target),
             )
         )
 
+    return ControlRuntime(
+        sensor_repository=sensors,
+        zone_repository=zones,
+        actuator=actuator,
+    )
+
+
+def create_shared_zone_runtime(actuator: ActuatorPort) -> ControlRuntime:
+    sensors = SensorRepository()
+    for sensor_id in ("living_room_primary", "living_room_secondary"):
+        sensors.add(
+            Sensor(
+                sensor_id=SensorId(value=sensor_id),
+                zone_id=ZoneId(value="living_room"),
+                name=sensor_id,
+            )
+        )
+    zones = ZoneRepository()
+    zones.add(
+        Zone(
+            zone_id=ZoneId(value="living_room"),
+            primary_sensor_id=SensorId(value="living_room_primary"),
+            name="Living room",
+            target_temperature=Temperature(22),
+        )
+    )
     return ControlRuntime(
         sensor_repository=sensors,
         zone_repository=zones,
@@ -135,6 +162,44 @@ def test_two_zones_dispatch_differently_targeted_commands_to_same_actuator():
         ZoneId(value="living_room"),
         ZoneId(value="bedroom"),
     ]
+
+
+def test_secondary_measurement_is_observable_without_decision_or_command():
+    actuator = RecordingActuator()
+    runtime = create_shared_zone_runtime(actuator)
+    published_measurements = []
+    published_decisions = []
+    runtime.event_bus.subscribe(
+        TemperatureMeasuredEvent,
+        lambda event: published_measurements.append(event.measurement),
+    )
+    runtime.event_bus.subscribe(DecisionCreatedEvent, published_decisions.append)
+    secondary = create_measurement(30, sensor_id="living_room_secondary")
+
+    result = runtime.process_temperature(secondary)
+
+    assert result is None
+    assert runtime.state_store.get_latest(secondary.sensor_id) is secondary
+    assert published_measurements == [secondary]
+    assert published_decisions == []
+    assert actuator.commands == []
+
+
+def test_secondary_does_not_regulate_when_primary_state_exists():
+    actuator = RecordingActuator()
+    runtime = create_shared_zone_runtime(actuator)
+    primary = create_measurement(19, sensor_id="living_room_primary")
+    secondary = create_measurement(30, sensor_id="living_room_secondary")
+
+    primary_result = runtime.process_temperature(primary)
+    secondary_result = runtime.process_temperature(secondary)
+
+    assert primary_result is not None
+    assert primary_result.decision.sensor_id == primary.sensor_id
+    assert primary_result.decision.zone_id == ZoneId(value="living_room")
+    assert secondary_result is None
+    assert [command.zone_id for command in actuator.commands] == [ZoneId(value="living_room")]
+    assert [command.action for command in actuator.commands] == ["enable_heating"]
 
 
 def test_stale_measurement_produces_no_additional_decision_or_command():

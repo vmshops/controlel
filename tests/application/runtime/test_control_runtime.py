@@ -37,6 +37,7 @@ def create_runtime(sensor_targets: dict[str, float]) -> ControlRuntime:
         zones.add(
             Zone(
                 zone_id=zone_id,
+                primary_sensor_id=SensorId(value=sensor_id),
                 name=f"{sensor_id} zone",
                 target_temperature=Temperature(target),
             )

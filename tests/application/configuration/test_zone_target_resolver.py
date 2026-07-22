@@ -14,9 +14,15 @@ from controlel.domain.value_objects.temperature import Temperature
 from controlel.domain.value_objects.zone_id import ZoneId
 
 
-def add_zone(repository: ZoneRepository, zone_id: str, target: float) -> Zone:
+def add_zone(
+    repository: ZoneRepository,
+    zone_id: str,
+    target: float,
+    primary_sensor_id: str | None = None,
+) -> Zone:
     zone = Zone(
         zone_id=ZoneId(value=zone_id),
+        primary_sensor_id=SensorId(value=primary_sensor_id or f"{zone_id}_temperature"),
         name=zone_id,
         target_temperature=Temperature(target),
     )
@@ -65,7 +71,12 @@ def test_two_sensors_in_one_zone_return_same_zone():
     zones = ZoneRepository()
     add_sensor(sensors, "living_room_primary", "living_room")
     add_sensor(sensors, "living_room_secondary", "living_room")
-    configured_zone = add_zone(zones, "living_room", 22)
+    configured_zone = add_zone(
+        zones,
+        "living_room",
+        22,
+        primary_sensor_id="living_room_primary",
+    )
     resolver = create_resolver(sensors, zones)
 
     assert resolver.resolve(SensorId(value="living_room_primary")) is configured_zone

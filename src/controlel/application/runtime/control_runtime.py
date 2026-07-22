@@ -8,6 +8,9 @@ from controlel.application.handlers.temperature_event_handler import (
 )
 from controlel.application.services.command_dispatcher import CommandDispatcher
 from controlel.application.state.runtime_state_store import RuntimeStateStore
+from controlel.application.state.zone_temperature_aggregator import (
+    ZoneTemperatureAggregator,
+)
 from controlel.domain.actuators.actuator_port import ActuatorPort
 from controlel.domain.events.decision_event import DecisionCreatedEvent
 from controlel.domain.events.temperature_measured_event import (
@@ -38,10 +41,15 @@ class ControlRuntime:
             sensor_repository=sensor_repository,
             zone_repository=zone_repository,
         )
+        self.temperature_aggregator = ZoneTemperatureAggregator(
+            state_store=self.state_store,
+            sensor_repository=sensor_repository,
+        )
 
         self.temperature_handler = TemperatureEventHandler(
             state_store=self.state_store,
             target_resolver=self.target_resolver,
+            temperature_aggregator=self.temperature_aggregator,
         )
 
     def process_temperature(

@@ -26,6 +26,11 @@ measurement state.
 exactly one configured `Zone`. `Zone.target_temperature` is a typed
 `Temperature` and is the source used to prepare `ControlContext`.
 
+Every zone also requires `primary_sensor_id`. This selects its sole regulation
+input sensor but does not replace `Sensor.zone_id`, which remains the only
+sensor-to-zone association. The configured primary sensor must exist and must
+belong to that zone.
+
 `SensorId` is observation provenance, while `ZoneId` is the logical regulated
 subject. `ControlContext` and `Decision` carry both. `DecisionCreatedEvent`
 preserves the complete decision without duplicating the identifiers, and an
@@ -50,6 +55,16 @@ observed temperature and timezone-aware observation timestamp.
 
 Runtime measurement state is used to prepare `ControlContext`. It is separate
 from control state, which describes regulation or actuator condition.
+
+For regulation, the application selects the exact latest measurement of the
+zone's primary sensor. Secondary measurements remain stored and observable but
+do not initiate regulation. Missing primary state produces no decision, and
+there is no automatic fallback or synthetic zone measurement.
+
+Timestamp ordering remains per sensor. Arithmetic mean, weighted aggregation,
+cross-sensor timestamp comparison, elapsed-time freshness and configurable
+aggregation policies are future capabilities. Repeated accepted primary
+measurements may still produce repeated commands.
 
 # 6. Historical Data Model
 

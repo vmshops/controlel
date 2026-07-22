@@ -9,7 +9,9 @@ Measurement
 -> SensorRepository
 -> Sensor.zone_id
 -> ZoneRepository
--> Zone(zone_id, target_temperature)
+-> Zone(zone_id, primary_sensor_id, target_temperature)
+-> ZoneTemperatureAggregator
+-> latest primary Measurement | None
 -> ControlContext(sensor_id, zone_id)
 -> Regulation
 -> Decision(sensor_id, zone_id)
@@ -31,6 +33,17 @@ Missing sensor or zone configuration raises without a fallback. The accepted
 measurement remains recorded, functional processing stops before a decision,
 and the temperature event is not published because functional handling occurs
 before observer notification.
+
+The handler then validates the zone's configured primary sensor and retrieves
+its exact latest measurement from runtime state. Only an accepted incoming
+measurement from that primary sensor creates `ControlContext`. An accepted
+secondary measurement remains stored and is subsequently published as a
+temperature event, but produces no decision event or command—even when primary
+state already exists. Missing primary state also produces no decision.
+
+There is no fallback sensor, arithmetic or weighted aggregation, cross-sensor
+timestamp comparison, or elapsed-time freshness rule. Configurable aggregation
+policies remain outside the current flow.
 
 Functional handlers are not subscribed by `ControlRuntime`. `EventBus` is
 notification-only: it calls observers synchronously in registration order,
@@ -58,7 +71,8 @@ request/response operation.
 
 `CommandDispatcher` invokes the injected `ActuatorPort` once with the exact
 command. Execution exceptions propagate to the caller. Repeated accepted
-measurements may produce repeated commands.
+primary measurements may produce repeated commands; command-state suppression
+is not part of this flow.
 
 The current flow intentionally has no command routing, retry policy,
 idempotency or applied-state suppression. It also has no hardware adapter;
