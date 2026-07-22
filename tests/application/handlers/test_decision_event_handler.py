@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 from controlel.application.handlers.decision_event_handler import DecisionEventHandler
 from controlel.domain.commands.command_family import CommandFamily
 from controlel.domain.commands.heating_action import HeatingAction
@@ -13,6 +15,7 @@ def create_event(action: DecisionAction, **decision_fields) -> DecisionCreatedEv
         decision=Decision(
             sensor_id=SensorId(value="living_room_temperature"),
             zone_id=ZoneId(value="living_room"),
+            observed_at=datetime(2026, 1, 1, tzinfo=UTC),
             action=action,
             **decision_fields,
         )

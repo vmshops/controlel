@@ -1,0 +1,1 @@
+"""Heating-demand domain models."""

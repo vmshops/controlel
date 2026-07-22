@@ -1,177 +1,81 @@
 # Control Flow
 
-The synchronous in-memory runtime flow is:
+The shared-source synchronous flow is:
 
 ```text
 Measurement
 -> TemperatureMeasuredEvent
--> MeasurementTimestampValidator(clock, max_future_skew)
+-> timestamp admission
 -> RuntimeStateStore
--> SensorRepository
--> Sensor.zone_id
--> ZoneRepository
--> Zone(zone_id, primary_sensor_id, primary_measurement_max_age, target_temperature)
--> ZoneTemperatureAggregator
--> Clock.now()
--> ZoneTemperatureResult(effective | missing | expired | future_dated)
--> ControlContext(sensor_id, zone_id)
--> Regulation
--> Decision(sensor_id, zone_id, DecisionAction)
--> DecisionCreatedEvent
--> DecisionEventHandler
--> Command(zone_id, CommandFamily, HeatingAction) | None
--> CommandDispatcher
--> ZoneActuatorRouter lookup by ZoneId
--> StateRepository lookup by ZoneId
--> suppress identical applied action | ActuatorPort
--> StateRepository update after success
+-> primary-sensor freshness
+-> ControlContext(sensor_id, zone_id, observed_at)
+-> regulation
+-> Decision(sensor_id, zone_id, observed_at, DecisionAction)
+-> DecisionCreatedEvent notification
+-> ZoneDemandHandler
+-> ZoneDemandStore
+-> HeatDemandAggregator(all configured zones, Clock)
+-> BuildingHeatDemand
+-> indeterminate: no command
+   determinate: HeatSourceCommand(CommandFamily.HEATING, HeatingAction)
+-> HeatSourceCommandDispatcher
+-> HeatSourcePort
+-> HeatSourceControlState after successful execution
 -> RuntimeProcessingResult
 ```
 
-`ControlRuntime` explicitly invokes each functional handler. It processes a
-temperature event through `TemperatureEventHandler` before publishing that
-event to observers. A stale measurement produces no decision or command, but
-its temperature event is still published.
+`ControlRuntime` explicitly invokes every functional step. It requires one
+`HeatSourcePort`; it no longer accepts actuator routes and does not construct
+`DecisionEventHandler`, `ZoneActuatorRouter`, `CommandDispatcher`, or a
+zone-targeted `Command`.
 
-`TemperatureEventHandler` first applies timestamp admission using the injected
-`Clock` and mandatory runtime-wide `max_future_skew`. The non-negative
-`timedelta` has no default; zero is valid. A timestamp equal to
-`now + max_future_skew` is admitted, while one beyond that inclusive boundary
-returns immediately without storage, configuration resolution, aggregation or
-regulation. The runtime still publishes its `TemperatureMeasuredEvent`; no
-rejection event is introduced, and observers cannot identify the exact
-no-decision reason from the event alone.
+## Provenance
 
-Every normal handler exit is an immutable `TemperatureHandlingResult`. It
-contains either the exact `DecisionCreatedEvent` or one stable
-`TemperatureNoDecisionReason`: admission rejection, out-of-order input,
-secondary measurement, missing primary state, expired primary state or
-future-dated primary state. The existing processing order determines the first
-terminating reason; configuration failures remain exceptions.
+The exact effective `Measurement.timestamp` is copied through
+`ControlContext.observed_at`, `Decision.observed_at`, and `ZoneDemand.observed_at`.
+`Decision.timestamp` is independent creation time and has no freshness role.
 
-For an accepted measurement, `TemperatureEventHandler` resolves the target
-from explicit zone configuration using the measurement's typed `SensorId`.
-Missing sensor or zone configuration raises without a fallback. The accepted
-measurement remains recorded, functional processing stops before a decision,
-and the temperature event is not published because functional handling occurs
-before observer notification.
+## Arbitration
 
-The handler then validates the zone's configured primary sensor and retrieves
-its exact latest measurement from runtime state. Only an accepted incoming
-measurement from that primary sensor creates `ControlContext`. An accepted
-secondary measurement remains stored and is subsequently published as a
-temperature event, but produces no decision event or command—even when primary
-state already exists. Missing primary state also produces no decision.
+Every configured zone participates. Inherited `Entity.enabled` is intentionally
+ignored. Missing, expired, and future-dated demand is unknown. Any eligible true
+demand produces `HEAT_REQUIRED`; `NO_HEAT_REQUIRED` requires eligible false
+demand from every zone; otherwise the result is `INDETERMINATE`.
 
-The aggregator reads the injected application `Clock` exactly once. A primary
-measurement is eligible when its timestamp is between
-`now - Zone.primary_measurement_max_age` and `now`, inclusive. An expired or
-future-dated primary observation remains in runtime state and is published to
-observers, but produces no context, decision, command or applied-state update.
-A missing primary observation returns no effective measurement. Invalid
-primary configuration still raises its explicit exception.
+`INDETERMINATE` creates no command, does not call the port, and does not change
+applied source state. It may therefore preserve an already-enabled source. A
+silent-sensor shutdown policy requires a separate milestone.
 
-`SystemClock` is the UTC infrastructure implementation; `ControlRuntime`
-requires a `Clock` explicitly and does not construct one. This keeps freshness
-tests deterministic and prevents direct wall-clock access in application
-aggregation and handling.
+A fresh command candidate is created for each determinate evaluation. The
+dispatcher, not aggregate change detection, suppresses an action already
+successfully applied. This allows a later actionable evaluation to retry after
+port failure.
 
-Admitted measurements continue to same-sensor ordering before configuration
-and freshness evaluation. An admitted old measurement may be stored and then
-rejected by elapsed-time freshness. An admitted within-tolerance future
-measurement may also be stored while remaining temporarily ineligible for
-regulation. No cross-sensor timestamps are compared.
+Startup follows the same truth table:
 
-A positive tolerance therefore creates a deliberate bounded poisoning window:
-an admitted future observation can temporarily block later lower-timestamp
-inputs under the unchanged ordering contract. Zero tolerance provides the
-strongest protection but may reject legitimate clock differences. A rejected
-beyond-boundary input never changes existing runtime or applied control state.
+- first false with another zone missing: indeterminate, no command;
+- first true with another zone missing: enable candidate;
+- all zones fresh false: disable candidate;
+- one-zone first false: explicit disable candidate;
+- no retained demand or source state: no implicit action.
 
-There is no fallback sensor, arithmetic or weighted aggregation, timestamp
-rewriting, cleanup, timer or health monitor.
-Freshness is checked only when aggregation is invoked; a sensor that silently
-stops reporting causes no timed reaction. Expiry emits no fail-safe command and
-does not change previously applied control state.
+## Normal no-action and failure behavior
 
-Functional handlers are not subscribed by `ControlRuntime`. `EventBus` is
-notification-only: it calls observers synchronously in registration order,
-discards their return values and returns `None`. Observer return values cannot
-change the functional result.
+Admission rejection, same-sensor ordering rejection, secondary measurement,
+and missing, expired, or future primary state preserve existing typed
+no-decision reasons and do not update demand. Configuration and observer
+exceptions also prevent demand update. `OBSERVE_ONLY` returns
+`decision_without_command` and retains demand.
 
-`Decision` remains a description of the regulation result and carries the
-typed `DecisionAction` vocabulary: `enable_heating`, `disable_heating` or the
-intentional non-command action `observe_only`. `DecisionEventHandler`
-explicitly maps the two executable decision actions to their corresponding
-`HeatingAction` members in `CommandFamily.HEATING`. `OBSERVE_ONLY` is the only
-mapping to `None`. A future unhandled action fails loudly until its behavior is
-designed.
+Source failure occurs after demand update and decision publication. It leaves
+applied source state unchanged and propagates unchanged, so no
+`RuntimeProcessingResult` is returned. The next actionable evaluation can
+retry.
 
-Decision and command actions deliberately use separate string-backed enum
-types. Unknown or misspelled values fail validation. Python-mode data retains
-the enum members, while JSON serialization emits the unchanged stable strings.
-There are no aliases, generic action registry, routing taxonomy or plugin
-action system.
+The existing zone-actuator command, router, dispatcher, port, and per-zone
+applied state remain independently usable but inactive in this shared-source
+runtime.
 
-`ControlRuntime.process_temperature()` returns an immutable
-`RuntimeProcessingResult` for normally completed processing. Its stable status
-is `no_decision`, `decision_without_command`, `command_executed` or
-`command_suppressed`. No-decision results carry the exact handler reason.
-Decision and command outcomes reference the existing event and command objects
-without duplicating their data.
-
-`SensorId` is carried from the measurement through `ControlContext` into the
-decision as observation provenance. The configured `ZoneId` is carried through
-the same models as the logical regulated subject. `DecisionCreatedEvent`
-contains the complete decision and does not duplicate either identifier.
-
-Supported commands copy `Decision.zone_id` as their logical execution target.
-They do not copy `SensorId`, reason, metadata or timestamp because those values
-are not currently required for execution. Future durable causal tracing should
-use explicit correlation or causation identity rather than overload
-`SensorId`.
-
-`EventBus` publishes `DecisionCreatedEvent` for notification before runtime
-explicitly invokes command mapping. Decision publication is not a
-request/response operation.
-
-`CommandDispatcher` first resolves `Command.zone_id` through the
-application-layer `ZoneActuatorRouter`, then compares the command with the
-latest successfully applied typed `HeatingAction` for that zone. An identical
-action is suppressed without actuator execution or state mutation. A different
-action executes through the exact resolved `ActuatorPort`, then becomes the new
-immutable `ControlState` only after normal return. Routing and execution
-exceptions preserve the previous state, so a later measurement may retry the
-action.
-
-Suppression does not remove the regulation result: repeated accepted primary
-measurements may still produce and publish decisions and create commands. The
-runtime result reports `command_suppressed`; only redundant actuator execution
-is skipped.
-
-Events remain notification-only. Event-only observers do not receive the
-returned runtime result. Configuration, clock, observer, actuator, validation
-and unexpected failures propagate as exceptions and produce no result object.
-No logging, persistence, correlation identifiers or diagnostic events are
-introduced.
-
-The current flow has no retry policy, persistence, physical feedback or
-concurrency protection. A normal adapter return records logical
-application-level success but does not confirm physical hardware state.
-
-`ZoneId` is not a physical actuator identifier. Runtime configuration maps each
-zone directly to exactly one port, copies those routes at construction and
-offers no default or dynamic mutation. Different zones may use different ports
-or the same port. A shared port must interpret the complete command's
-`ZoneId`; independent zone commands are not global boiler-demand arbitration.
-There is no `ActuatorId`, registry, discovery, family routing, physical topology
-or multiple-port fan-out.
-
-Observers may delay runtime processing, and observer exceptions currently
-propagate to the caller. Observer isolation and concurrency are outside the
-current design.
-
-Scheduling, disabled-state behavior, configuration persistence, dynamic route
-changes and global demand arbitration are outside the current flow. Dynamic
-route changes would require route identity and applied-state invalidation
-semantics.
+There are no timers, cleanup jobs, persistence, automatic fail-safe commands,
+scheduled retries, modulation, DHW behavior, valve control, source routing,
+multiple sources, concurrency, or physical confirmation.

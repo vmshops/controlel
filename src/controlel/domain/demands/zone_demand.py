@@ -3,30 +3,16 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, field_validator
 
 from controlel.domain.value_objects.sensor_id import SensorId
-from controlel.domain.value_objects.temperature import Temperature
 from controlel.domain.value_objects.zone_id import ZoneId
 
 
-class ControlContext(BaseModel):
-    """
-    Represents current state and target values for regulation.
-    """
-
-    sensor_id: SensorId
-
+class ZoneDemand(BaseModel):
     zone_id: ZoneId
-
+    requires_heat: bool
+    source_sensor_id: SensorId
     observed_at: datetime
 
-    current_temperature: Temperature
-
-    target_temperature: Temperature
-
-    hysteresis: Temperature = Temperature(0)
-
-    model_config = ConfigDict(
-        frozen=True,
-    )
+    model_config = ConfigDict(frozen=True)
 
     @field_validator("observed_at")
     @classmethod

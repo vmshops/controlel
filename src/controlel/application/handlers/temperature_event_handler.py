@@ -92,6 +92,7 @@ class TemperatureEventHandler:
         context = ControlContext(
             sensor_id=effective_measurement.sensor_id,
             zone_id=zone.zone_id,
+            observed_at=effective_measurement.timestamp,
             current_temperature=effective_measurement.value,
             target_temperature=zone.target_temperature,
         )

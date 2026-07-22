@@ -2,82 +2,62 @@
 
 ## Sensor and zone configuration
 
-`SensorId` is the stable domain identifier of a sensor. `ZoneId` is the stable
-domain identifier of a heating zone. Both are immutable value objects; the UUID
-provided by `Entity` remains an internal entity identity.
+`SensorId` is stable observation identity and `ZoneId` is the logical regulated
+subject. Each `Sensor` belongs to one zone. Every configured `Zone` has one
+required `primary_sensor_id`, one strictly positive
+`primary_measurement_max_age`, and one target temperature.
 
-Each configured `Sensor` has exactly one `zone_id`. This field is the single
-source of the sensor-to-zone association. `Zone` does not duplicate the
-relationship with a sensor list.
+Every zone returned by `ZoneRepository.list_all()` participates in building
+heat-demand arbitration. `Zone` inherits `Entity.enabled`, but enabled-state
+semantics are deliberately not used in this milestone. Missing or ineligible
+demand therefore remains uncertainty regardless of `enabled`.
 
-A configured `Zone` contains its `ZoneId`, required `primary_sensor_id`,
-strictly positive `primary_measurement_max_age`, name and typed `Temperature`
-target. The maximum age is a required `timedelta` with no default and defines
-the inclusive freshness boundary for the primary observation. The primary
-identifier selects the one sensor whose accepted measurements may initiate
-regulation for the zone; it does not replace or duplicate `Sensor.zone_id` as
-the sensor-to-zone association.
+## Observation provenance and decisions
 
-`Zone` contains no latest measured temperature and no applied heating state.
-Those concepts belong to runtime measurement state and control state,
-respectively.
+`Measurement.timestamp` is copied exactly to `ControlContext.observed_at` and
+then to `Decision.observed_at`. All three values identify the same source
+observation and must be timezone-aware. `Decision.timestamp` remains the
+independently generated decision-creation time and is never used for demand
+freshness.
 
-Scheduling, disabled-state behavior and configuration mutation are outside the
-current domain contract.
+`DecisionAction` describes one zone's regulation intent. Its stable values
+remain `enable_heating`, `disable_heating`, and `observe_only`.
 
-Freshness is evaluated by the application against an injected clock. It does
-not change `Measurement`, delete runtime observations, or add sensor health or
-fallback behavior to the domain model.
+## Requested heating demand
 
-## Regulation identity
+An actionable decision maps to an immutable `ZoneDemand` containing:
 
-`SensorId` identifies the observation provenance used to prepare regulation
-inputs. `ZoneId` identifies the logical regulated subject. A `ControlContext`
-and the resulting `Decision` carry both identifiers so the decision retains
-the effective primary sensor's provenance and zone identity.
+- `ZoneId` of the requesting zone;
+- a `requires_heat` boolean;
+- the exact primary `SensorId` provenance;
+- the exact observation time.
 
-An executable `Command` carries `ZoneId` as its logical target. It does not
-carry `SensorId`, because sensor provenance is not currently execution data.
-`ZoneId` is not a physical actuator identifier, and the domain defines no
-generic target abstraction.
+Demand is retained desired state, not a measurement, decision, executable
+command, or successfully applied state. `OBSERVE_ONLY` creates no demand and
+does not erase a previously retained demand.
 
-At runtime, the application-layer `ZoneActuatorRouter` maps each configured
-`ZoneId` directly to exactly one `ActuatorPort`. A port may serve multiple
-zones, but a zone does not fan out to multiple ports. The router copies its
-runtime configuration and exposes no mutation or default route. This adds no
-`ActuatorId`, actuator registry, persistence, discovery, physical topology or
-family-based routing to the domain model.
+`BuildingHeatDemand` is a timestamped, immutable aggregate with one stable
+status: `heat_required`, `no_heat_required`, or `indeterminate`. It contains
+ordered evidence for eligible demands and missing, expired, and future-dated
+zones without copying `Measurement` objects.
 
-## Heating decision and command vocabulary
+Any eligible true demand means heat is required. No heat is required only when
+every configured zone has an eligible false demand. Every other state is
+indeterminate.
 
-`DecisionAction` is the typed regulation vocabulary. Its stable serialized
-values are `enable_heating`, `disable_heating` and `observe_only`.
-`OBSERVE_ONLY` is an intentional decision that creates no executable request.
+## Commands and applied state
 
-`HeatingAction` is the separate executable heating vocabulary and contains
-only `enable_heating` and `disable_heating`. `CommandFamily` currently contains
-only the stable `heating` family. A `Decision` therefore carries a
-`DecisionAction`, while a `Command` carries both a `CommandFamily` in its
-existing `command_type` field and a `HeatingAction`.
+`HeatSourceCommand` is the executable request for the one shared heat source.
+It uses `CommandFamily.HEATING` and `HeatingAction`, but has no `ZoneId`,
+synthetic building zone, or heat-source identifier.
 
-The types are deliberately separate: regulation describes an outcome, while
-a command requests execution. Unknown values and misspellings fail model
-validation, and there are no aliases, generic action registry, routing model,
-physical target taxonomy or plugin action system. Python-mode model data
-retains enum instances; JSON serialization exposes the stable string values.
-Future vocabulary additions require a deliberate mapping update.
+`HeatSourceControlState` is singleton in-memory state for the latest
+successfully applied shared-source action. It records the action, command ID,
+and application time. It is not physical boiler confirmation.
 
-## Applied control state
+The existing zone-targeted `Command`, per-zone `ControlState`,
+`ZoneActuatorRouter`, `CommandDispatcher`, and `ActuatorPort` remain a separate
+zone-actuator path. They are not used by the shared-source `ControlRuntime`.
 
-`ControlState` is the latest successfully applied logical action for one
-`ZoneId`. It records the exact `HeatingAction`, the successful command identity
-and the application-level execution time. It contains no measurement or target
-configuration.
-
-Applied state is distinct from a `Decision`, which describes what regulation
-wants, and from a `Command`, which is an executable request that may still fail
-or be suppressed.
-
-Actuator routing is resolved before applied-state suppression. Applied state
-remains keyed by logical `ZoneId`; it does not identify a physical actuator or
-store routing configuration.
+There is no persistence, timer, scheduling, modulation, DHW behavior, valve
+control, source routing, multiple-source topology, or real hardware adapter.

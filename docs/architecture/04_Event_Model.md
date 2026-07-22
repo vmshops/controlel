@@ -2,107 +2,54 @@
 
 ## Notification contract
 
-`EventBus` is a synchronous observer-notification mechanism. It notifies every
-matching subscriber in registration order, discards subscriber return values
-and always returns `None`. Dictionary event keys and class-based event keys are
-both supported.
+`EventBus` remains a synchronous notification mechanism. It calls subscribers
+in registration order, discards return values, and returns `None`. Functional
+handlers are invoked explicitly by `ControlRuntime`, not subscribed to the
+bus. Subscriber exceptions propagate unchanged.
 
-Functional handlers are invoked explicitly by `ControlRuntime`; they are not
-also subscribed by the runtime. This avoids duplicate execution and prevents
-functional results from depending on subscriber ordering.
+Temperature handling occurs before `TemperatureMeasuredEvent` publication.
+Every normal handler result publishes its exact temperature event, including
+admission rejection, ordering rejection, secondary input, and ineligible
+primary observations. A configuration exception interrupts processing before
+normal notification, as before.
 
-Temperature measurement processing occurs before `TemperatureMeasuredEvent`
-is published. Observers therefore cannot alter the event before runtime state
-and regulation have processed it. Rejected stale measurement events are still
-published and remain observable. Measurements beyond the configured future
-admission boundary are also published, but are not stored and produce no
-control context, decision or command. Observers cannot currently distinguish
-the exact no-decision reason from event fields alone.
+Every produced `DecisionCreatedEvent` is published before demand creation,
+arbitration, or shared-source execution. The event contains the complete
+`Decision`, including `SensorId`, `ZoneId`, and `observed_at`; it does not
+duplicate those fields.
 
-Admitted primary measurements that are expired or still future-dated at
-aggregation time are stored and published, but likewise produce no control
-context, decision or command. No admission-rejection event is emitted.
+The event bus does not return decisions, demands, aggregates, commands, or
+runtime results. No demand, aggregate, command-created, expiration, diagnostic,
+or health event is introduced.
 
-Accepted measurements from secondary zone sensors are also published and
-remain observable after being stored, but they produce no `ControlContext`,
-decision event or command. A zone with no latest primary measurement likewise
-produces no decision.
+## Decision notification and execution separation
 
-Elapsed-time expiry creates no expiration or health event. Evaluation occurs
-only when aggregation is invoked; there is no timer that publishes an event
-when a sensor silently stops reporting.
+`DecisionAction` now explicitly represents zone heating-demand intent. After
+decision publication, `ZoneDemandHandler` maps enable and disable intent to a
+retained `ZoneDemand`; `OBSERVE_ONLY` maps to no demand and leaves existing
+demand unchanged.
 
-Subscribers run synchronously and may delay runtime processing. Subscriber
-exceptions currently propagate unchanged.
+The shared-source runtime then derives `BuildingHeatDemand`. A determinate
+aggregate creates `HeatSourceCommand`; indeterminate demand creates no command.
+Source execution is therefore explicit orchestration and never depends on
+event subscriber ordering or return values.
 
-## Synchronous processing outcome
+The existing `DecisionEventHandler` still maps decisions to zone-targeted
+`Command` objects for the independent zone-actuator path. `ControlRuntime` does
+not invoke that path for the shared source.
 
-Events remain notification-only and unchanged. Independently of publication,
-`ControlRuntime.process_temperature()` returns an immutable
-`RuntimeProcessingResult` for every normally completed invocation. Its stable
-`RuntimeProcessingStatus` codes distinguish `no_decision`,
-`decision_without_command`, `command_executed` and `command_suppressed`.
+Decision publication remains observable even when source execution is later
+suppressed or fails. If a decision observer raises, demand is not updated and
+source processing does not begin. No result object is returned for observer,
+configuration, clock, validation, or port exceptions.
 
-A `no_decision` result includes one stable `TemperatureNoDecisionReason` code:
-`timestamp_admission_rejected`, `out_of_order`, `secondary_measurement`,
-`primary_measurement_missing`, `primary_measurement_expired` or
-`primary_measurement_future_dated`. Expected no-action paths are results, not
-exceptions.
+## Synchronous processing result
 
-The result references the existing `DecisionCreatedEvent` and `Command` when
-present; it does not copy their fields. Result objects exist only when
-processing completes normally. Configuration, routing, clock, observer,
-actuator, validation and unexpected failures remain exceptions, so no
-misleading result is returned when they interrupt processing.
+`RuntimeProcessingResult` retains the existing stable statuses and adds
+`building_heat_demand_indeterminate`. No-decision results retain their existing
+typed reasons. Indeterminate results carry the exact decision event and
+aggregate but no command. Executed and suppressed results carry the exact
+decision event, determinate aggregate, and `HeatSourceCommand`.
 
-Event-only observers do not receive the synchronous runtime result. No
-diagnostic events, logging, persistence or correlation identifiers are
-introduced.
-
-## Decision notifications
-
-Regulation produces a `Decision`, which describes what the regulation logic
-decided and why. `ControlLoopService` wraps that result in a
-`DecisionCreatedEvent`.
-
-`ControlRuntime` publishes the event through `EventBus` so notification
-subscribers can observe decisions. Decision events are notifications, not
-request/response calls. After publication, the runtime explicitly passes the
-event to `DecisionEventHandler`.
-
-The contained `Decision` is the authoritative source of its `SensorId`
-observation provenance and `ZoneId` regulated-subject identity.
-`DecisionCreatedEvent` does not duplicate those identifiers as event fields.
-
-Decision notification remains independent of command execution. A decision
-event is still published when its mapped command is later suppressed because
-the same zone action is already applied, and it is published before an
-actuator route is resolved or execution is attempted. A missing route therefore
-propagates `ActuatorRouteNotFoundError` after decision publication, without a
-runtime result or applied-state change. The caller receives
-`command_suppressed` or `command_executed` only after dispatch completes
-normally.
-
-The handler is the explicit typed mapping boundary. It maps
-`DecisionAction.ENABLE_HEATING` to `HeatingAction.ENABLE_HEATING` and
-`DecisionAction.DISABLE_HEATING` to `HeatingAction.DISABLE_HEATING`, always in
-`CommandFamily.HEATING`. `DecisionAction.OBSERVE_ONLY` is the sole intentional
-decision-without-command outcome and returns `None` without reaching the
-actuator boundary. The mapping is exhaustive, so a future decision action must
-receive deliberately designed command behavior rather than silently becoming
-a no-command outcome.
-
-Decision and command actions intentionally use different string-backed enum
-types. Their JSON values remain stable, while Python-mode data retains enum
-instances. Unknown values and misspellings fail validation; no compatibility
-aliases or generic action registry exist.
-
-A `Command` is an explicit request, not an event describing something that
-already happened. No command-created event is introduced in the current flow.
-Commands carry the decision's `ZoneId` as a logical execution target but do not
-carry `SensorId`.
-
-`ZoneActuatorRouter` is application runtime composition, not event processing.
-It maps `Command.zone_id` directly to one configured `ActuatorPort`, has no
-default, and distinguishes missing routing configuration from exceptions raised
-by a resolved port during execution.
+Event-only observers do not receive this synchronous result. Logging,
+persistence, correlation IDs, and diagnostic events remain outside scope.

@@ -16,11 +16,13 @@ class HeatingStrategy(RegulationStrategy):
             return Decision(
                 sensor_id=context.sensor_id,
                 zone_id=context.zone_id,
+                observed_at=context.observed_at,
                 action=DecisionAction.ENABLE_HEATING,
             )
 
         return Decision(
             sensor_id=context.sensor_id,
             zone_id=context.zone_id,
+            observed_at=context.observed_at,
             action=DecisionAction.DISABLE_HEATING,
         )

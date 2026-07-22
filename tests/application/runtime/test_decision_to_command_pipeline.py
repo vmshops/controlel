@@ -10,20 +10,16 @@ from controlel.application.runtime.runtime_processing_result import (
     RuntimeProcessingStatus,
     TemperatureNoDecisionReason,
 )
-from controlel.application.services.zone_actuator_router import (
-    ActuatorRouteNotFoundError,
-)
-from controlel.domain.actuators.actuator_port import ActuatorPort
-from controlel.domain.commands.command import Command
-from controlel.domain.commands.command_family import CommandFamily
+from controlel.domain.commands.heat_source_command import HeatSourceCommand
 from controlel.domain.commands.heating_action import HeatingAction
 from controlel.domain.decisions.decision import Decision
 from controlel.domain.decisions.decision_action import DecisionAction
+from controlel.domain.demands.building_heat_demand_status import (
+    BuildingHeatDemandStatus,
+)
 from controlel.domain.entities.zone import Zone
 from controlel.domain.events.decision_event import DecisionCreatedEvent
-from controlel.domain.events.temperature_measured_event import (
-    TemperatureMeasuredEvent,
-)
+from controlel.domain.events.temperature_measured_event import TemperatureMeasuredEvent
 from controlel.domain.measurements.measurement import Measurement
 from controlel.domain.repositories.sensor_repository import SensorRepository
 from controlel.domain.repositories.zone_repository import ZoneRepository
@@ -33,10 +29,10 @@ from controlel.domain.value_objects.temperature import Temperature
 from controlel.domain.value_objects.zone_id import ZoneId
 
 NOW = datetime(2026, 1, 1, 12, tzinfo=UTC)
-DEFAULT_MAX_AGE = timedelta(minutes=5)
+MAX_AGE = timedelta(minutes=5)
 
 
-class FixedClock:
+class MutableClock:
     def __init__(self, current_time: datetime = NOW):
         self.current_time = current_time
 
@@ -44,619 +40,457 @@ class FixedClock:
         return self.current_time
 
 
-class RecordingActuator(ActuatorPort):
-    def __init__(self):
-        self.commands: list[Command] = []
+class RecordingHeatSource:
+    def __init__(self, failures: int = 0):
+        self.failures = failures
+        self.commands: list[HeatSourceCommand] = []
+        self.error = RuntimeError("heat source failed")
 
-    def execute(self, command: Command) -> None:
+    def execute(self, command: HeatSourceCommand) -> None:
         self.commands.append(command)
+        if len(self.commands) <= self.failures:
+            raise self.error
 
 
-class ActuatorFailure(Exception):
-    pass
+class FailOnCallHeatSource(RecordingHeatSource):
+    def __init__(self, fail_on_call: int):
+        super().__init__()
+        self.fail_on_call = fail_on_call
 
-
-class FailingActuator(ActuatorPort):
-    def __init__(self, error: Exception):
-        self.error = error
-        self.commands = []
-
-    def execute(self, command: Command) -> None:
+    def execute(self, command: HeatSourceCommand) -> None:
         self.commands.append(command)
-        raise self.error
+        if len(self.commands) == self.fail_on_call:
+            raise self.error
 
 
-class UnsupportedDecisionControlLoop:
+class ObserveOnlyControlLoop:
     def process(self, context) -> DecisionCreatedEvent:
         return DecisionCreatedEvent(
             decision=Decision(
                 sensor_id=context.sensor_id,
                 zone_id=context.zone_id,
+                observed_at=context.observed_at,
                 action=DecisionAction.OBSERVE_ONLY,
-            ),
+            )
         )
 
 
 def create_measurement(
     value: float,
-    timestamp: datetime | None = None,
     sensor_id: str = "living_room_temperature",
+    timestamp: datetime = NOW,
 ) -> Measurement:
     return Measurement(
         sensor_id=SensorId(value=sensor_id),
         value=Temperature(value),
-        timestamp=timestamp or NOW,
+        timestamp=timestamp,
     )
 
 
 def create_runtime(
-    actuator: ActuatorPort,
-    configurations: dict[str, tuple[str, float]] | None = None,
-    maximum_ages: dict[str, timedelta] | None = None,
+    port: RecordingHeatSource,
+    zones: tuple[str, ...] = ("living_room",),
+    clock: MutableClock | None = None,
     max_future_skew: timedelta = timedelta(0),
-    clock: FixedClock | None = None,
-    actuator_routes: dict[ZoneId, ActuatorPort] | None = None,
+    max_ages: dict[str, timedelta] | None = None,
 ) -> ControlRuntime:
-    configurations = configurations or {
-        "living_room_temperature": ("living_room", 22),
-    }
-    maximum_ages = maximum_ages or {}
     sensors = SensorRepository()
-    zones = ZoneRepository()
-    for sensor_id, (zone_id, target) in configurations.items():
-        sensors.add(
-            Sensor(
-                sensor_id=SensorId(value=sensor_id),
-                zone_id=ZoneId(value=zone_id),
-                name=sensor_id,
-            )
-        )
-        zones.add(
+    zone_repository = ZoneRepository()
+    max_ages = max_ages or {}
+    for zone_name in zones:
+        sensor_id = SensorId(value=f"{zone_name}_temperature")
+        zone_id = ZoneId(value=zone_name)
+        sensors.add(Sensor(sensor_id=sensor_id, zone_id=zone_id, name=sensor_id.value))
+        zone_repository.add(
             Zone(
-                zone_id=ZoneId(value=zone_id),
-                primary_sensor_id=SensorId(value=sensor_id),
-                primary_measurement_max_age=maximum_ages.get(
-                    zone_id,
-                    DEFAULT_MAX_AGE,
-                ),
-                name=zone_id,
-                target_temperature=Temperature(target),
+                zone_id=zone_id,
+                primary_sensor_id=sensor_id,
+                primary_measurement_max_age=max_ages.get(zone_name, MAX_AGE),
+                name=zone_name,
+                target_temperature=Temperature(22),
             )
         )
 
-    configured_routes = (
-        actuator_routes
-        if actuator_routes is not None
-        else {ZoneId(value=zone_id): actuator for zone_id, _target in configurations.values()}
-    )
     return ControlRuntime(
         sensor_repository=sensors,
-        zone_repository=zones,
-        actuator_routes=configured_routes,
-        clock=clock or FixedClock(),
+        zone_repository=zone_repository,
+        heat_source_port=port,
+        clock=clock or MutableClock(),
         max_future_skew=max_future_skew,
     )
 
 
-def create_shared_zone_runtime(actuator: ActuatorPort) -> ControlRuntime:
+def create_runtime_with_secondary(port: RecordingHeatSource) -> ControlRuntime:
     sensors = SensorRepository()
-    for sensor_id in ("living_room_primary", "living_room_secondary"):
+    zone_id = ZoneId(value="living_room")
+    for sensor_name in ("living_room_primary", "living_room_secondary"):
         sensors.add(
             Sensor(
-                sensor_id=SensorId(value=sensor_id),
-                zone_id=ZoneId(value="living_room"),
-                name=sensor_id,
+                sensor_id=SensorId(value=sensor_name),
+                zone_id=zone_id,
+                name=sensor_name,
             )
         )
     zones = ZoneRepository()
     zones.add(
         Zone(
-            zone_id=ZoneId(value="living_room"),
+            zone_id=zone_id,
             primary_sensor_id=SensorId(value="living_room_primary"),
-            primary_measurement_max_age=DEFAULT_MAX_AGE,
-            name="Living room",
+            primary_measurement_max_age=MAX_AGE,
+            name="living_room",
             target_temperature=Temperature(22),
         )
     )
-    return ControlRuntime(
-        sensor_repository=sensors,
-        zone_repository=zones,
-        actuator_routes={ZoneId(value="living_room"): actuator},
-        clock=FixedClock(),
-        max_future_skew=timedelta(0),
-    )
+    return ControlRuntime(sensors, zones, port, MutableClock(), timedelta(0))
 
 
-def test_low_temperature_produces_enable_heating_command():
-    actuator = RecordingActuator()
-    runtime = create_runtime(actuator)
+def test_single_zone_action_executes_shared_source_command_with_exact_provenance():
+    port = RecordingHeatSource()
+    runtime = create_runtime(port)
+    measurement = create_measurement(19)
+
+    result = runtime.process_temperature(measurement)
+
+    assert result.status is RuntimeProcessingStatus.COMMAND_EXECUTED
+    assert result.decision_event.decision.observed_at is measurement.timestamp
+    assert result.building_heat_demand.status is BuildingHeatDemandStatus.HEAT_REQUIRED
+    assert result.command is port.commands[0]
+    assert result.command.action is HeatingAction.ENABLE_HEATING
+    assert "zone_id" not in HeatSourceCommand.model_fields
+    demand = runtime.zone_demand_store.get(ZoneId(value="living_room"))
+    assert demand.observed_at is measurement.timestamp
+    assert demand.source_sensor_id is measurement.sensor_id
+
+
+def test_first_false_with_other_zone_missing_is_indeterminate_without_source_action():
+    port = RecordingHeatSource()
+    runtime = create_runtime(port, ("living_room", "bedroom"))
+
+    result = runtime.process_temperature(create_measurement(23))
+
+    assert result.status is RuntimeProcessingStatus.BUILDING_HEAT_DEMAND_INDETERMINATE
+    assert result.building_heat_demand.missing_zone_ids == (ZoneId(value="bedroom"),)
+    assert result.command is None
+    assert port.commands == []
+    assert runtime.heat_source_state_store.get() is None
+
+
+def test_first_true_with_other_zone_missing_enables_source():
+    port = RecordingHeatSource()
+    runtime = create_runtime(port, ("living_room", "bedroom"))
 
     result = runtime.process_temperature(create_measurement(19))
 
     assert result.status is RuntimeProcessingStatus.COMMAND_EXECUTED
-    decision_event = result.decision_event
-    assert decision_event.decision.action is DecisionAction.ENABLE_HEATING
-    assert decision_event.decision.sensor_id == SensorId(value="living_room_temperature")
-    assert decision_event.decision.zone_id == ZoneId(value="living_room")
-    assert [command.action for command in actuator.commands] == [HeatingAction.ENABLE_HEATING]
-    assert actuator.commands[0].command_type is CommandFamily.HEATING
-    assert result.command is actuator.commands[0]
-    assert actuator.commands[0].zone_id == ZoneId(value="living_room")
-    state = runtime.control_state_repository.get(ZoneId(value="living_room"))
-    assert state.applied_action is HeatingAction.ENABLE_HEATING
-    assert state.command_id == actuator.commands[0].id
+    assert result.building_heat_demand.status is BuildingHeatDemandStatus.HEAT_REQUIRED
+    assert port.commands[0].action is HeatingAction.ENABLE_HEATING
 
 
-def test_high_temperature_produces_disable_heating_command():
-    actuator = RecordingActuator()
-    runtime = create_runtime(actuator)
+def test_single_zone_first_false_creates_explicit_disable_candidate():
+    port = RecordingHeatSource()
+    runtime = create_runtime(port)
 
     result = runtime.process_temperature(create_measurement(23))
 
     assert result.status is RuntimeProcessingStatus.COMMAND_EXECUTED
-    decision_event = result.decision_event
-    assert decision_event.decision.action is DecisionAction.DISABLE_HEATING
-    assert decision_event.decision.sensor_id == SensorId(value="living_room_temperature")
-    assert decision_event.decision.zone_id == ZoneId(value="living_room")
-    assert [command.action for command in actuator.commands] == [HeatingAction.DISABLE_HEATING]
-    assert actuator.commands[0].command_type is CommandFamily.HEATING
-    assert result.command is actuator.commands[0]
-    assert actuator.commands[0].zone_id == ZoneId(value="living_room")
-    assert (
-        runtime.control_state_repository.get(ZoneId(value="living_room")).applied_action
-        is HeatingAction.DISABLE_HEATING
-    )
+    assert result.building_heat_demand.status is BuildingHeatDemandStatus.NO_HEAT_REQUIRED
+    assert result.command.action is HeatingAction.DISABLE_HEATING
 
 
-def test_two_zones_route_end_to_end_through_one_shared_port():
-    actuator = RecordingActuator()
-    runtime = create_runtime(
-        actuator,
-        {
-            "living_room_temperature": ("living_room", 22),
-            "bedroom_temperature": ("bedroom", 22),
-        },
-    )
-
-    living_room_event = runtime.process_temperature(create_measurement(19, sensor_id="living_room_temperature"))
-    bedroom_event = runtime.process_temperature(create_measurement(19, sensor_id="bedroom_temperature"))
-
-    assert living_room_event.status is RuntimeProcessingStatus.COMMAND_EXECUTED
-    assert bedroom_event.status is RuntimeProcessingStatus.COMMAND_EXECUTED
-    assert living_room_event.decision_event.decision.sensor_id == SensorId(value="living_room_temperature")
-    assert bedroom_event.decision_event.decision.sensor_id == SensorId(value="bedroom_temperature")
-    assert [command.zone_id for command in actuator.commands] == [
-        ZoneId(value="living_room"),
-        ZoneId(value="bedroom"),
-    ]
-    assert runtime.control_state_repository.get(ZoneId(value="living_room")).command_id == actuator.commands[0].id
-    assert runtime.control_state_repository.get(ZoneId(value="bedroom")).command_id == actuator.commands[1].id
-
-
-def test_two_zones_route_end_to_end_to_different_ports():
-    living_room_actuator = RecordingActuator()
-    bedroom_actuator = RecordingActuator()
-    configurations = {
-        "living_room_temperature": ("living_room", 22),
-        "bedroom_temperature": ("bedroom", 22),
-    }
-    runtime = create_runtime(
-        living_room_actuator,
-        configurations,
-        actuator_routes={
-            ZoneId(value="living_room"): living_room_actuator,
-            ZoneId(value="bedroom"): bedroom_actuator,
-        },
-    )
-
-    living_room_result = runtime.process_temperature(create_measurement(19, sensor_id="living_room_temperature"))
-    bedroom_result = runtime.process_temperature(create_measurement(19, sensor_id="bedroom_temperature"))
-
-    assert living_room_result.status is RuntimeProcessingStatus.COMMAND_EXECUTED
-    assert bedroom_result.status is RuntimeProcessingStatus.COMMAND_EXECUTED
-    assert [command.zone_id for command in living_room_actuator.commands] == [ZoneId(value="living_room")]
-    assert [command.zone_id for command in bedroom_actuator.commands] == [ZoneId(value="bedroom")]
-
-
-def test_secondary_measurement_is_observable_without_decision_or_command():
-    actuator = RecordingActuator()
-    runtime = create_shared_zone_runtime(actuator)
-    published_measurements = []
-    published_decisions = []
-    runtime.event_bus.subscribe(
-        TemperatureMeasuredEvent,
-        lambda event: published_measurements.append(event.measurement),
-    )
-    runtime.event_bus.subscribe(DecisionCreatedEvent, published_decisions.append)
-    secondary = create_measurement(30, sensor_id="living_room_secondary")
-
-    result = runtime.process_temperature(secondary)
-
-    assert result.status is RuntimeProcessingStatus.NO_DECISION
-    assert result.reason is TemperatureNoDecisionReason.PRIMARY_MEASUREMENT_MISSING
-    assert runtime.state_store.get_latest(secondary.sensor_id) is secondary
-    assert published_measurements == [secondary]
-    assert published_decisions == []
-    assert actuator.commands == []
-
-
-def test_secondary_does_not_regulate_when_primary_state_exists():
-    actuator = RecordingActuator()
-    runtime = create_shared_zone_runtime(actuator)
-    primary = create_measurement(19, sensor_id="living_room_primary")
-    secondary = create_measurement(30, sensor_id="living_room_secondary")
-
-    primary_result = runtime.process_temperature(primary)
-    secondary_result = runtime.process_temperature(secondary)
-
-    assert primary_result.status is RuntimeProcessingStatus.COMMAND_EXECUTED
-    assert primary_result.decision_event.decision.sensor_id == primary.sensor_id
-    assert primary_result.decision_event.decision.zone_id == ZoneId(value="living_room")
-    assert secondary_result.status is RuntimeProcessingStatus.NO_DECISION
-    assert secondary_result.reason is TemperatureNoDecisionReason.SECONDARY_MEASUREMENT
-    assert [command.zone_id for command in actuator.commands] == [ZoneId(value="living_room")]
-    assert [command.action for command in actuator.commands] == [HeatingAction.ENABLE_HEATING]
-
-
-def test_stale_measurement_produces_no_additional_decision_or_command():
-    actuator = RecordingActuator()
-    runtime = create_runtime(actuator)
-    current_timestamp = NOW
-    current = create_measurement(19, current_timestamp)
-    stale = create_measurement(18, current_timestamp - timedelta(seconds=1))
-    published_measurements = []
-    runtime.event_bus.subscribe(
-        TemperatureMeasuredEvent,
-        lambda event: published_measurements.append(event.measurement),
-    )
-    runtime.process_temperature(current)
-
-    stale_result = runtime.process_temperature(stale)
-
-    assert stale_result.status is RuntimeProcessingStatus.NO_DECISION
-    assert stale_result.reason is TemperatureNoDecisionReason.OUT_OF_ORDER
-    assert len(actuator.commands) == 1
-    assert runtime.state_store.get_latest(current.sensor_id) == current
-    assert published_measurements == [current, stale]
-
-
-def test_cutoff_boundary_measurement_is_accepted_end_to_end():
-    actuator = RecordingActuator()
-    runtime = create_runtime(actuator)
-    measurement = create_measurement(19, NOW - DEFAULT_MAX_AGE)
-
-    result = runtime.process_temperature(measurement)
-
-    assert result.status is RuntimeProcessingStatus.COMMAND_EXECUTED
-    assert result.decision_event.decision.zone_id == ZoneId(value="living_room")
-    assert [command.action for command in actuator.commands] == [HeatingAction.ENABLE_HEATING]
-
-
-def test_expired_primary_is_admitted_stored_and_observable_without_control_effects():
-    actuator = RecordingActuator()
-    runtime = create_runtime(actuator)
-    measurement = create_measurement(
-        19,
-        NOW - DEFAULT_MAX_AGE - timedelta(microseconds=1),
-    )
-    published_measurements = []
-    published_decisions = []
-    runtime.event_bus.subscribe(TemperatureMeasuredEvent, published_measurements.append)
-    runtime.event_bus.subscribe(DecisionCreatedEvent, published_decisions.append)
-
-    result = runtime.process_temperature(measurement)
-
-    assert result.status is RuntimeProcessingStatus.NO_DECISION
-    assert result.reason is TemperatureNoDecisionReason.PRIMARY_MEASUREMENT_EXPIRED
-    assert runtime.state_store.get_latest(measurement.sensor_id) is measurement
-    assert [event.measurement for event in published_measurements] == [measurement]
-    assert published_decisions == []
-    assert actuator.commands == []
-    assert runtime.control_state_repository.get(ZoneId(value="living_room")) is None
-
-
-def test_beyond_future_boundary_is_observable_but_has_no_state_or_control_effects():
-    actuator = RecordingActuator()
-    runtime = create_runtime(actuator, max_future_skew=timedelta(minutes=1))
-    measurement = create_measurement(
-        19,
-        NOW + timedelta(minutes=1, microseconds=1),
-    )
-    published_measurements = []
-    published_decisions = []
-    runtime.event_bus.subscribe(TemperatureMeasuredEvent, published_measurements.append)
-    runtime.event_bus.subscribe(DecisionCreatedEvent, published_decisions.append)
-
-    result = runtime.process_temperature(measurement)
-
-    assert result.status is RuntimeProcessingStatus.NO_DECISION
-    assert result.reason is TemperatureNoDecisionReason.TIMESTAMP_ADMISSION_REJECTED
-    assert runtime.state_store.get_latest(measurement.sensor_id) is None
-    assert [event.measurement for event in published_measurements] == [measurement]
-    assert published_decisions == []
-    assert actuator.commands == []
-    assert runtime.control_state_repository.get(ZoneId(value="living_room")) is None
-
-
-@pytest.mark.parametrize(
-    "timestamp",
-    [NOW + timedelta(seconds=30), NOW + timedelta(minutes=1)],
-    ids=["within-tolerance", "exact-boundary"],
-)
-def test_admitted_future_is_stored_and_observable_but_temporarily_ineligible(timestamp):
-    actuator = RecordingActuator()
-    runtime = create_runtime(actuator, max_future_skew=timedelta(minutes=1))
-    measurement = create_measurement(19, timestamp)
-    published_measurements = []
-    runtime.event_bus.subscribe(TemperatureMeasuredEvent, published_measurements.append)
-
-    result = runtime.process_temperature(measurement)
-
-    assert result.status is RuntimeProcessingStatus.NO_DECISION
-    assert result.reason is TemperatureNoDecisionReason.PRIMARY_MEASUREMENT_FUTURE_DATED
-    assert runtime.state_store.get_latest(measurement.sensor_id) is measurement
-    assert [event.measurement for event in published_measurements] == [measurement]
-    assert actuator.commands == []
-    assert runtime.control_state_repository.get(ZoneId(value="living_room")) is None
-
-
-def test_valid_input_processes_normally_after_rejected_poisoning_attempt():
-    actuator = RecordingActuator()
-    runtime = create_runtime(actuator, max_future_skew=timedelta(0))
-    rejected = create_measurement(30, NOW + timedelta(microseconds=1))
-    valid = create_measurement(19, NOW)
-
-    rejected_result = runtime.process_temperature(rejected)
-    valid_result = runtime.process_temperature(valid)
-
-    assert rejected_result.status is RuntimeProcessingStatus.NO_DECISION
-    assert rejected_result.reason is TemperatureNoDecisionReason.TIMESTAMP_ADMISSION_REJECTED
-    assert valid_result.status is RuntimeProcessingStatus.COMMAND_EXECUTED
-    assert runtime.state_store.get_latest(valid.sensor_id) is valid
-    assert [command.action for command in actuator.commands] == [HeatingAction.ENABLE_HEATING]
-
-
-def test_existing_state_remains_unchanged_after_rejected_poisoning_attempt():
-    actuator = RecordingActuator()
-    runtime = create_runtime(actuator, max_future_skew=timedelta(0))
-    valid = create_measurement(19, NOW)
-    runtime.process_temperature(valid)
-    applied_state = runtime.control_state_repository.get(ZoneId(value="living_room"))
-    rejected = create_measurement(30, NOW + timedelta(microseconds=1))
-
-    result = runtime.process_temperature(rejected)
-
-    assert result.status is RuntimeProcessingStatus.NO_DECISION
-    assert result.reason is TemperatureNoDecisionReason.TIMESTAMP_ADMISSION_REJECTED
-    assert runtime.state_store.get_latest(valid.sensor_id) is valid
-    assert runtime.control_state_repository.get(ZoneId(value="living_room")) is applied_state
-    assert len(actuator.commands) == 1
-
-
-def test_zones_apply_independent_primary_measurement_max_ages():
-    actuator = RecordingActuator()
-    runtime = create_runtime(
-        actuator,
-        {
-            "living_room_temperature": ("living_room", 22),
-            "bedroom_temperature": ("bedroom", 22),
-        },
-        {
-            "living_room": timedelta(minutes=5),
-            "bedroom": timedelta(minutes=1),
-        },
-    )
-    timestamp = NOW - timedelta(minutes=2)
-
-    living_room_result = runtime.process_temperature(create_measurement(19, timestamp, "living_room_temperature"))
-    bedroom_result = runtime.process_temperature(create_measurement(19, timestamp, "bedroom_temperature"))
-
-    assert living_room_result.status is RuntimeProcessingStatus.COMMAND_EXECUTED
-    assert bedroom_result.status is RuntimeProcessingStatus.NO_DECISION
-    assert bedroom_result.reason is TemperatureNoDecisionReason.PRIMARY_MEASUREMENT_EXPIRED
-    assert [command.zone_id for command in actuator.commands] == [ZoneId(value="living_room")]
-    assert runtime.control_state_repository.get(ZoneId(value="bedroom")) is None
-
-
-def test_missing_configuration_stops_before_decision_or_command():
-    actuator = RecordingActuator()
-    runtime = ControlRuntime(
-        sensor_repository=SensorRepository(),
-        zone_repository=ZoneRepository(),
-        actuator_routes={},
-        clock=FixedClock(),
-        max_future_skew=timedelta(0),
-    )
-    published_decisions = []
-    runtime.event_bus.subscribe(DecisionCreatedEvent, published_decisions.append)
-    measurement = create_measurement(19)
-
-    with pytest.raises(SensorConfigurationNotFoundError):
-        runtime.process_temperature(measurement)
-
-    assert runtime.state_store.get_latest(measurement.sensor_id) == measurement
-    assert published_decisions == []
-    assert actuator.commands == []
-
-
-def test_missing_actuator_route_propagates_after_decision_publication_without_state_change():
-    unrelated_actuator = RecordingActuator()
-    runtime = create_runtime(
-        unrelated_actuator,
-        actuator_routes={ZoneId(value="bedroom"): unrelated_actuator},
-    )
-    published_decisions = []
-    runtime.event_bus.subscribe(DecisionCreatedEvent, published_decisions.append)
-    result = None
-
-    with pytest.raises(ActuatorRouteNotFoundError) as raised:
-        result = runtime.process_temperature(create_measurement(19))
-
-    assert raised.value.zone_id == ZoneId(value="living_room")
-    assert result is None
-    assert len(published_decisions) == 1
-    assert published_decisions[0].decision.zone_id == ZoneId(value="living_room")
-    assert unrelated_actuator.commands == []
-    assert runtime.control_state_repository.get(ZoneId(value="living_room")) is None
-
-
-def test_unsupported_decision_does_not_invoke_actuator():
-    actuator = RecordingActuator()
-    runtime = create_runtime(actuator)
-    runtime.temperature_handler.control_loop = UnsupportedDecisionControlLoop()
-
-    result = runtime.process_temperature(create_measurement(19))
-
-    assert result.status is RuntimeProcessingStatus.DECISION_WITHOUT_COMMAND
-    assert result.decision_event.decision.action is DecisionAction.OBSERVE_ONLY
-    assert result.command is None
-    assert actuator.commands == []
-    assert runtime.control_state_repository.get(ZoneId(value="living_room")) is None
-
-
-def test_decision_created_event_is_published_and_returned():
-    actuator = RecordingActuator()
-    runtime = create_runtime(actuator)
-    published_events = []
-    runtime.event_bus.subscribe(DecisionCreatedEvent, published_events.append)
-
-    result = runtime.process_temperature(create_measurement(19))
-
-    assert result.status is RuntimeProcessingStatus.COMMAND_EXECUTED
-    assert published_events == [result.decision_event]
-
-
-def test_temperature_handler_runs_before_observer_notification():
-    actuator = RecordingActuator()
-    runtime = create_runtime(actuator)
-    original = create_measurement(19)
-    conflicting = Measurement(
-        sensor_id=original.sensor_id,
-        value=Temperature(30),
-        timestamp=original.timestamp,
-    )
-    observed_stored_measurements = []
-
-    def conflicting_observer(event):
-        observed_stored_measurements.append(runtime.state_store.get_latest(event.measurement.sensor_id))
-        event.measurement = conflicting
-        return "conflicting observer result"
-
-    runtime.event_bus.subscribe(TemperatureMeasuredEvent, conflicting_observer)
-
-    result = runtime.process_temperature(original)
-
-    assert result.status is RuntimeProcessingStatus.COMMAND_EXECUTED
-    assert result.decision_event.decision.action is DecisionAction.ENABLE_HEATING
-    assert observed_stored_measurements == [original]
-    assert runtime.state_store.get_latest(original.sensor_id) == original
-    assert [command.action for command in actuator.commands] == [HeatingAction.ENABLE_HEATING]
-
-
-def test_repeated_decisions_are_published_but_identical_applied_action_executes_once():
-    actuator = RecordingActuator()
-    runtime = create_runtime(actuator)
-    published_decisions = []
-    runtime.event_bus.subscribe(DecisionCreatedEvent, published_decisions.append)
-
+def test_second_true_creates_candidate_but_is_suppressed():
+    port = RecordingHeatSource()
+    runtime = create_runtime(port, ("living_room", "bedroom"))
     first = runtime.process_temperature(create_measurement(19))
-    second = runtime.process_temperature(create_measurement(19))
+
+    second = runtime.process_temperature(create_measurement(19, sensor_id="bedroom_temperature"))
 
     assert first.status is RuntimeProcessingStatus.COMMAND_EXECUTED
     assert second.status is RuntimeProcessingStatus.COMMAND_SUPPRESSED
-    assert published_decisions == [first.decision_event, second.decision_event]
-    assert first.command is actuator.commands[0]
-    assert second.command is not actuator.commands[0]
-    assert [command.action for command in actuator.commands] == [HeatingAction.ENABLE_HEATING]
-    assert second.command.action is HeatingAction.ENABLE_HEATING
-    assert second.command.command_type is CommandFamily.HEATING
-    state = runtime.control_state_repository.get(ZoneId(value="living_room"))
-    assert state.command_id == actuator.commands[0].id
+    assert second.command.id != first.command.id
+    assert len(port.commands) == 1
 
 
-def test_changed_action_executes_and_replaces_applied_state():
-    actuator = RecordingActuator()
-    runtime = create_runtime(actuator)
-
+def test_source_remains_enabled_until_last_true_zone_stops():
+    port = RecordingHeatSource()
+    runtime = create_runtime(port, ("living_room", "bedroom"))
     runtime.process_temperature(create_measurement(19))
-    result = runtime.process_temperature(create_measurement(23))
+    runtime.process_temperature(create_measurement(19, sensor_id="bedroom_temperature"))
 
-    assert result.status is RuntimeProcessingStatus.COMMAND_EXECUTED
-    assert result.command is actuator.commands[1]
-    assert [command.action for command in actuator.commands] == [
+    one_stops = runtime.process_temperature(create_measurement(23))
+    last_stops = runtime.process_temperature(create_measurement(23, sensor_id="bedroom_temperature"))
+
+    assert one_stops.status is RuntimeProcessingStatus.COMMAND_SUPPRESSED
+    assert one_stops.command.action is HeatingAction.ENABLE_HEATING
+    assert last_stops.status is RuntimeProcessingStatus.COMMAND_EXECUTED
+    assert last_stops.command.action is HeatingAction.DISABLE_HEATING
+    assert [command.action for command in port.commands] == [
         HeatingAction.ENABLE_HEATING,
         HeatingAction.DISABLE_HEATING,
     ]
-    state = runtime.control_state_repository.get(ZoneId(value="living_room"))
-    assert state.applied_action is HeatingAction.DISABLE_HEATING
-    assert state.command_id == actuator.commands[1].id
 
 
-def test_invalid_clock_contract_propagates_without_runtime_result():
-    actuator = RecordingActuator()
-    runtime = create_runtime(
-        actuator,
-        clock=FixedClock(datetime(2026, 1, 1, 12)),
+def test_all_zones_fresh_false_explicitly_disables_source():
+    port = RecordingHeatSource()
+    runtime = create_runtime(port, ("living_room", "bedroom"))
+    first = runtime.process_temperature(create_measurement(23))
+    second = runtime.process_temperature(create_measurement(23, sensor_id="bedroom_temperature"))
+
+    assert first.status is RuntimeProcessingStatus.BUILDING_HEAT_DEMAND_INDETERMINATE
+    assert second.status is RuntimeProcessingStatus.COMMAND_EXECUTED
+    assert second.command.action is HeatingAction.DISABLE_HEATING
+
+
+@pytest.mark.parametrize("expired_requires_heat", [True, False])
+def test_expired_demand_prevents_disable(expired_requires_heat):
+    clock = MutableClock()
+    port = RecordingHeatSource()
+    runtime = create_runtime(port, ("living_room", "bedroom"), clock)
+    first_value = 19 if expired_requires_heat else 23
+    runtime.process_temperature(create_measurement(first_value))
+    clock.current_time = NOW + MAX_AGE + timedelta(seconds=1)
+
+    result = runtime.process_temperature(
+        create_measurement(
+            23,
+            sensor_id="bedroom_temperature",
+            timestamp=clock.current_time,
+        )
     )
+
+    assert result.status is RuntimeProcessingStatus.BUILDING_HEAT_DEMAND_INDETERMINATE
+    assert result.building_heat_demand.expired_zone_ids == (ZoneId(value="living_room"),)
+    assert result.command is None
+    assert all(command.action is not HeatingAction.DISABLE_HEATING for command in port.commands)
+
+
+def test_fresh_true_overrides_expired_uncertainty():
+    clock = MutableClock()
+    port = RecordingHeatSource()
+    runtime = create_runtime(port, ("living_room", "bedroom"), clock)
+    runtime.process_temperature(create_measurement(23))
+    clock.current_time = NOW + MAX_AGE + timedelta(seconds=1)
+
+    result = runtime.process_temperature(
+        create_measurement(
+            19,
+            sensor_id="bedroom_temperature",
+            timestamp=clock.current_time,
+        )
+    )
+
+    assert result.status is RuntimeProcessingStatus.COMMAND_EXECUTED
+    assert result.building_heat_demand.status is BuildingHeatDemandStatus.HEAT_REQUIRED
+
+
+def test_secondary_and_out_of_order_paths_do_not_change_retained_demand():
+    port = RecordingHeatSource()
+    runtime = create_runtime_with_secondary(port)
+    accepted = Measurement(
+        sensor_id=SensorId(value="living_room_primary"),
+        value=Temperature(19),
+        timestamp=NOW,
+    )
+    runtime.process_temperature(accepted)
+    retained = runtime.zone_demand_store.get(ZoneId(value="living_room"))
+
+    secondary = runtime.process_temperature(
+        Measurement(
+            sensor_id=SensorId(value="living_room_secondary"),
+            value=Temperature(23),
+            timestamp=NOW,
+        )
+    )
+    stale = runtime.process_temperature(
+        Measurement(
+            sensor_id=SensorId(value="living_room_primary"),
+            value=Temperature(23),
+            timestamp=NOW - timedelta(seconds=1),
+        )
+    )
+
+    assert secondary.reason is TemperatureNoDecisionReason.SECONDARY_MEASUREMENT
+    assert stale.reason is TemperatureNoDecisionReason.OUT_OF_ORDER
+    assert runtime.zone_demand_store.get(ZoneId(value="living_room")) is retained
+
+
+def test_missing_primary_path_does_not_record_zone_demand():
+    port = RecordingHeatSource()
+    runtime = create_runtime_with_secondary(port)
+
+    result = runtime.process_temperature(
+        Measurement(
+            sensor_id=SensorId(value="living_room_secondary"),
+            value=Temperature(19),
+            timestamp=NOW,
+        )
+    )
+
+    assert result.reason is TemperatureNoDecisionReason.PRIMARY_MEASUREMENT_MISSING
+    assert runtime.zone_demand_store.list_current() == []
+    assert port.commands == []
+
+
+def test_expired_primary_path_retains_previous_zone_demand():
+    clock = MutableClock()
+    port = RecordingHeatSource()
+    runtime = create_runtime(port, clock=clock)
+    runtime.process_temperature(create_measurement(19))
+    retained = runtime.zone_demand_store.get(ZoneId(value="living_room"))
+    clock.current_time = NOW + timedelta(minutes=10)
+    expired_timestamp = clock.current_time - MAX_AGE - timedelta(seconds=1)
+
+    result = runtime.process_temperature(create_measurement(23, timestamp=expired_timestamp))
+
+    assert result.reason is TemperatureNoDecisionReason.PRIMARY_MEASUREMENT_EXPIRED
+    assert runtime.zone_demand_store.get(ZoneId(value="living_room")) is retained
+
+
+def test_admitted_future_primary_path_retains_previous_zone_demand():
+    port = RecordingHeatSource()
+    runtime = create_runtime(port, max_future_skew=timedelta(minutes=1))
+    runtime.process_temperature(create_measurement(19))
+    retained = runtime.zone_demand_store.get(ZoneId(value="living_room"))
+
+    result = runtime.process_temperature(create_measurement(23, timestamp=NOW + timedelta(seconds=1)))
+
+    assert result.reason is TemperatureNoDecisionReason.PRIMARY_MEASUREMENT_FUTURE_DATED
+    assert runtime.zone_demand_store.get(ZoneId(value="living_room")) is retained
+
+
+def test_timestamp_admission_rejection_retains_demand_and_publishes_temperature_event():
+    port = RecordingHeatSource()
+    runtime = create_runtime(port)
+    runtime.process_temperature(create_measurement(19))
+    retained = runtime.zone_demand_store.get(ZoneId(value="living_room"))
+    observed = []
+    runtime.event_bus.subscribe(TemperatureMeasuredEvent, observed.append)
+    rejected = create_measurement(23, timestamp=NOW + timedelta(seconds=1))
+
+    result = runtime.process_temperature(rejected)
+
+    assert result.reason is TemperatureNoDecisionReason.TIMESTAMP_ADMISSION_REJECTED
+    assert runtime.zone_demand_store.get(ZoneId(value="living_room")) is retained
+    assert observed[0].measurement is rejected
+
+
+def test_configuration_failure_retains_existing_demand():
+    port = RecordingHeatSource()
+    runtime = create_runtime(port)
+    runtime.process_temperature(create_measurement(19))
+    retained = runtime.zone_demand_store.get(ZoneId(value="living_room"))
+
+    with pytest.raises(SensorConfigurationNotFoundError):
+        runtime.process_temperature(create_measurement(19, sensor_id="unknown"))
+
+    assert runtime.zone_demand_store.get(ZoneId(value="living_room")) is retained
+
+
+def test_observe_only_retains_demand_and_returns_without_aggregate():
+    port = RecordingHeatSource()
+    runtime = create_runtime(port)
+    runtime.process_temperature(create_measurement(19))
+    retained = runtime.zone_demand_store.get(ZoneId(value="living_room"))
+    runtime.temperature_handler.control_loop = ObserveOnlyControlLoop()
+
+    result = runtime.process_temperature(create_measurement(23))
+
+    assert result.status is RuntimeProcessingStatus.DECISION_WITHOUT_COMMAND
+    assert result.building_heat_demand is None
+    assert result.command is None
+    assert runtime.zone_demand_store.get(ZoneId(value="living_room")) is retained
+
+
+def test_source_failure_keeps_updated_demand_and_state_then_later_retries():
+    clock = MutableClock()
+    port = RecordingHeatSource(failures=1)
+    runtime = create_runtime(port, clock=clock)
+    decisions = []
+    runtime.event_bus.subscribe(DecisionCreatedEvent, decisions.append)
+    first = create_measurement(19)
+
+    with pytest.raises(RuntimeError) as raised:
+        runtime.process_temperature(first)
+
+    assert raised.value is port.error
+    assert decisions[0].decision.observed_at is first.timestamp
+    assert runtime.zone_demand_store.get(ZoneId(value="living_room")).requires_heat is True
+    assert runtime.heat_source_state_store.get() is None
+    clock.current_time = NOW + timedelta(seconds=1)
+
+    retry = runtime.process_temperature(create_measurement(19, timestamp=clock.current_time))
+
+    assert retry.status is RuntimeProcessingStatus.COMMAND_EXECUTED
+    assert len(port.commands) == 2
+    assert runtime.heat_source_state_store.get().command_id == retry.command.id
+
+
+def test_failed_transition_retains_new_demand_and_previous_applied_state_then_retries():
+    port = FailOnCallHeatSource(fail_on_call=2)
+    runtime = create_runtime(port)
+    enabled = runtime.process_temperature(create_measurement(19))
+    previous_state = runtime.heat_source_state_store.get()
+
+    with pytest.raises(RuntimeError):
+        runtime.process_temperature(create_measurement(23))
+
+    assert runtime.zone_demand_store.get(ZoneId(value="living_room")).requires_heat is False
+    assert runtime.heat_source_state_store.get() is previous_state
+    assert previous_state.command_id == enabled.command.id
+
+    retry = runtime.process_temperature(create_measurement(23))
+
+    assert retry.status is RuntimeProcessingStatus.COMMAND_EXECUTED
+    assert retry.command.action is HeatingAction.DISABLE_HEATING
+
+
+def test_temperature_and_decision_events_are_published_unchanged():
+    port = RecordingHeatSource()
+    runtime = create_runtime(port)
+    temperatures = []
+    decisions = []
+    runtime.event_bus.subscribe(TemperatureMeasuredEvent, temperatures.append)
+    runtime.event_bus.subscribe(DecisionCreatedEvent, decisions.append)
     measurement = create_measurement(19)
 
-    with pytest.raises(
-        ValueError,
-        match=r"Clock\.now\(\) must return a timezone-aware datetime",
-    ):
+    result = runtime.process_temperature(measurement)
+
+    assert temperatures[0].measurement is measurement
+    assert decisions[0] is result.decision_event
+
+
+def test_observer_failure_propagates_before_demand_or_source_processing():
+    port = RecordingHeatSource()
+    runtime = create_runtime(port)
+    error = RuntimeError("observer failed")
+
+    def fail(_event):
+        raise error
+
+    runtime.event_bus.subscribe(DecisionCreatedEvent, fail)
+
+    with pytest.raises(RuntimeError) as raised:
+        runtime.process_temperature(create_measurement(19))
+
+    assert raised.value is error
+    assert runtime.zone_demand_store.list_current() == []
+    assert port.commands == []
+
+
+def test_temperature_handler_records_measurement_before_temperature_observer_failure():
+    port = RecordingHeatSource()
+    runtime = create_runtime(port)
+    measurement = create_measurement(19)
+    error = RuntimeError("temperature observer failed")
+
+    def fail(_event):
+        assert runtime.state_store.get_latest(measurement.sensor_id) is measurement
+        raise error
+
+    runtime.event_bus.subscribe(TemperatureMeasuredEvent, fail)
+
+    with pytest.raises(RuntimeError) as raised:
         runtime.process_temperature(measurement)
 
-    assert runtime.state_store.get_latest(measurement.sensor_id) is None
-    assert actuator.commands == []
-
-
-def test_temperature_observer_failure_propagates_before_command_processing():
-    error = RuntimeError("temperature observer failed")
-    actuator = RecordingActuator()
-    runtime = create_runtime(actuator)
-
-    def failing_observer(event):
-        raise error
-
-    runtime.event_bus.subscribe(TemperatureMeasuredEvent, failing_observer)
-
-    with pytest.raises(RuntimeError) as raised:
-        runtime.process_temperature(create_measurement(19))
-
     assert raised.value is error
-    assert actuator.commands == []
-    assert runtime.control_state_repository.get(ZoneId(value="living_room")) is None
-
-
-def test_decision_observer_failure_propagates_before_command_processing():
-    error = RuntimeError("decision observer failed")
-    actuator = RecordingActuator()
-    runtime = create_runtime(actuator)
-
-    def failing_observer(event):
-        raise error
-
-    runtime.event_bus.subscribe(DecisionCreatedEvent, failing_observer)
-
-    with pytest.raises(RuntimeError) as raised:
-        runtime.process_temperature(create_measurement(19))
-
-    assert raised.value is error
-    assert actuator.commands == []
-    assert runtime.control_state_repository.get(ZoneId(value="living_room")) is None
-
-
-def test_actuator_failure_does_not_record_requested_action():
-    error = ActuatorFailure("execution failed")
-    actuator = FailingActuator(error)
-    runtime = create_runtime(actuator)
-    published_decisions = []
-    runtime.event_bus.subscribe(DecisionCreatedEvent, published_decisions.append)
-
-    with pytest.raises(ActuatorFailure) as raised:
-        runtime.process_temperature(create_measurement(19))
-
-    assert raised.value is error
-    assert len(actuator.commands) == 1
-    assert len(published_decisions) == 1
-    assert runtime.control_state_repository.get(ZoneId(value="living_room")) is None
+    assert runtime.zone_demand_store.list_current() == []
+    assert port.commands == []

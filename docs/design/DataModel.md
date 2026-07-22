@@ -1,167 +1,86 @@
 # Controlel Data Model
 
-Version:
-0.1
+Version: 0.1
 
-Status:
-Draft
+Status: Draft
 
+## Configuration
 
-# 1. Purpose
+`SensorId` resolves to a configured `Sensor`, whose `ZoneId` resolves to one
+configured `Zone`. The zone supplies target temperature, required primary
+sensor identity, and required positive `primary_measurement_max_age`.
 
+All zones in `ZoneRepository` participate in building arbitration. Although
+`Zone` inherits `Entity.enabled`, enabled state is not a participation filter in
+this milestone.
 
-# 2. Core Entities
+## Observation and regulation
 
+`Measurement` contains only `sensor_id`, observed temperature, and a
+timezone-aware observation timestamp. Timestamp admission and same-sensor
+ordering happen before regulation. Latest observations remain in
+`RuntimeStateStore`; they are not history.
 
-# 3. Entity Relationships
+The selected primary measurement supplies `ControlContext.observed_at`.
+Regulation copies it exactly to `Decision.observed_at`. `Decision.timestamp`
+remains independently generated decision-creation time.
 
+`DecisionAction` is zone demand intent. Its stable JSON values remain
+`enable_heating`, `disable_heating`, and `observe_only`.
 
-# 4. Configuration Model
+## Demand
 
-Configuration supplies target values and other regulation inputs. Target
-temperature is not an observed measurement and is not stored in runtime
-measurement state.
+An immutable `ZoneDemand` contains `zone_id`, `requires_heat`, exact source
+`sensor_id`, and exact observation time. `ZoneDemandStore` retains one current
+requested demand per zone without freshness evaluation or deletion.
 
-`SensorId` resolves to a configured `Sensor`, whose required `ZoneId` identifies
-exactly one configured `Zone`. `Zone.target_temperature` is a typed
-`Temperature` and is the source used to prepare `ControlContext`.
+`HeatDemandAggregator` classifies each configured zone at one injected clock
+time. A demand is eligible at the inclusive boundary:
 
-Every zone also requires `primary_sensor_id` and a strictly positive
-`primary_measurement_max_age` `timedelta` with no default. The sensor identifier
-selects its sole regulation input sensor but does not replace `Sensor.zone_id`,
-which remains the only sensor-to-zone association. The configured primary
-sensor must exist and must belong to that zone. The maximum age defines the
-inclusive elapsed-time freshness boundary for the primary observation.
+```text
+now - zone.primary_measurement_max_age <= demand.observed_at <= now
+```
 
-`SensorId` is observation provenance, while `ZoneId` is the logical regulated
-subject. `ControlContext` and `Decision` carry both. `DecisionCreatedEvent`
-preserves the complete decision without duplicating the identifiers, and an
-executable `Command` carries only `ZoneId` as its logical target. Sensor
-provenance is not currently command execution data.
+Missing, expired, and future-dated demands are unknown. The immutable
+`BuildingHeatDemand` carries ordered evidence and one stable status:
 
-`Decision.action` uses the string-backed `DecisionAction` vocabulary:
-`enable_heating`, `disable_heating` and the intentional non-command
-`observe_only`. Executable `Command.action` uses the separate `HeatingAction`
-type, which contains only the enable and disable operations, while the existing
-`command_type` field uses `CommandFamily` and currently accepts only `heating`.
-`DecisionEventHandler` is the explicit exhaustive mapping boundary between
-these types; `OBSERVE_ONLY` maps to no command.
+```text
+any eligible true                         -> heat_required
+all configured zones eligible false       -> no_heat_required
+all other cases                           -> indeterminate
+```
 
-These exact serialized values are stable. Python-mode model data retains enum
-members and JSON output uses their strings. Unknown values and misspellings
-fail validation. There are no aliases, generic action registry, routing or
-physical-target taxonomy, or plugin action system; future vocabulary growth
-requires an explicit mapping decision.
+No `requires_heat` boolean is added to the aggregate because it would hide
+indeterminate state.
 
-Zone configuration contains no latest measurement, applied heating state or
-live actuator port. Scheduling, persistence, disabled-state semantics and
-configuration mutation are intentionally absent.
+## Shared-source execution
 
-`ZoneId` is not a physical actuator identifier. The application-layer
-`ZoneActuatorRouter` copies runtime bindings from each `ZoneId` directly to
-exactly one `ActuatorPort`; one port may be shared by several zones. Routes have
-no default, listing or mutation contract. A shared port receives each complete
-typed command and must understand its logical zone target. This is not global
-boiler-demand arbitration. No `ActuatorId`, registry, discovery, physical
-topology, family routing or multiple-port fan-out exists. Future durable causal
-tracing should introduce correlation or causation identity rather than reuse
-`SensorId` for that purpose.
+`HeatSourceCommand` contains UUID identity, timezone-aware creation time,
+`CommandFamily.HEATING`, and typed `HeatingAction`. It has no `ZoneId` or
+heat-source identifier. The single explicitly injected `HeatSourcePort` is the
+shared-source execution boundary.
 
-# 5. Runtime Model
+`HeatSourceControlState` contains the latest successfully applied source
+action, command ID, and application time. `HeatSourceStateStore` retains one
+such state. Identical applied actions are suppressed; different or missing
+state permits execution. State changes only after normal port return.
 
-The application maintains one latest `Measurement` per stable `SensorId` in an
-in-memory `RuntimeStateStore`. Measurements contain only the sensor identity,
-observed temperature and timezone-aware observation timestamp.
+Port failure preserves prior applied state while the newly requested zone
+demand remains retained. Retry requires a later actionable evaluation.
 
-Timestamp admission runs before storage using the injected application
-`Clock` and mandatory runtime-wide `max_future_skew`. This tolerance is a
-non-negative `timedelta` with no default; zero is allowed. The future boundary
-is inclusive. A measurement beyond `now + max_future_skew` remains observable
-but is not stored, its timestamp is never rewritten, and existing runtime
-state remains unchanged.
+The existing zone-targeted `Command`, `ActuatorPort`, `ZoneActuatorRouter`,
+`CommandDispatcher`, `ControlState`, and `StateRepository` remain a separate
+zone-actuator model and are not used by shared-source `ControlRuntime`.
 
-Runtime measurement state is used to prepare `ControlContext`. It is separate
-from control state, which describes regulation or actuator condition.
+## Runtime outcomes
 
-Effective-temperature selection returns an immutable `ZoneTemperatureResult`
-with one stable status: `effective`, `missing`, `expired` or `future_dated`.
-Only `effective` references the exact stored measurement. The handler then
-returns an immutable `TemperatureHandlingResult` containing exactly one typed
-no-decision reason or the exact `DecisionCreatedEvent`.
+Existing runtime status and no-decision values remain stable. The added
+`building_heat_demand_indeterminate` status carries the exact decision event
+and aggregate without a command. Command outcomes carry the exact determinate
+aggregate and `HeatSourceCommand`; aggregate status and action must agree.
 
-For regulation, the application selects the exact latest measurement of the
-zone's primary sensor. Secondary measurements remain stored and observable but
-do not initiate regulation. Missing primary state produces no decision, and
-there is no automatic fallback or synthetic zone measurement.
-
-The application injects a deterministic `Clock` into aggregation; `SystemClock`
-is the UTC infrastructure implementation. A primary measurement is eligible
-when `now - primary_measurement_max_age <= timestamp <= now`. The cutoff is
-inclusive, while future timestamps are strictly ineligible. A naive clock
-value violates the port contract.
-
-Admitted measurements continue through per-sensor ordering, which remains
-distinct from elapsed-time freshness. Admitted old observations may be stored
-and later rejected as expired. Admitted within-tolerance future observations
-may be stored and observable while remaining temporarily ineligible for
-regulation. There is no deletion or cleanup. Missing primary state returns no
-effective measurement, while invalid primary configuration raises an explicit
-error.
-
-Freshness is evaluated only when aggregation is invoked. There is no timer,
-silent-sensor reaction, fail-safe command, fallback or health monitoring, and
-previously applied state remains unchanged when an observation is ineligible.
-A positive skew tolerance deliberately creates a bounded window in which an
-admitted future measurement can block later lower-timestamp inputs under the
-unchanged store ordering rule. Zero tolerance provides the strongest poisoning
-protection but may reject legitimate source-clock differences.
-
-Admission rejection, same-sensor ordering rejection, freshness rejection,
-missing primary state and configuration failure remain separate outcomes.
-There is no rejection event, fallback, health monitoring or fail-safe command,
-and observers cannot currently identify the exact no-decision reason from
-`TemperatureMeasuredEvent` fields alone.
-
-For every normally completed call, `ControlRuntime` returns an immutable
-`RuntimeProcessingResult`. `RuntimeProcessingStatus` has stable codes for
-`no_decision`, `decision_without_command`, `command_executed` and
-`command_suppressed`. `TemperatureNoDecisionReason` provides stable codes for
-admission rejection, out-of-order input, secondary input, missing primary
-state, expired primary state and future-dated primary state.
-
-Results reference existing `DecisionCreatedEvent` and `Command` objects rather
-than duplicating decision, command, measurement or identifier fields. Expected
-no-action outcomes are typed results. Configuration, clock, observer, actuator,
-validation and unexpected failures remain exceptions and return no result.
-Events remain notification-only, so event-only observers do not receive the
-synchronous result. No logging, persistence, correlation identifiers or
-diagnostic events are part of the model.
-
-Arithmetic mean, weighted aggregation, cross-sensor timestamp comparison and
-configurable aggregation policies remain outside the model. Repeated eligible
-primary measurements may still produce repeated decisions.
-
-Applied `ControlState` is stored separately per `ZoneId`. It contains only the
-latest successfully executed typed `HeatingAction`, the successful command identity
-and the application time. It does not contain measurements, targets or desired
-decisions and never stores the non-executable `DecisionAction.OBSERVE_ONLY`.
-
-Routing is resolved before suppression, so missing configuration raises
-`ActuatorRouteNotFoundError` even when the same action was previously applied.
-With a valid route, an identical already-applied action is suppressed per zone.
-State changes only after the resolved actuator port returns normally; routing
-or execution failure leaves prior state intact and permits a later request to
-retry. Decisions and decision events remain observable before routing and even
-when execution is suppressed.
-
-Applied state is in-memory and is lost on restart. A normal adapter return does
-not physically confirm hardware state, and external changes can make the view
-inaccurate. Persistence, state history, retries, physical feedback, dynamic
-route mutation and concurrency protection are not implemented. Changing routes
-would require route identity and applied-state invalidation semantics.
-
-# 6. Historical Data Model
-
-Historical measurements are not part of the runtime store. A future history
-model may append observations and persist them, but the current runtime model
-only retains the latest accepted measurement for each sensor.
+There is no persistence, timer, cleanup, scheduling, automatic shutdown,
+modulation, DHW behavior, valve control, source routing, multiple-source model,
+real integration, concurrency, or physical-state confirmation. Expiration is
+noticed only during later arbitration, and indeterminate demand preserves the
+last successfully applied source state.

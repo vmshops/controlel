@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 from controlel.domain.decisions.decision_action import DecisionAction
 from controlel.domain.regulation.context import ControlContext
 from controlel.domain.regulation.engine import RegulationEngine
@@ -11,6 +13,7 @@ def test_engine_uses_provided_strategy():
     context = ControlContext(
         sensor_id=SensorId(value="living_room_temperature"),
         zone_id=ZoneId(value="living_room"),
+        observed_at=datetime(2026, 1, 1, tzinfo=UTC),
         current_temperature=Temperature(20),
         target_temperature=Temperature(22),
         hysteresis=Temperature(0.3),

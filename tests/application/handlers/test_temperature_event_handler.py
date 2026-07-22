@@ -164,6 +164,7 @@ def create_decision_event():
         ControlContext(
             sensor_id=PRIMARY_SENSOR_ID,
             zone_id=ZONE_ID,
+            observed_at=NOW,
             current_temperature=Temperature(19),
             target_temperature=Temperature(22),
         )
@@ -315,6 +316,8 @@ def test_accepted_primary_measurement_creates_context_and_invokes_regulation():
     assert aggregator.zones == [zone]
     assert control_loop.contexts[0].sensor_id == PRIMARY_SENSOR_ID
     assert control_loop.contexts[0].zone_id == ZONE_ID
+    assert control_loop.contexts[0].observed_at == measurement.timestamp
+    assert result.decision_event.decision.observed_at == measurement.timestamp
     assert control_loop.contexts[0].current_temperature == measurement.value
     assert control_loop.contexts[0].target_temperature == Temperature(18)
 

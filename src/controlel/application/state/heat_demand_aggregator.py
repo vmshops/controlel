@@ -1,0 +1,92 @@
+from controlel.application.state.zone_demand_store import ZoneDemandStore
+from controlel.application.time.clock import Clock
+from controlel.domain.demands.building_heat_demand import BuildingHeatDemand
+from controlel.domain.demands.building_heat_demand_status import (
+    BuildingHeatDemandStatus,
+)
+from controlel.domain.demands.zone_demand import ZoneDemand
+from controlel.domain.repositories.zone_repository import ZoneRepository
+from controlel.domain.value_objects.sensor_id import SensorId
+from controlel.domain.value_objects.zone_id import ZoneId
+
+
+class ZoneDemandPrimarySensorMismatchError(ValueError):
+    def __init__(
+        self,
+        zone_id: ZoneId,
+        expected_sensor_id: SensorId,
+        actual_sensor_id: SensorId,
+    ) -> None:
+        self.zone_id = zone_id
+        self.expected_sensor_id = expected_sensor_id
+        self.actual_sensor_id = actual_sensor_id
+        super().__init__(
+            f"Zone '{zone_id.value}' expects primary sensor "
+            f"'{expected_sensor_id.value}', but demand came from "
+            f"'{actual_sensor_id.value}'"
+        )
+
+
+class HeatDemandAggregator:
+    def __init__(
+        self,
+        demand_store: ZoneDemandStore,
+        zone_repository: ZoneRepository,
+        clock: Clock,
+    ) -> None:
+        self.demand_store = demand_store
+        self.zone_repository = zone_repository
+        self.clock = clock
+
+    def evaluate(self) -> BuildingHeatDemand:
+        now = self.clock.now()
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise ValueError("Clock.now() must return a timezone-aware datetime")
+
+        zones = self.zone_repository.list_all()
+        eligible_demands: list[ZoneDemand] = []
+        missing_zone_ids: list[ZoneId] = []
+        expired_zone_ids: list[ZoneId] = []
+        future_dated_zone_ids: list[ZoneId] = []
+
+        for zone in zones:
+            demand = self.demand_store.get(zone.zone_id)
+            if demand is None:
+                missing_zone_ids.append(zone.zone_id)
+                continue
+
+            if demand.source_sensor_id != zone.primary_sensor_id:
+                raise ZoneDemandPrimarySensorMismatchError(
+                    zone_id=zone.zone_id,
+                    expected_sensor_id=zone.primary_sensor_id,
+                    actual_sensor_id=demand.source_sensor_id,
+                )
+
+            cutoff = now - zone.primary_measurement_max_age
+            if demand.observed_at < cutoff:
+                expired_zone_ids.append(zone.zone_id)
+            elif demand.observed_at > now:
+                future_dated_zone_ids.append(zone.zone_id)
+            else:
+                eligible_demands.append(demand)
+
+        has_heat_request = any(demand.requires_heat for demand in eligible_demands)
+        has_uncertainty = bool(missing_zone_ids or expired_zone_ids or future_dated_zone_ids)
+
+        if not zones:
+            status = BuildingHeatDemandStatus.INDETERMINATE
+        elif has_heat_request:
+            status = BuildingHeatDemandStatus.HEAT_REQUIRED
+        elif not has_uncertainty and len(eligible_demands) == len(zones):
+            status = BuildingHeatDemandStatus.NO_HEAT_REQUIRED
+        else:
+            status = BuildingHeatDemandStatus.INDETERMINATE
+
+        return BuildingHeatDemand(
+            status=status,
+            evaluated_at=now,
+            eligible_demands=tuple(eligible_demands),
+            missing_zone_ids=tuple(missing_zone_ids),
+            expired_zone_ids=tuple(expired_zone_ids),
+            future_dated_zone_ids=tuple(future_dated_zone_ids),
+        )

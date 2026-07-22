@@ -1,37 +1,44 @@
-from collections.abc import Mapping
 from datetime import timedelta
 
 from controlel.application.configuration.zone_target_resolver import (
     ZoneTargetResolver,
 )
 from controlel.application.events.event_bus import EventBus
-from controlel.application.handlers.decision_event_handler import DecisionEventHandler
 from controlel.application.handlers.temperature_event_handler import (
     TemperatureEventHandler,
 )
+from controlel.application.handlers.zone_demand_handler import ZoneDemandHandler
+from controlel.application.ports.heat_source_port import HeatSourcePort
 from controlel.application.runtime.runtime_processing_result import (
     RuntimeProcessingResult,
     RuntimeProcessingStatus,
 )
-from controlel.application.services.command_dispatcher import CommandDispatcher
+from controlel.application.services.heat_source_command_dispatcher import (
+    HeatSourceCommandDispatcher,
+)
 from controlel.application.services.measurement_timestamp_validator import (
     MeasurementTimestampValidator,
 )
-from controlel.application.services.zone_actuator_router import ZoneActuatorRouter
+from controlel.application.state.heat_demand_aggregator import HeatDemandAggregator
+from controlel.application.state.heat_source_state_store import HeatSourceStateStore
 from controlel.application.state.runtime_state_store import RuntimeStateStore
+from controlel.application.state.zone_demand_store import ZoneDemandStore
 from controlel.application.state.zone_temperature_aggregator import (
     ZoneTemperatureAggregator,
 )
 from controlel.application.time.clock import Clock
-from controlel.domain.actuators.actuator_port import ActuatorPort
+from controlel.domain.commands.command_family import CommandFamily
+from controlel.domain.commands.heat_source_command import HeatSourceCommand
+from controlel.domain.commands.heating_action import HeatingAction
+from controlel.domain.demands.building_heat_demand_status import (
+    BuildingHeatDemandStatus,
+)
 from controlel.domain.events.temperature_measured_event import (
     TemperatureMeasuredEvent,
 )
 from controlel.domain.measurements.measurement import Measurement
 from controlel.domain.repositories.sensor_repository import SensorRepository
-from controlel.domain.repositories.state_repository import StateRepository
 from controlel.domain.repositories.zone_repository import ZoneRepository
-from controlel.domain.value_objects.zone_id import ZoneId
 
 
 class ControlRuntime:
@@ -44,18 +51,23 @@ class ControlRuntime:
         self,
         sensor_repository: SensorRepository,
         zone_repository: ZoneRepository,
-        actuator_routes: Mapping[ZoneId, ActuatorPort],
+        heat_source_port: HeatSourcePort,
         clock: Clock,
         max_future_skew: timedelta,
     ) -> None:
         self.event_bus = EventBus()
         self.state_store = RuntimeStateStore()
-        self.control_state_repository = StateRepository()
-        self.decision_handler = DecisionEventHandler()
-        self.actuator_router = ZoneActuatorRouter(actuator_routes)
-        self.command_dispatcher = CommandDispatcher(
-            actuator_router=self.actuator_router,
-            state_repository=self.control_state_repository,
+        self.zone_demand_store = ZoneDemandStore()
+        self.heat_source_state_store = HeatSourceStateStore()
+        self.zone_demand_handler = ZoneDemandHandler()
+        self.heat_demand_aggregator = HeatDemandAggregator(
+            demand_store=self.zone_demand_store,
+            zone_repository=zone_repository,
+            clock=clock,
+        )
+        self.heat_source_command_dispatcher = HeatSourceCommandDispatcher(
+            heat_source_port=heat_source_port,
+            state_store=self.heat_source_state_store,
         )
         self.target_resolver = ZoneTargetResolver(
             sensor_repository=sensor_repository,
@@ -101,18 +113,36 @@ class ControlRuntime:
 
         self.event_bus.publish(decision_event)
 
-        command = self.decision_handler.handle(decision_event)
-        if command is None:
+        zone_demand = self.zone_demand_handler.handle(decision_event)
+        if zone_demand is None:
             return RuntimeProcessingResult(
                 status=RuntimeProcessingStatus.DECISION_WITHOUT_COMMAND,
                 decision_event=decision_event,
             )
 
-        executed = self.command_dispatcher.dispatch(command)
+        self.zone_demand_store.record(zone_demand)
+        building_heat_demand = self.heat_demand_aggregator.evaluate()
+        if building_heat_demand.status is BuildingHeatDemandStatus.INDETERMINATE:
+            return RuntimeProcessingResult(
+                status=RuntimeProcessingStatus.BUILDING_HEAT_DEMAND_INDETERMINATE,
+                decision_event=decision_event,
+                building_heat_demand=building_heat_demand,
+            )
+
+        action_by_status = {
+            BuildingHeatDemandStatus.HEAT_REQUIRED: HeatingAction.ENABLE_HEATING,
+            BuildingHeatDemandStatus.NO_HEAT_REQUIRED: HeatingAction.DISABLE_HEATING,
+        }
+        command = HeatSourceCommand(
+            command_type=CommandFamily.HEATING,
+            action=action_by_status[building_heat_demand.status],
+        )
+        executed = self.heat_source_command_dispatcher.dispatch(command)
         return RuntimeProcessingResult(
             status=(
                 RuntimeProcessingStatus.COMMAND_EXECUTED if executed else RuntimeProcessingStatus.COMMAND_SUPPRESSED
             ),
             decision_event=decision_event,
+            building_heat_demand=building_heat_demand,
             command=command,
         )
