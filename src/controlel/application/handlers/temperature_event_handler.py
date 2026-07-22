@@ -25,11 +25,13 @@ class TemperatureEventHandler:
         if not self.state_store.record(event.measurement):
             return None
 
-        target_temperature = self.target_resolver.resolve(event.measurement.sensor_id)
+        zone = self.target_resolver.resolve(event.measurement.sensor_id)
 
         context = ControlContext(
+            sensor_id=event.measurement.sensor_id,
+            zone_id=zone.zone_id,
             current_temperature=event.measurement.value,
-            target_temperature=target_temperature,
+            target_temperature=zone.target_temperature,
         )
 
         return self.control_loop.process(context)

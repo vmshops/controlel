@@ -1,7 +1,7 @@
+from controlel.domain.entities.zone import Zone
 from controlel.domain.repositories.sensor_repository import SensorRepository
 from controlel.domain.repositories.zone_repository import ZoneRepository
 from controlel.domain.value_objects.sensor_id import SensorId
-from controlel.domain.value_objects.temperature import Temperature
 from controlel.domain.value_objects.zone_id import ZoneId
 
 
@@ -30,7 +30,7 @@ class ZoneTargetResolver:
         self.sensor_repository = sensor_repository
         self.zone_repository = zone_repository
 
-    def resolve(self, sensor_id: SensorId) -> Temperature:
+    def resolve(self, sensor_id: SensorId) -> Zone:
         try:
             sensor = self.sensor_repository.get(sensor_id)
         except KeyError as error:
@@ -41,4 +41,4 @@ class ZoneTargetResolver:
         except KeyError as error:
             raise ZoneConfigurationNotFoundError(sensor.zone_id) from error
 
-        return zone.target_temperature
+        return zone

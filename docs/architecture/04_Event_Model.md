@@ -30,9 +30,15 @@ subscribers can observe decisions. Decision events are notifications, not
 request/response calls. After publication, the runtime explicitly passes the
 event to `DecisionEventHandler`.
 
+The contained `Decision` is the authoritative source of its `SensorId`
+observation provenance and `ZoneId` regulated-subject identity.
+`DecisionCreatedEvent` does not duplicate those identifiers as event fields.
+
 The handler maps supported decision actions to an executable `Command`. A
 decision may produce no command. Unsupported or non-actionable actions return
 `None` and do not reach the actuator boundary.
 
 A `Command` is an explicit request, not an event describing something that
 already happened. No command-created event is introduced in the current flow.
+Commands carry the decision's `ZoneId` as a logical execution target but do not
+carry `SensorId`.

@@ -1,5 +1,10 @@
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
+from controlel.application.configuration.zone_target_resolver import (
+    SensorConfigurationNotFoundError,
+)
 from controlel.application.runtime.control_runtime import ControlRuntime
 from controlel.domain.actuators.actuator_port import ActuatorPort
 from controlel.domain.commands.command import Command
@@ -29,38 +34,50 @@ class RecordingActuator(ActuatorPort):
 class UnsupportedDecisionControlLoop:
     def process(self, context) -> DecisionCreatedEvent:
         return DecisionCreatedEvent(
-            decision=Decision(action="observe_only"),
+            decision=Decision(
+                sensor_id=context.sensor_id,
+                zone_id=context.zone_id,
+                action="observe_only",
+            ),
         )
 
 
 def create_measurement(
     value: float,
     timestamp: datetime | None = None,
+    sensor_id: str = "living_room_temperature",
 ) -> Measurement:
     return Measurement(
-        sensor_id=SensorId(value="living_room_temperature"),
+        sensor_id=SensorId(value=sensor_id),
         value=Temperature(value),
         timestamp=timestamp or datetime.now(UTC),
     )
 
 
-def create_runtime(actuator: ActuatorPort) -> ControlRuntime:
+def create_runtime(
+    actuator: ActuatorPort,
+    configurations: dict[str, tuple[str, float]] | None = None,
+) -> ControlRuntime:
+    configurations = configurations or {
+        "living_room_temperature": ("living_room", 22),
+    }
     sensors = SensorRepository()
-    sensors.add(
-        Sensor(
-            sensor_id=SensorId(value="living_room_temperature"),
-            zone_id=ZoneId(value="living_room"),
-            name="Living room temperature",
-        )
-    )
     zones = ZoneRepository()
-    zones.add(
-        Zone(
-            zone_id=ZoneId(value="living_room"),
-            name="Living room",
-            target_temperature=Temperature(22),
+    for sensor_id, (zone_id, target) in configurations.items():
+        sensors.add(
+            Sensor(
+                sensor_id=SensorId(value=sensor_id),
+                zone_id=ZoneId(value=zone_id),
+                name=sensor_id,
+            )
         )
-    )
+        zones.add(
+            Zone(
+                zone_id=ZoneId(value=zone_id),
+                name=zone_id,
+                target_temperature=Temperature(target),
+            )
+        )
 
     return ControlRuntime(
         sensor_repository=sensors,
@@ -77,7 +94,10 @@ def test_low_temperature_produces_enable_heating_command():
 
     assert decision_event is not None
     assert decision_event.decision.action == "enable_heating"
+    assert decision_event.decision.sensor_id == SensorId(value="living_room_temperature")
+    assert decision_event.decision.zone_id == ZoneId(value="living_room")
     assert [command.action for command in actuator.commands] == ["enable_heating"]
+    assert actuator.commands[0].zone_id == ZoneId(value="living_room")
 
 
 def test_high_temperature_produces_disable_heating_command():
@@ -88,7 +108,33 @@ def test_high_temperature_produces_disable_heating_command():
 
     assert decision_event is not None
     assert decision_event.decision.action == "disable_heating"
+    assert decision_event.decision.sensor_id == SensorId(value="living_room_temperature")
+    assert decision_event.decision.zone_id == ZoneId(value="living_room")
     assert [command.action for command in actuator.commands] == ["disable_heating"]
+    assert actuator.commands[0].zone_id == ZoneId(value="living_room")
+
+
+def test_two_zones_dispatch_differently_targeted_commands_to_same_actuator():
+    actuator = RecordingActuator()
+    runtime = create_runtime(
+        actuator,
+        {
+            "living_room_temperature": ("living_room", 22),
+            "bedroom_temperature": ("bedroom", 22),
+        },
+    )
+
+    living_room_event = runtime.process_temperature(create_measurement(19, sensor_id="living_room_temperature"))
+    bedroom_event = runtime.process_temperature(create_measurement(19, sensor_id="bedroom_temperature"))
+
+    assert living_room_event is not None
+    assert bedroom_event is not None
+    assert living_room_event.decision.sensor_id == SensorId(value="living_room_temperature")
+    assert bedroom_event.decision.sensor_id == SensorId(value="bedroom_temperature")
+    assert [command.zone_id for command in actuator.commands] == [
+        ZoneId(value="living_room"),
+        ZoneId(value="bedroom"),
+    ]
 
 
 def test_stale_measurement_produces_no_additional_decision_or_command():
@@ -110,6 +156,25 @@ def test_stale_measurement_produces_no_additional_decision_or_command():
     assert len(actuator.commands) == 1
     assert runtime.state_store.get_latest(current.sensor_id) == current
     assert published_measurements == [current, stale]
+
+
+def test_missing_configuration_stops_before_decision_or_command():
+    actuator = RecordingActuator()
+    runtime = ControlRuntime(
+        sensor_repository=SensorRepository(),
+        zone_repository=ZoneRepository(),
+        actuator=actuator,
+    )
+    published_decisions = []
+    runtime.event_bus.subscribe(DecisionCreatedEvent, published_decisions.append)
+    measurement = create_measurement(19)
+
+    with pytest.raises(SensorConfigurationNotFoundError):
+        runtime.process_temperature(measurement)
+
+    assert runtime.state_store.get_latest(measurement.sensor_id) == measurement
+    assert published_decisions == []
+    assert actuator.commands == []
 
 
 def test_unsupported_decision_does_not_invoke_actuator():

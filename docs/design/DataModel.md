@@ -26,9 +26,21 @@ measurement state.
 exactly one configured `Zone`. `Zone.target_temperature` is a typed
 `Temperature` and is the source used to prepare `ControlContext`.
 
+`SensorId` is observation provenance, while `ZoneId` is the logical regulated
+subject. `ControlContext` and `Decision` carry both. `DecisionCreatedEvent`
+preserves the complete decision without duplicating the identifiers, and an
+executable `Command` carries only `ZoneId` as its logical target. Sensor
+provenance is not currently command execution data.
+
 Zone configuration contains no latest measurement or applied heating state.
 Scheduling, persistence, disabled-state semantics, actuator routing and
 configuration mutation are intentionally absent.
+
+`ZoneId` is not a physical actuator identifier. Commands for every zone still
+use one injected `ActuatorPort`; no zone-to-actuator routing exists. Multiple
+sensors in one zone may produce repeated or conflicting commands. Future
+durable causal tracing should introduce correlation or causation identity
+rather than reuse `SensorId` for that purpose.
 
 # 5. Runtime Model
 

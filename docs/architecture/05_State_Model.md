@@ -19,6 +19,12 @@ Sensor -> Measurement -> Event -> RuntimeStateStore -> ControlContext
        -> Decision -> DecisionCreatedEvent -> Command | None -> ActuatorPort
 ```
 
+The measurement's `SensorId` is observation provenance. Target resolution adds
+the configured `ZoneId`, and both identifiers are preserved in
+`ControlContext` and `Decision`. A produced command retains only `ZoneId` as
+its logical execution target; these identifiers are not runtime state fields
+added by the store.
+
 ## Historical measurements
 
 Latest runtime state is not measurement history. The runtime store overwrites
@@ -45,6 +51,10 @@ Missing sensor or zone configuration raises an explicit application
 configuration error. No fallback target is applied. Because the measurement is
 recorded before configuration resolution, an accepted observation remains in
 runtime state when resolution fails, but no regulation decision is produced.
+
+All commands are still dispatched through one injected `ActuatorPort`.
+`ZoneId` is not a physical actuator identifier, and zone-to-actuator routing is
+not part of the current state or configuration model.
 
 ## Persistence boundary
 

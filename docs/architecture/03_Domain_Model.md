@@ -17,3 +17,15 @@ control state, respectively.
 
 Scheduling, disabled-state behavior and configuration mutation are outside the
 current domain contract.
+
+## Regulation identity
+
+`SensorId` identifies the observation provenance used to prepare regulation
+inputs. `ZoneId` identifies the logical regulated subject. A `ControlContext`
+and the resulting `Decision` carry both identifiers so the decision retains
+its observation provenance and zone identity.
+
+An executable `Command` carries `ZoneId` as its logical target. It does not
+carry `SensorId`, because sensor provenance is not currently execution data.
+`ZoneId` is not a physical actuator identifier, and the domain defines no
+generic target abstraction.

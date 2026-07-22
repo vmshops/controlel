@@ -12,6 +12,7 @@ class DecisionEventHandler:
             return None
 
         return Command(
+            zone_id=event.decision.zone_id,
             command_type="heating",
             action=event.decision.action,
         )

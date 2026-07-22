@@ -14,14 +14,14 @@ from controlel.domain.value_objects.temperature import Temperature
 from controlel.domain.value_objects.zone_id import ZoneId
 
 
-def add_zone(repository: ZoneRepository, zone_id: str, target: float) -> None:
-    repository.add(
-        Zone(
-            zone_id=ZoneId(value=zone_id),
-            name=zone_id,
-            target_temperature=Temperature(target),
-        )
+def add_zone(repository: ZoneRepository, zone_id: str, target: float) -> Zone:
+    zone = Zone(
+        zone_id=ZoneId(value=zone_id),
+        name=zone_id,
+        target_temperature=Temperature(target),
     )
+    repository.add(zone)
+    return zone
 
 
 def add_sensor(
@@ -49,40 +49,40 @@ def create_resolver(
     )
 
 
-def test_resolves_sensor_through_zone_to_typed_target():
+def test_resolves_sensor_to_complete_configured_zone():
     sensors = SensorRepository()
     zones = ZoneRepository()
     add_sensor(sensors, "living_room_temperature", "living_room")
-    add_zone(zones, "living_room", 22)
+    configured_zone = add_zone(zones, "living_room", 22)
 
-    target = create_resolver(sensors, zones).resolve(SensorId(value="living_room_temperature"))
+    resolved_zone = create_resolver(sensors, zones).resolve(SensorId(value="living_room_temperature"))
 
-    assert target == Temperature(22)
+    assert resolved_zone is configured_zone
 
 
-def test_two_sensors_in_one_zone_return_same_target():
+def test_two_sensors_in_one_zone_return_same_zone():
     sensors = SensorRepository()
     zones = ZoneRepository()
     add_sensor(sensors, "living_room_primary", "living_room")
     add_sensor(sensors, "living_room_secondary", "living_room")
-    add_zone(zones, "living_room", 22)
+    configured_zone = add_zone(zones, "living_room", 22)
     resolver = create_resolver(sensors, zones)
 
-    assert resolver.resolve(SensorId(value="living_room_primary")) == Temperature(22)
-    assert resolver.resolve(SensorId(value="living_room_secondary")) == Temperature(22)
+    assert resolver.resolve(SensorId(value="living_room_primary")) is configured_zone
+    assert resolver.resolve(SensorId(value="living_room_secondary")) is configured_zone
 
 
-def test_sensors_in_different_zones_return_different_targets():
+def test_sensors_in_different_zones_return_their_configured_zones():
     sensors = SensorRepository()
     zones = ZoneRepository()
     add_sensor(sensors, "living_room_temperature", "living_room")
     add_sensor(sensors, "bedroom_temperature", "bedroom")
-    add_zone(zones, "living_room", 22)
-    add_zone(zones, "bedroom", 18)
+    living_room = add_zone(zones, "living_room", 22)
+    bedroom = add_zone(zones, "bedroom", 18)
     resolver = create_resolver(sensors, zones)
 
-    assert resolver.resolve(SensorId(value="living_room_temperature")) == Temperature(22)
-    assert resolver.resolve(SensorId(value="bedroom_temperature")) == Temperature(18)
+    assert resolver.resolve(SensorId(value="living_room_temperature")) is living_room
+    assert resolver.resolve(SensorId(value="bedroom_temperature")) is bedroom
 
 
 def test_sensor_name_is_irrelevant_to_resolution():
@@ -94,11 +94,11 @@ def test_sensor_name_is_irrelevant_to_resolution():
         "living_room",
         name="Not a zone identifier",
     )
-    add_zone(zones, "living_room", 22)
+    configured_zone = add_zone(zones, "living_room", 22)
 
-    target = create_resolver(sensors, zones).resolve(SensorId(value="living_room_temperature"))
+    resolved_zone = create_resolver(sensors, zones).resolve(SensorId(value="living_room_temperature"))
 
-    assert target == Temperature(22)
+    assert resolved_zone is configured_zone
 
 
 def test_missing_sensor_raises_explicit_configuration_error_without_fallback():

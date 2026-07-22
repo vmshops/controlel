@@ -9,13 +9,13 @@ Measurement
 -> SensorRepository
 -> Sensor.zone_id
 -> ZoneRepository
--> Zone.target_temperature
--> ControlContext
+-> Zone(zone_id, target_temperature)
+-> ControlContext(sensor_id, zone_id)
 -> Regulation
--> Decision
+-> Decision(sensor_id, zone_id)
 -> DecisionCreatedEvent
 -> DecisionEventHandler
--> Command | None
+-> Command(zone_id) | None
 -> CommandDispatcher
 -> ActuatorPort
 ```
@@ -41,6 +41,17 @@ change the functional result.
 handler explicitly maps `enable_heating` and `disable_heating` to commands in
 the `heating` command family. Other actions produce no command.
 
+`SensorId` is carried from the measurement through `ControlContext` into the
+decision as observation provenance. The configured `ZoneId` is carried through
+the same models as the logical regulated subject. `DecisionCreatedEvent`
+contains the complete decision and does not duplicate either identifier.
+
+Supported commands copy `Decision.zone_id` as their logical execution target.
+They do not copy `SensorId`, reason, metadata or timestamp because those values
+are not currently required for execution. Future durable causal tracing should
+use explicit correlation or causation identity rather than overload
+`SensorId`.
+
 `EventBus` publishes `DecisionCreatedEvent` for notification before runtime
 explicitly invokes command mapping. Decision publication is not a
 request/response operation.
@@ -53,10 +64,14 @@ The current flow intentionally has no command routing, retry policy,
 idempotency or applied-state suppression. It also has no hardware adapter;
 platform-specific implementations remain outside the core runtime.
 
+`ZoneId` is not a physical actuator identifier. Commands targeted to different
+zones still pass through the same injected `ActuatorPort`; zone-to-actuator
+routing is intentionally absent. Multiple sensors associated with one zone may
+currently produce repeated or conflicting commands.
+
 Observers may delay runtime processing, and observer exceptions currently
 propagate to the caller. Observer isolation and concurrency are outside the
 current design.
 
 Scheduling, disabled-state behavior, configuration persistence and mutation,
-zone-based actuator routing, and decision/command zone identity are also
-outside the current flow.
+and zone-based actuator routing are also outside the current flow.

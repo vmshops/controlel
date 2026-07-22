@@ -33,13 +33,13 @@ class RecordingControlLoop:
 
 
 class RecordingTargetResolver(ZoneTargetResolver):
-    def __init__(self, target: Temperature):
-        self.target = target
+    def __init__(self, zone: Zone):
+        self.zone = zone
         self.sensor_ids = []
 
-    def resolve(self, sensor_id: SensorId) -> Temperature:
+    def resolve(self, sensor_id: SensorId) -> Zone:
         self.sensor_ids.append(sensor_id)
-        return self.target
+        return self.zone
 
 
 def create_event(
@@ -87,6 +87,8 @@ def test_accepted_measurement_is_recorded_and_uses_resolved_zone_target():
     handler.handle(event)
 
     assert state_store.get_latest(event.measurement.sensor_id) == event.measurement
+    assert control_loop.contexts[0].sensor_id == event.measurement.sensor_id
+    assert control_loop.contexts[0].zone_id == ZoneId(value="living_room")
     assert control_loop.contexts[0].target_temperature == Temperature(18)
 
 
@@ -96,7 +98,13 @@ def test_stale_measurement_does_not_invoke_target_resolution_or_control_loop():
     newest_event = create_event(20, newest_timestamp)
     stale_event = create_event(19, newest_timestamp - timedelta(minutes=1))
     state_store.record(newest_event.measurement)
-    target_resolver = RecordingTargetResolver(Temperature(22))
+    target_resolver = RecordingTargetResolver(
+        Zone(
+            zone_id=ZoneId(value="living_room"),
+            name="Living room",
+            target_temperature=Temperature(22),
+        )
+    )
     control_loop = RecordingControlLoop()
     handler = TemperatureEventHandler(
         state_store=state_store,

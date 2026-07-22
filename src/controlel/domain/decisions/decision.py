@@ -3,11 +3,18 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from controlel.domain.value_objects.sensor_id import SensorId
+from controlel.domain.value_objects.zone_id import ZoneId
+
 
 class Decision(BaseModel):
     """
     Represents a regulation decision.
     """
+
+    sensor_id: SensorId
+
+    zone_id: ZoneId
 
     action: str
 

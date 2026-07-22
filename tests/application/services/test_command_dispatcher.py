@@ -3,6 +3,7 @@ import pytest
 from controlel.application.services.command_dispatcher import CommandDispatcher
 from controlel.domain.actuators.actuator_port import ActuatorPort
 from controlel.domain.commands.command import Command
+from controlel.domain.value_objects.zone_id import ZoneId
 
 
 class RecordingActuator(ActuatorPort):
@@ -29,6 +30,7 @@ def test_dispatcher_executes_exact_command_once_through_actuator_port():
     actuator = RecordingActuator()
     dispatcher = CommandDispatcher(actuator=actuator)
     command = Command(
+        zone_id=ZoneId(value="living_room"),
         command_type="heating",
         action="enable_heating",
     )
@@ -42,6 +44,7 @@ def test_actuator_exception_propagates_unchanged():
     error = ActuatorFailure("execution failed")
     dispatcher = CommandDispatcher(actuator=FailingActuator(error))
     command = Command(
+        zone_id=ZoneId(value="living_room"),
         command_type="heating",
         action="enable_heating",
     )

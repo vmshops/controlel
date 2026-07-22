@@ -1,11 +1,15 @@
 from controlel.application.services.control_loop_service import ControlLoopService
 from controlel.domain.events.decision_event import DecisionCreatedEvent
 from controlel.domain.regulation.context import ControlContext
+from controlel.domain.value_objects.sensor_id import SensorId
 from controlel.domain.value_objects.temperature import Temperature
+from controlel.domain.value_objects.zone_id import ZoneId
 
 
 def test_control_loop_creates_decision_event():
     context = ControlContext(
+        sensor_id=SensorId(value="living_room_temperature"),
+        zone_id=ZoneId(value="living_room"),
         current_temperature=Temperature(19),
         target_temperature=Temperature(22),
     )

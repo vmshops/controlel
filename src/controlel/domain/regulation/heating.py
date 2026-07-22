@@ -12,6 +12,14 @@ class HeatingStrategy(RegulationStrategy):
         lower_limit = context.target_temperature.value - context.hysteresis.value
 
         if context.current_temperature.value < lower_limit:
-            return Decision(action="enable_heating")
+            return Decision(
+                sensor_id=context.sensor_id,
+                zone_id=context.zone_id,
+                action="enable_heating",
+            )
 
-        return Decision(action="disable_heating")
+        return Decision(
+            sensor_id=context.sensor_id,
+            zone_id=context.zone_id,
+            action="disable_heating",
+        )
