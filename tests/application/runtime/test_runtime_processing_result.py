@@ -8,7 +8,10 @@ from controlel.application.runtime.runtime_processing_result import (
     TemperatureNoDecisionReason,
 )
 from controlel.domain.commands.command import Command
+from controlel.domain.commands.command_family import CommandFamily
+from controlel.domain.commands.heating_action import HeatingAction
 from controlel.domain.decisions.decision import Decision
+from controlel.domain.decisions.decision_action import DecisionAction
 from controlel.domain.events.decision_event import DecisionCreatedEvent
 from controlel.domain.value_objects.sensor_id import SensorId
 from controlel.domain.value_objects.zone_id import ZoneId
@@ -19,7 +22,7 @@ def create_decision_event() -> DecisionCreatedEvent:
         decision=Decision(
             sensor_id=SensorId(value="living_room_temperature"),
             zone_id=ZoneId(value="living_room"),
-            action="enable_heating",
+            action=DecisionAction.ENABLE_HEATING,
         )
     )
 
@@ -27,8 +30,8 @@ def create_decision_event() -> DecisionCreatedEvent:
 def create_command() -> Command:
     return Command(
         zone_id=ZoneId(value="living_room"),
-        command_type="heating",
-        action="enable_heating",
+        command_type=CommandFamily.HEATING,
+        action=HeatingAction.ENABLE_HEATING,
     )
 
 

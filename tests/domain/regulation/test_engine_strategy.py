@@ -1,3 +1,4 @@
+from controlel.domain.decisions.decision_action import DecisionAction
 from controlel.domain.regulation.context import ControlContext
 from controlel.domain.regulation.engine import RegulationEngine
 from controlel.domain.regulation.heating import HeatingStrategy
@@ -21,4 +22,4 @@ def test_engine_uses_provided_strategy():
 
     decision = engine.evaluate(context)
 
-    assert decision.action == "enable_heating"
+    assert decision.action is DecisionAction.ENABLE_HEATING

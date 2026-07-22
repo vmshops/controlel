@@ -1,4 +1,5 @@
 from controlel.application.services.regulation_service import RegulationService
+from controlel.domain.decisions.decision_action import DecisionAction
 from controlel.domain.regulation.context import ControlContext
 from controlel.domain.value_objects.sensor_id import SensorId
 from controlel.domain.value_objects.temperature import Temperature
@@ -17,4 +18,4 @@ def test_regulation_service_returns_decision():
 
     decision = service.evaluate(context)
 
-    assert decision.action == "enable_heating"
+    assert decision.action is DecisionAction.ENABLE_HEATING

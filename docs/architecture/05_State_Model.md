@@ -112,9 +112,11 @@ and persistence design.
 
 `ControlState` records the latest successfully applied logical action for one
 `ZoneId`. `StateRepository` retains at most one immutable state per zone. A
-state contains the applied action, the exact successful `Command.id` and a
-timezone-aware application time. It contains no current measurement or target
-configuration and is not stored in `RuntimeStateStore`.
+state contains the exact typed `HeatingAction` from the successfully executed
+command, the exact successful `Command.id` and a timezone-aware application
+time. It contains no current measurement or target configuration and is not
+stored in `RuntimeStateStore`. It does not store `DecisionAction`, because an
+applied state records execution rather than regulation intent.
 
 Before actuator execution, the application checks the zone's applied state. An
 identical action is suppressed without changing state. A different or missing
@@ -127,6 +129,11 @@ Applied state is in-memory and lost on restart, so the first command after a
 restart may execute again. A normal adapter return is application-level
 success, not physical hardware confirmation. External hardware changes can
 therefore make the in-memory state inaccurate.
+
+Typed equality preserves suppression: the same `HeatingAction` for the same
+zone is suppressed, a different heating action for that zone executes, and the
+same action for another zone executes independently. Python-mode state data
+retains the enum member and JSON serialization uses its stable string value.
 
 ## Configuration and targets
 

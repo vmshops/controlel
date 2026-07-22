@@ -80,9 +80,19 @@ the same zone action is already applied, and it is published before an
 actuator execution that may fail. The caller receives `command_suppressed` or
 `command_executed` only after dispatch completes normally.
 
-The handler maps supported decision actions to an executable `Command`. A
-decision may produce no command. Unsupported or non-actionable actions return
-`None` and do not reach the actuator boundary.
+The handler is the explicit typed mapping boundary. It maps
+`DecisionAction.ENABLE_HEATING` to `HeatingAction.ENABLE_HEATING` and
+`DecisionAction.DISABLE_HEATING` to `HeatingAction.DISABLE_HEATING`, always in
+`CommandFamily.HEATING`. `DecisionAction.OBSERVE_ONLY` is the sole intentional
+decision-without-command outcome and returns `None` without reaching the
+actuator boundary. The mapping is exhaustive, so a future decision action must
+receive deliberately designed command behavior rather than silently becoming
+a no-command outcome.
+
+Decision and command actions intentionally use different string-backed enum
+types. Their JSON values remain stable, while Python-mode data retains enum
+instances. Unknown values and misspellings fail validation; no compatibility
+aliases or generic action registry exist.
 
 A `Command` is an explicit request, not an event describing something that
 already happened. No command-created event is introduced in the current flow.

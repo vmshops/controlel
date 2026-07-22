@@ -39,6 +39,20 @@ preserves the complete decision without duplicating the identifiers, and an
 executable `Command` carries only `ZoneId` as its logical target. Sensor
 provenance is not currently command execution data.
 
+`Decision.action` uses the string-backed `DecisionAction` vocabulary:
+`enable_heating`, `disable_heating` and the intentional non-command
+`observe_only`. Executable `Command.action` uses the separate `HeatingAction`
+type, which contains only the enable and disable operations, while the existing
+`command_type` field uses `CommandFamily` and currently accepts only `heating`.
+`DecisionEventHandler` is the explicit exhaustive mapping boundary between
+these types; `OBSERVE_ONLY` maps to no command.
+
+These exact serialized values are stable. Python-mode model data retains enum
+members and JSON output uses their strings. Unknown values and misspellings
+fail validation. There are no aliases, generic action registry, routing or
+physical-target taxonomy, or plugin action system; future vocabulary growth
+requires an explicit mapping decision.
+
 Zone configuration contains no latest measurement or applied heating state.
 Scheduling, persistence, disabled-state semantics, actuator routing and
 configuration mutation are intentionally absent.
@@ -124,9 +138,9 @@ configurable aggregation policies remain outside the model. Repeated eligible
 primary measurements may still produce repeated decisions.
 
 Applied `ControlState` is stored separately per `ZoneId`. It contains only the
-latest successfully executed logical action, the successful command identity
+latest successfully executed typed `HeatingAction`, the successful command identity
 and the application time. It does not contain measurements, targets or desired
-decisions.
+decisions and never stores the non-executable `DecisionAction.OBSERVE_ONLY`.
 
 An identical already-applied action is suppressed per zone. State changes only
 after the actuator port returns normally; a failure leaves prior state intact

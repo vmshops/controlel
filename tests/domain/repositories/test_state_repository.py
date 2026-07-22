@@ -1,11 +1,12 @@
 from uuid import uuid4
 
+from controlel.domain.commands.heating_action import HeatingAction
 from controlel.domain.repositories.state_repository import StateRepository
 from controlel.domain.states.control_state import ControlState
 from controlel.domain.value_objects.zone_id import ZoneId
 
 
-def create_state(zone_id: str, action: str) -> ControlState:
+def create_state(zone_id: str, action: HeatingAction) -> ControlState:
     return ControlState(
         zone_id=ZoneId(value=zone_id),
         applied_action=action,
@@ -21,7 +22,7 @@ def test_empty_zone_lookup_returns_none():
 
 def test_saves_and_returns_exact_state_by_zone_id():
     repository = StateRepository()
-    state = create_state("living_room", "enable_heating")
+    state = create_state("living_room", HeatingAction.ENABLE_HEATING)
 
     repository.save(state)
 
@@ -30,8 +31,8 @@ def test_saves_and_returns_exact_state_by_zone_id():
 
 def test_different_zones_remain_independent():
     repository = StateRepository()
-    living_room = create_state("living_room", "enable_heating")
-    bedroom = create_state("bedroom", "disable_heating")
+    living_room = create_state("living_room", HeatingAction.ENABLE_HEATING)
+    bedroom = create_state("bedroom", HeatingAction.DISABLE_HEATING)
 
     repository.save(living_room)
     repository.save(bedroom)
@@ -42,9 +43,9 @@ def test_different_zones_remain_independent():
 
 def test_replacing_one_zone_does_not_change_another_zone():
     repository = StateRepository()
-    living_room_first = create_state("living_room", "enable_heating")
-    living_room_second = create_state("living_room", "disable_heating")
-    bedroom = create_state("bedroom", "enable_heating")
+    living_room_first = create_state("living_room", HeatingAction.ENABLE_HEATING)
+    living_room_second = create_state("living_room", HeatingAction.DISABLE_HEATING)
+    bedroom = create_state("bedroom", HeatingAction.ENABLE_HEATING)
     repository.save(living_room_first)
     repository.save(bedroom)
 

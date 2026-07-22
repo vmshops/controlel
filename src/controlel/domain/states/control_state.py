@@ -3,6 +3,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from controlel.domain.commands.heating_action import HeatingAction
 from controlel.domain.value_objects.zone_id import ZoneId
 
 
@@ -12,7 +13,7 @@ class ControlState(BaseModel):
     """
 
     zone_id: ZoneId
-    applied_action: str
+    applied_action: HeatingAction
     command_id: UUID
     applied_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 

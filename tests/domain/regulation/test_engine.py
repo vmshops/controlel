@@ -1,3 +1,4 @@
+from controlel.domain.decisions.decision_action import DecisionAction
 from controlel.domain.regulation.context import ControlContext
 from controlel.domain.regulation.engine import RegulationEngine
 from controlel.domain.regulation.heating import HeatingStrategy
@@ -20,7 +21,7 @@ def test_engine_enables_heating_when_temperature_is_low():
 
     decision = engine.evaluate(context)
 
-    assert decision.action == "enable_heating"
+    assert decision.action is DecisionAction.ENABLE_HEATING
 
 
 def test_engine_respects_hysteresis():
@@ -38,4 +39,4 @@ def test_engine_respects_hysteresis():
 
     decision = engine.evaluate(context)
 
-    assert decision.action == "disable_heating"
+    assert decision.action is DecisionAction.DISABLE_HEATING

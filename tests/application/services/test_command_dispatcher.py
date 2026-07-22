@@ -3,6 +3,8 @@ import pytest
 from controlel.application.services.command_dispatcher import CommandDispatcher
 from controlel.domain.actuators.actuator_port import ActuatorPort
 from controlel.domain.commands.command import Command
+from controlel.domain.commands.command_family import CommandFamily
+from controlel.domain.commands.heating_action import HeatingAction
 from controlel.domain.repositories.state_repository import StateRepository
 from controlel.domain.value_objects.zone_id import ZoneId
 
@@ -41,12 +43,12 @@ class FailOnceActuator(ActuatorPort):
 
 
 def create_command(
-    action: str = "enable_heating",
+    action: HeatingAction = HeatingAction.ENABLE_HEATING,
     zone_id: str = "living_room",
 ) -> Command:
     return Command(
         zone_id=ZoneId(value=zone_id),
-        command_type="heating",
+        command_type=CommandFamily.HEATING,
         action=action,
     )
 
@@ -74,7 +76,7 @@ def test_first_action_executes_exact_command_and_records_applied_state():
     assert actuator.executed_commands == [command]
     assert state is not None
     assert state.zone_id == command.zone_id
-    assert state.applied_action == command.action
+    assert state.applied_action is command.action
     assert state.command_id == command.id
 
 
@@ -112,8 +114,8 @@ def test_opposite_action_executes_and_replaces_zone_state():
     actuator = RecordingActuator()
     repository = StateRepository()
     dispatcher = create_dispatcher(actuator, repository)
-    enable = create_command(action="enable_heating")
-    disable = create_command(action="disable_heating")
+    enable = create_command(action=HeatingAction.ENABLE_HEATING)
+    disable = create_command(action=HeatingAction.DISABLE_HEATING)
     dispatcher.dispatch(enable)
 
     executed = dispatcher.dispatch(disable)
@@ -121,7 +123,7 @@ def test_opposite_action_executes_and_replaces_zone_state():
     state = repository.get(enable.zone_id)
     assert executed is True
     assert actuator.executed_commands == [enable, disable]
-    assert state.applied_action == "disable_heating"
+    assert state.applied_action is HeatingAction.DISABLE_HEATING
     assert state.command_id == disable.id
 
 
@@ -143,11 +145,11 @@ def test_failed_initial_execution_propagates_exact_error_and_records_no_state():
 def test_failed_transition_preserves_previous_applied_state():
     repository = StateRepository()
     successful_actuator = RecordingActuator()
-    enable = create_command(action="enable_heating")
+    enable = create_command(action=HeatingAction.ENABLE_HEATING)
     create_dispatcher(successful_actuator, repository).dispatch(enable)
     applied_state = repository.get(enable.zone_id)
     error = ActuatorFailure("transition failed")
-    disable = create_command(action="disable_heating")
+    disable = create_command(action=HeatingAction.DISABLE_HEATING)
 
     with pytest.raises(ActuatorFailure) as raised:
         create_dispatcher(FailingActuator(error), repository).dispatch(disable)

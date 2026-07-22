@@ -16,10 +16,10 @@ Measurement
 -> ZoneTemperatureResult(effective | missing | expired | future_dated)
 -> ControlContext(sensor_id, zone_id)
 -> Regulation
--> Decision(sensor_id, zone_id)
+-> Decision(sensor_id, zone_id, DecisionAction)
 -> DecisionCreatedEvent
 -> DecisionEventHandler
--> Command(zone_id) | None
+-> Command(zone_id, CommandFamily, HeatingAction) | None
 -> CommandDispatcher
 -> StateRepository lookup by ZoneId
 -> suppress identical applied action | ActuatorPort
@@ -98,9 +98,19 @@ notification-only: it calls observers synchronously in registration order,
 discards their return values and returns `None`. Observer return values cannot
 change the functional result.
 
-`Decision` remains a description of the regulation result. The application
-handler explicitly maps `enable_heating` and `disable_heating` to commands in
-the `heating` command family. Other actions produce no command.
+`Decision` remains a description of the regulation result and carries the
+typed `DecisionAction` vocabulary: `enable_heating`, `disable_heating` or the
+intentional non-command action `observe_only`. `DecisionEventHandler`
+explicitly maps the two executable decision actions to their corresponding
+`HeatingAction` members in `CommandFamily.HEATING`. `OBSERVE_ONLY` is the only
+mapping to `None`. A future unhandled action fails loudly until its behavior is
+designed.
+
+Decision and command actions deliberately use separate string-backed enum
+types. Unknown or misspelled values fail validation. Python-mode data retains
+the enum members, while JSON serialization emits the unchanged stable strings.
+There are no aliases, generic action registry, routing taxonomy or plugin
+action system.
 
 `ControlRuntime.process_temperature()` returns an immutable
 `RuntimeProcessingResult` for normally completed processing. Its stable status
@@ -125,7 +135,7 @@ explicitly invokes command mapping. Decision publication is not a
 request/response operation.
 
 `CommandDispatcher` compares a command with the latest successfully applied
-action for its `ZoneId`. An identical action is suppressed without actuator
+typed `HeatingAction` for its `ZoneId`. An identical action is suppressed without actuator
 execution or state mutation. A different action executes through the injected
 `ActuatorPort`, then becomes the new immutable `ControlState` only after normal
 return. Execution exceptions propagate unchanged and preserve the previous

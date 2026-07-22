@@ -7,6 +7,8 @@ from controlel.application.runtime.runtime_processing_result import (
 )
 from controlel.domain.actuators.actuator_port import ActuatorPort
 from controlel.domain.commands.command import Command
+from controlel.domain.commands.heating_action import HeatingAction
+from controlel.domain.decisions.decision_action import DecisionAction
 from controlel.domain.entities.zone import Zone
 from controlel.domain.events.temperature_measured_event import (
     TemperatureMeasuredEvent,
@@ -75,10 +77,11 @@ def test_control_runtime_processes_temperature():
     result = runtime.process_temperature(measurement)
 
     assert result.status is RuntimeProcessingStatus.COMMAND_EXECUTED
-    assert result.decision_event.decision.action == "enable_heating"
+    assert result.decision_event.decision.action is DecisionAction.ENABLE_HEATING
     assert runtime.state_store.get_latest(measurement.sensor_id) == measurement
     assert (
-        runtime.control_state_repository.get(result.decision_event.decision.zone_id).applied_action == "enable_heating"
+        runtime.control_state_repository.get(result.decision_event.decision.zone_id).applied_action
+        is HeatingAction.ENABLE_HEATING
     )
 
 
@@ -129,8 +132,8 @@ def test_equal_temperatures_in_different_zones_use_different_targets():
         )
     )
 
-    assert living_room_result.decision_event.decision.action == "enable_heating"
-    assert bedroom_result.decision_event.decision.action == "disable_heating"
+    assert living_room_result.decision_event.decision.action is DecisionAction.ENABLE_HEATING
+    assert bedroom_result.decision_event.decision.action is DecisionAction.DISABLE_HEATING
 
 
 def test_temperature_observer_return_values_cannot_replace_decision_result():
@@ -156,7 +159,7 @@ def test_temperature_observer_return_values_cannot_replace_decision_result():
     result = runtime.process_temperature(measurement)
 
     assert result.status is RuntimeProcessingStatus.COMMAND_EXECUTED
-    assert result.decision_event.decision.action == "enable_heating"
+    assert result.decision_event.decision.action is DecisionAction.ENABLE_HEATING
     assert notified == ["first", "second"]
 
 

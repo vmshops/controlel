@@ -1,4 +1,5 @@
 from controlel.domain.decisions.decision import Decision
+from controlel.domain.decisions.decision_action import DecisionAction
 from controlel.domain.regulation.context import ControlContext
 from controlel.domain.regulation.strategy import RegulationStrategy
 
@@ -15,11 +16,11 @@ class HeatingStrategy(RegulationStrategy):
             return Decision(
                 sensor_id=context.sensor_id,
                 zone_id=context.zone_id,
-                action="enable_heating",
+                action=DecisionAction.ENABLE_HEATING,
             )
 
         return Decision(
             sensor_id=context.sensor_id,
             zone_id=context.zone_id,
-            action="disable_heating",
+            action=DecisionAction.DISABLE_HEATING,
         )

@@ -12,7 +12,10 @@ from controlel.application.runtime.runtime_processing_result import (
 )
 from controlel.domain.actuators.actuator_port import ActuatorPort
 from controlel.domain.commands.command import Command
+from controlel.domain.commands.command_family import CommandFamily
+from controlel.domain.commands.heating_action import HeatingAction
 from controlel.domain.decisions.decision import Decision
+from controlel.domain.decisions.decision_action import DecisionAction
 from controlel.domain.entities.zone import Zone
 from controlel.domain.events.decision_event import DecisionCreatedEvent
 from controlel.domain.events.temperature_measured_event import (
@@ -66,7 +69,7 @@ class UnsupportedDecisionControlLoop:
             decision=Decision(
                 sensor_id=context.sensor_id,
                 zone_id=context.zone_id,
-                action="observe_only",
+                action=DecisionAction.OBSERVE_ONLY,
             ),
         )
 
@@ -163,14 +166,15 @@ def test_low_temperature_produces_enable_heating_command():
 
     assert result.status is RuntimeProcessingStatus.COMMAND_EXECUTED
     decision_event = result.decision_event
-    assert decision_event.decision.action == "enable_heating"
+    assert decision_event.decision.action is DecisionAction.ENABLE_HEATING
     assert decision_event.decision.sensor_id == SensorId(value="living_room_temperature")
     assert decision_event.decision.zone_id == ZoneId(value="living_room")
-    assert [command.action for command in actuator.commands] == ["enable_heating"]
+    assert [command.action for command in actuator.commands] == [HeatingAction.ENABLE_HEATING]
+    assert actuator.commands[0].command_type is CommandFamily.HEATING
     assert result.command is actuator.commands[0]
     assert actuator.commands[0].zone_id == ZoneId(value="living_room")
     state = runtime.control_state_repository.get(ZoneId(value="living_room"))
-    assert state.applied_action == "enable_heating"
+    assert state.applied_action is HeatingAction.ENABLE_HEATING
     assert state.command_id == actuator.commands[0].id
 
 
@@ -182,13 +186,17 @@ def test_high_temperature_produces_disable_heating_command():
 
     assert result.status is RuntimeProcessingStatus.COMMAND_EXECUTED
     decision_event = result.decision_event
-    assert decision_event.decision.action == "disable_heating"
+    assert decision_event.decision.action is DecisionAction.DISABLE_HEATING
     assert decision_event.decision.sensor_id == SensorId(value="living_room_temperature")
     assert decision_event.decision.zone_id == ZoneId(value="living_room")
-    assert [command.action for command in actuator.commands] == ["disable_heating"]
+    assert [command.action for command in actuator.commands] == [HeatingAction.DISABLE_HEATING]
+    assert actuator.commands[0].command_type is CommandFamily.HEATING
     assert result.command is actuator.commands[0]
     assert actuator.commands[0].zone_id == ZoneId(value="living_room")
-    assert runtime.control_state_repository.get(ZoneId(value="living_room")).applied_action == "disable_heating"
+    assert (
+        runtime.control_state_repository.get(ZoneId(value="living_room")).applied_action
+        is HeatingAction.DISABLE_HEATING
+    )
 
 
 def test_two_zones_dispatch_differently_targeted_commands_to_same_actuator():
@@ -253,7 +261,7 @@ def test_secondary_does_not_regulate_when_primary_state_exists():
     assert secondary_result.status is RuntimeProcessingStatus.NO_DECISION
     assert secondary_result.reason is TemperatureNoDecisionReason.SECONDARY_MEASUREMENT
     assert [command.zone_id for command in actuator.commands] == [ZoneId(value="living_room")]
-    assert [command.action for command in actuator.commands] == ["enable_heating"]
+    assert [command.action for command in actuator.commands] == [HeatingAction.ENABLE_HEATING]
 
 
 def test_stale_measurement_produces_no_additional_decision_or_command():
@@ -287,7 +295,7 @@ def test_cutoff_boundary_measurement_is_accepted_end_to_end():
 
     assert result.status is RuntimeProcessingStatus.COMMAND_EXECUTED
     assert result.decision_event.decision.zone_id == ZoneId(value="living_room")
-    assert [command.action for command in actuator.commands] == ["enable_heating"]
+    assert [command.action for command in actuator.commands] == [HeatingAction.ENABLE_HEATING]
 
 
 def test_expired_primary_is_admitted_stored_and_observable_without_control_effects():
@@ -371,7 +379,7 @@ def test_valid_input_processes_normally_after_rejected_poisoning_attempt():
     assert rejected_result.reason is TemperatureNoDecisionReason.TIMESTAMP_ADMISSION_REJECTED
     assert valid_result.status is RuntimeProcessingStatus.COMMAND_EXECUTED
     assert runtime.state_store.get_latest(valid.sensor_id) is valid
-    assert [command.action for command in actuator.commands] == ["enable_heating"]
+    assert [command.action for command in actuator.commands] == [HeatingAction.ENABLE_HEATING]
 
 
 def test_existing_state_remains_unchanged_after_rejected_poisoning_attempt():
@@ -445,7 +453,7 @@ def test_unsupported_decision_does_not_invoke_actuator():
     result = runtime.process_temperature(create_measurement(19))
 
     assert result.status is RuntimeProcessingStatus.DECISION_WITHOUT_COMMAND
-    assert result.decision_event.decision.action == "observe_only"
+    assert result.decision_event.decision.action is DecisionAction.OBSERVE_ONLY
     assert result.command is None
     assert actuator.commands == []
     assert runtime.control_state_repository.get(ZoneId(value="living_room")) is None
@@ -484,10 +492,10 @@ def test_temperature_handler_runs_before_observer_notification():
     result = runtime.process_temperature(original)
 
     assert result.status is RuntimeProcessingStatus.COMMAND_EXECUTED
-    assert result.decision_event.decision.action == "enable_heating"
+    assert result.decision_event.decision.action is DecisionAction.ENABLE_HEATING
     assert observed_stored_measurements == [original]
     assert runtime.state_store.get_latest(original.sensor_id) == original
-    assert [command.action for command in actuator.commands] == ["enable_heating"]
+    assert [command.action for command in actuator.commands] == [HeatingAction.ENABLE_HEATING]
 
 
 def test_repeated_decisions_are_published_but_identical_applied_action_executes_once():
@@ -504,7 +512,9 @@ def test_repeated_decisions_are_published_but_identical_applied_action_executes_
     assert published_decisions == [first.decision_event, second.decision_event]
     assert first.command is actuator.commands[0]
     assert second.command is not actuator.commands[0]
-    assert [command.action for command in actuator.commands] == ["enable_heating"]
+    assert [command.action for command in actuator.commands] == [HeatingAction.ENABLE_HEATING]
+    assert second.command.action is HeatingAction.ENABLE_HEATING
+    assert second.command.command_type is CommandFamily.HEATING
     state = runtime.control_state_repository.get(ZoneId(value="living_room"))
     assert state.command_id == actuator.commands[0].id
 
@@ -519,11 +529,11 @@ def test_changed_action_executes_and_replaces_applied_state():
     assert result.status is RuntimeProcessingStatus.COMMAND_EXECUTED
     assert result.command is actuator.commands[1]
     assert [command.action for command in actuator.commands] == [
-        "enable_heating",
-        "disable_heating",
+        HeatingAction.ENABLE_HEATING,
+        HeatingAction.DISABLE_HEATING,
     ]
     state = runtime.control_state_repository.get(ZoneId(value="living_room"))
-    assert state.applied_action == "disable_heating"
+    assert state.applied_action is HeatingAction.DISABLE_HEATING
     assert state.command_id == actuator.commands[1].id
 
 

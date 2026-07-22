@@ -1,3 +1,4 @@
+from controlel.domain.decisions.decision_action import DecisionAction
 from controlel.domain.regulation.context import ControlContext
 from controlel.domain.regulation.heating import HeatingStrategy
 from controlel.domain.value_objects.sensor_id import SensorId
@@ -18,7 +19,7 @@ def test_heating_strategy_enable_heating():
 
     decision = strategy.evaluate(context)
 
-    assert decision.action == "enable_heating"
+    assert decision.action is DecisionAction.ENABLE_HEATING
     assert decision.sensor_id == context.sensor_id
     assert decision.zone_id == context.zone_id
 
@@ -36,6 +37,6 @@ def test_heating_strategy_disable_heating():
 
     decision = strategy.evaluate(context)
 
-    assert decision.action == "disable_heating"
+    assert decision.action is DecisionAction.DISABLE_HEATING
     assert decision.sensor_id == context.sensor_id
     assert decision.zone_id == context.zone_id

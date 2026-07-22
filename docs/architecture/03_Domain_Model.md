@@ -41,10 +41,29 @@ carry `SensorId`, because sensor provenance is not currently execution data.
 `ZoneId` is not a physical actuator identifier, and the domain defines no
 generic target abstraction.
 
+## Heating decision and command vocabulary
+
+`DecisionAction` is the typed regulation vocabulary. Its stable serialized
+values are `enable_heating`, `disable_heating` and `observe_only`.
+`OBSERVE_ONLY` is an intentional decision that creates no executable request.
+
+`HeatingAction` is the separate executable heating vocabulary and contains
+only `enable_heating` and `disable_heating`. `CommandFamily` currently contains
+only the stable `heating` family. A `Decision` therefore carries a
+`DecisionAction`, while a `Command` carries both a `CommandFamily` in its
+existing `command_type` field and a `HeatingAction`.
+
+The types are deliberately separate: regulation describes an outcome, while
+a command requests execution. Unknown values and misspellings fail model
+validation, and there are no aliases, generic action registry, routing model,
+physical target taxonomy or plugin action system. Python-mode model data
+retains enum instances; JSON serialization exposes the stable string values.
+Future vocabulary additions require a deliberate mapping update.
+
 ## Applied control state
 
 `ControlState` is the latest successfully applied logical action for one
-`ZoneId`. It records the applied action, the exact successful command identity
+`ZoneId`. It records the exact `HeatingAction`, the successful command identity
 and the application-level execution time. It contains no measurement or target
 configuration.
 
