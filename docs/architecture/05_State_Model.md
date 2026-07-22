@@ -16,7 +16,7 @@ prepared. This preserves the flow:
 
 ```text
 Sensor -> Measurement -> Event -> RuntimeStateStore -> ControlContext
-       -> Decision -> Command
+       -> Decision -> DecisionCreatedEvent -> Command | None -> ActuatorPort
 ```
 
 ## Historical measurements

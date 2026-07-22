@@ -7,5 +7,11 @@ class DecisionEventHandler:
     Converts decision events into executable commands.
     """
 
-    def handle(self, event: DecisionCreatedEvent) -> Command:
-        return Command.from_decision(event.decision)
+    def handle(self, event: DecisionCreatedEvent) -> Command | None:
+        if event.decision.action not in {"enable_heating", "disable_heating"}:
+            return None
+
+        return Command(
+            command_type="heating",
+            action=event.decision.action,
+        )

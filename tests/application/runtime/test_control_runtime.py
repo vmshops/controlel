@@ -1,7 +1,14 @@
 from controlel.application.runtime.control_runtime import ControlRuntime
+from controlel.domain.actuators.actuator_port import ActuatorPort
+from controlel.domain.commands.command import Command
 from controlel.domain.measurements.measurement import Measurement
 from controlel.domain.value_objects.sensor_id import SensorId
 from controlel.domain.value_objects.temperature import Temperature
+
+
+class NoOpActuator(ActuatorPort):
+    def execute(self, command: Command) -> None:
+        pass
 
 
 def test_control_runtime_processes_temperature():
@@ -10,7 +17,10 @@ def test_control_runtime_processes_temperature():
         value=Temperature(19),
     )
 
-    runtime = ControlRuntime(target_temperature=Temperature(22))
+    runtime = ControlRuntime(
+        target_temperature=Temperature(22),
+        actuator=NoOpActuator(),
+    )
 
     result = runtime.process_temperature(measurement)
 
@@ -27,7 +37,10 @@ def test_control_runtime_keeps_measurements_for_multiple_sensors():
         sensor_id=SensorId(value="bedroom_temperature"),
         value=Temperature(20),
     )
-    runtime = ControlRuntime(target_temperature=Temperature(22))
+    runtime = ControlRuntime(
+        target_temperature=Temperature(22),
+        actuator=NoOpActuator(),
+    )
 
     runtime.process_temperature(living_room)
     runtime.process_temperature(bedroom)
