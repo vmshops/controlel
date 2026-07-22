@@ -9,8 +9,9 @@ Measurement
 -> SensorRepository
 -> Sensor.zone_id
 -> ZoneRepository
--> Zone(zone_id, primary_sensor_id, target_temperature)
+-> Zone(zone_id, primary_sensor_id, primary_measurement_max_age, target_temperature)
 -> ZoneTemperatureAggregator
+-> Clock.now()
 -> latest primary Measurement | None
 -> ControlContext(sensor_id, zone_id)
 -> Regulation
@@ -43,9 +44,29 @@ secondary measurement remains stored and is subsequently published as a
 temperature event, but produces no decision event or command—even when primary
 state already exists. Missing primary state also produces no decision.
 
-There is no fallback sensor, arithmetic or weighted aggregation, cross-sensor
-timestamp comparison, or elapsed-time freshness rule. Configurable aggregation
-policies remain outside the current flow.
+The aggregator reads the injected application `Clock` exactly once. A primary
+measurement is eligible when its timestamp is between
+`now - Zone.primary_measurement_max_age` and `now`, inclusive. An expired or
+future-dated primary observation remains in runtime state and is published to
+observers, but produces no context, decision, command or applied-state update.
+A missing primary observation returns no effective measurement. Invalid
+primary configuration still raises its explicit exception.
+
+`SystemClock` is the UTC infrastructure implementation; `ControlRuntime`
+requires a `Clock` explicitly and does not construct one. This keeps freshness
+tests deterministic and prevents direct wall-clock access in application
+aggregation and handling.
+
+Same-sensor out-of-order rejection remains separate and happens before
+configuration and freshness evaluation. No cross-sensor timestamps are
+compared. A stored future observation may therefore block later
+lower-timestamp inputs under the unchanged state-store ordering contract.
+
+There is no fallback sensor, arithmetic or weighted aggregation, clock-skew
+tolerance, timestamp-admission policy, cleanup, timer or health monitor.
+Freshness is checked only when aggregation is invoked; a sensor that silently
+stops reporting causes no timed reaction. Expiry emits no fail-safe command and
+does not change previously applied control state.
 
 Functional handlers are not subscribed by `ControlRuntime`. `EventBus` is
 notification-only: it calls observers synchronously in registration order,

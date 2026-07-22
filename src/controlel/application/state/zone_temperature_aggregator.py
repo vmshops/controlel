@@ -1,4 +1,5 @@
 from controlel.application.state.runtime_state_store import RuntimeStateStore
+from controlel.application.time.clock import Clock
 from controlel.domain.entities.zone import Zone
 from controlel.domain.measurements.measurement import Measurement
 from controlel.domain.repositories.sensor_repository import SensorRepository
@@ -38,9 +39,11 @@ class ZoneTemperatureAggregator:
         self,
         state_store: RuntimeStateStore,
         sensor_repository: SensorRepository,
+        clock: Clock,
     ):
         self.state_store = state_store
         self.sensor_repository = sensor_repository
+        self.clock = clock
 
     def get_effective(self, zone: Zone) -> Measurement | None:
         try:
@@ -58,4 +61,16 @@ class ZoneTemperatureAggregator:
                 actual_zone_id=primary_sensor.zone_id,
             )
 
-        return self.state_store.get_latest(zone.primary_sensor_id)
+        measurement = self.state_store.get_latest(zone.primary_sensor_id)
+        if measurement is None:
+            return None
+
+        now = self.clock.now()
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise ValueError("Clock.now() must return a timezone-aware datetime")
+
+        cutoff = now - zone.primary_measurement_max_age
+        if cutoff <= measurement.timestamp <= now:
+            return measurement
+
+        return None

@@ -22,6 +22,17 @@ from controlel.domain.value_objects.sensor_id import SensorId
 from controlel.domain.value_objects.temperature import Temperature
 from controlel.domain.value_objects.zone_id import ZoneId
 
+NOW = datetime(2026, 1, 1, 12, tzinfo=UTC)
+DEFAULT_MAX_AGE = timedelta(minutes=5)
+
+
+class FixedClock:
+    def __init__(self, current_time: datetime = NOW):
+        self.current_time = current_time
+
+    def now(self) -> datetime:
+        return self.current_time
+
 
 class RecordingActuator(ActuatorPort):
     def __init__(self):
@@ -64,17 +75,19 @@ def create_measurement(
     return Measurement(
         sensor_id=SensorId(value=sensor_id),
         value=Temperature(value),
-        timestamp=timestamp or datetime.now(UTC),
+        timestamp=timestamp or NOW,
     )
 
 
 def create_runtime(
     actuator: ActuatorPort,
     configurations: dict[str, tuple[str, float]] | None = None,
+    maximum_ages: dict[str, timedelta] | None = None,
 ) -> ControlRuntime:
     configurations = configurations or {
         "living_room_temperature": ("living_room", 22),
     }
+    maximum_ages = maximum_ages or {}
     sensors = SensorRepository()
     zones = ZoneRepository()
     for sensor_id, (zone_id, target) in configurations.items():
@@ -89,6 +102,10 @@ def create_runtime(
             Zone(
                 zone_id=ZoneId(value=zone_id),
                 primary_sensor_id=SensorId(value=sensor_id),
+                primary_measurement_max_age=maximum_ages.get(
+                    zone_id,
+                    DEFAULT_MAX_AGE,
+                ),
                 name=zone_id,
                 target_temperature=Temperature(target),
             )
@@ -98,6 +115,7 @@ def create_runtime(
         sensor_repository=sensors,
         zone_repository=zones,
         actuator=actuator,
+        clock=FixedClock(),
     )
 
 
@@ -116,6 +134,7 @@ def create_shared_zone_runtime(actuator: ActuatorPort) -> ControlRuntime:
         Zone(
             zone_id=ZoneId(value="living_room"),
             primary_sensor_id=SensorId(value="living_room_primary"),
+            primary_measurement_max_age=DEFAULT_MAX_AGE,
             name="Living room",
             target_temperature=Temperature(22),
         )
@@ -124,6 +143,7 @@ def create_shared_zone_runtime(actuator: ActuatorPort) -> ControlRuntime:
         sensor_repository=sensors,
         zone_repository=zones,
         actuator=actuator,
+        clock=FixedClock(),
     )
 
 
@@ -225,7 +245,7 @@ def test_secondary_does_not_regulate_when_primary_state_exists():
 def test_stale_measurement_produces_no_additional_decision_or_command():
     actuator = RecordingActuator()
     runtime = create_runtime(actuator)
-    current_timestamp = datetime.now(UTC)
+    current_timestamp = NOW
     current = create_measurement(19, current_timestamp)
     stale = create_measurement(18, current_timestamp - timedelta(seconds=1))
     published_measurements = []
@@ -243,12 +263,76 @@ def test_stale_measurement_produces_no_additional_decision_or_command():
     assert published_measurements == [current, stale]
 
 
+def test_cutoff_boundary_measurement_is_accepted_end_to_end():
+    actuator = RecordingActuator()
+    runtime = create_runtime(actuator)
+    measurement = create_measurement(19, NOW - DEFAULT_MAX_AGE)
+
+    result = runtime.process_temperature(measurement)
+
+    assert result is not None
+    assert result.decision.zone_id == ZoneId(value="living_room")
+    assert [command.action for command in actuator.commands] == ["enable_heating"]
+
+
+@pytest.mark.parametrize(
+    "timestamp",
+    [
+        NOW - DEFAULT_MAX_AGE - timedelta(microseconds=1),
+        NOW + timedelta(microseconds=1),
+    ],
+    ids=["expired", "future"],
+)
+def test_ineligible_primary_is_stored_and_observable_without_control_effects(timestamp):
+    actuator = RecordingActuator()
+    runtime = create_runtime(actuator)
+    measurement = create_measurement(19, timestamp)
+    published_measurements = []
+    published_decisions = []
+    runtime.event_bus.subscribe(TemperatureMeasuredEvent, published_measurements.append)
+    runtime.event_bus.subscribe(DecisionCreatedEvent, published_decisions.append)
+
+    result = runtime.process_temperature(measurement)
+
+    assert result is None
+    assert runtime.state_store.get_latest(measurement.sensor_id) is measurement
+    assert [event.measurement for event in published_measurements] == [measurement]
+    assert published_decisions == []
+    assert actuator.commands == []
+    assert runtime.control_state_repository.get(ZoneId(value="living_room")) is None
+
+
+def test_zones_apply_independent_primary_measurement_max_ages():
+    actuator = RecordingActuator()
+    runtime = create_runtime(
+        actuator,
+        {
+            "living_room_temperature": ("living_room", 22),
+            "bedroom_temperature": ("bedroom", 22),
+        },
+        {
+            "living_room": timedelta(minutes=5),
+            "bedroom": timedelta(minutes=1),
+        },
+    )
+    timestamp = NOW - timedelta(minutes=2)
+
+    living_room_result = runtime.process_temperature(create_measurement(19, timestamp, "living_room_temperature"))
+    bedroom_result = runtime.process_temperature(create_measurement(19, timestamp, "bedroom_temperature"))
+
+    assert living_room_result is not None
+    assert bedroom_result is None
+    assert [command.zone_id for command in actuator.commands] == [ZoneId(value="living_room")]
+    assert runtime.control_state_repository.get(ZoneId(value="bedroom")) is None
+
+
 def test_missing_configuration_stops_before_decision_or_command():
     actuator = RecordingActuator()
     runtime = ControlRuntime(
         sensor_repository=SensorRepository(),
         zone_repository=ZoneRepository(),
         actuator=actuator,
+        clock=FixedClock(),
     )
     published_decisions = []
     runtime.event_bus.subscribe(DecisionCreatedEvent, published_decisions.append)

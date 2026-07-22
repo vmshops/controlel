@@ -10,10 +10,13 @@ Each configured `Sensor` has exactly one `zone_id`. This field is the single
 source of the sensor-to-zone association. `Zone` does not duplicate the
 relationship with a sensor list.
 
-A configured `Zone` contains its `ZoneId`, required `primary_sensor_id`, name
-and typed `Temperature` target. The primary identifier selects the one sensor
-whose accepted measurements may initiate regulation for the zone; it does not
-replace or duplicate `Sensor.zone_id` as the sensor-to-zone association.
+A configured `Zone` contains its `ZoneId`, required `primary_sensor_id`,
+strictly positive `primary_measurement_max_age`, name and typed `Temperature`
+target. The maximum age is a required `timedelta` with no default and defines
+the inclusive freshness boundary for the primary observation. The primary
+identifier selects the one sensor whose accepted measurements may initiate
+regulation for the zone; it does not replace or duplicate `Sensor.zone_id` as
+the sensor-to-zone association.
 
 `Zone` contains no latest measured temperature and no applied heating state.
 Those concepts belong to runtime measurement state and control state,
@@ -21,6 +24,10 @@ respectively.
 
 Scheduling, disabled-state behavior and configuration mutation are outside the
 current domain contract.
+
+Freshness is evaluated by the application against an injected clock. It does
+not change `Measurement`, delete runtime observations, or add sensor health or
+fallback behavior to the domain model.
 
 ## Regulation identity
 

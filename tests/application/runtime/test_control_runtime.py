@@ -1,3 +1,4 @@
+from datetime import UTC, datetime, timedelta
 from inspect import signature
 
 from controlel.application.runtime.control_runtime import ControlRuntime
@@ -14,6 +15,13 @@ from controlel.domain.sensors.sensor import Sensor
 from controlel.domain.value_objects.sensor_id import SensorId
 from controlel.domain.value_objects.temperature import Temperature
 from controlel.domain.value_objects.zone_id import ZoneId
+
+NOW = datetime(2026, 1, 1, 12, tzinfo=UTC)
+
+
+class FixedClock:
+    def now(self) -> datetime:
+        return NOW
 
 
 class NoOpActuator(ActuatorPort):
@@ -38,6 +46,7 @@ def create_runtime(sensor_targets: dict[str, float]) -> ControlRuntime:
             Zone(
                 zone_id=zone_id,
                 primary_sensor_id=SensorId(value=sensor_id),
+                primary_measurement_max_age=timedelta(minutes=5),
                 name=f"{sensor_id} zone",
                 target_temperature=Temperature(target),
             )
@@ -47,6 +56,7 @@ def create_runtime(sensor_targets: dict[str, float]) -> ControlRuntime:
         sensor_repository=sensors,
         zone_repository=zones,
         actuator=NoOpActuator(),
+        clock=FixedClock(),
     )
 
 
@@ -54,6 +64,7 @@ def test_control_runtime_processes_temperature():
     measurement = Measurement(
         sensor_id=SensorId(value="living_room_temperature"),
         value=Temperature(19),
+        timestamp=NOW,
     )
     runtime = create_runtime({"living_room_temperature": 22})
 
@@ -68,10 +79,12 @@ def test_control_runtime_keeps_measurements_for_multiple_sensors():
     living_room = Measurement(
         sensor_id=SensorId(value="living_room_temperature"),
         value=Temperature(19),
+        timestamp=NOW,
     )
     bedroom = Measurement(
         sensor_id=SensorId(value="bedroom_temperature"),
         value=Temperature(20),
+        timestamp=NOW,
     )
     runtime = create_runtime(
         {
@@ -98,12 +111,14 @@ def test_equal_temperatures_in_different_zones_use_different_targets():
         Measurement(
             sensor_id=SensorId(value="living_room_temperature"),
             value=Temperature(20),
+            timestamp=NOW,
         )
     )
     bedroom_result = runtime.process_temperature(
         Measurement(
             sensor_id=SensorId(value="bedroom_temperature"),
             value=Temperature(20),
+            timestamp=NOW,
         )
     )
 
@@ -115,6 +130,7 @@ def test_temperature_observer_return_values_cannot_replace_decision_result():
     measurement = Measurement(
         sensor_id=SensorId(value="living_room_temperature"),
         value=Temperature(19),
+        timestamp=NOW,
     )
     runtime = create_runtime({"living_room_temperature": 22})
     notified = []
@@ -139,3 +155,9 @@ def test_temperature_observer_return_values_cannot_replace_decision_result():
 
 def test_control_runtime_no_longer_accepts_static_target_temperature():
     assert "target_temperature" not in signature(ControlRuntime).parameters
+
+
+def test_control_runtime_requires_explicit_clock():
+    parameter = signature(ControlRuntime).parameters["clock"]
+
+    assert parameter.default is parameter.empty

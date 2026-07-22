@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 import pytest
 
 from controlel.domain.entities.zone import Zone
@@ -14,6 +16,7 @@ def create_zone(zone_id: str, target: float = 22) -> Zone:
     return Zone(
         zone_id=ZoneId(value=zone_id),
         primary_sensor_id=SensorId(value=f"{zone_id}_temperature"),
+        primary_measurement_max_age=timedelta(minutes=5),
         name=zone_id,
         target_temperature=Temperature(target),
     )

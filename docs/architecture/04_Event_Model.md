@@ -14,12 +14,18 @@ functional results from depending on subscriber ordering.
 Temperature measurement processing occurs before `TemperatureMeasuredEvent`
 is published. Observers therefore cannot alter the event before runtime state
 and regulation have processed it. Rejected stale measurement events are still
-published and remain observable.
+published and remain observable. Accepted primary measurements that are
+expired or future-dated are likewise stored and published, but produce no
+control context, decision or command.
 
 Accepted measurements from secondary zone sensors are also published and
 remain observable after being stored, but they produce no `ControlContext`,
 decision event or command. A zone with no latest primary measurement likewise
 produces no decision.
+
+Elapsed-time expiry creates no expiration or health event. Evaluation occurs
+only when aggregation is invoked; there is no timer that publishes an event
+when a sensor silently stops reporting.
 
 Subscribers run synchronously and may delay runtime processing. Subscriber
 exceptions currently propagate unchanged.

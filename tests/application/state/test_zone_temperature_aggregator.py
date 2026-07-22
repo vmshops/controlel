@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -18,13 +18,25 @@ from controlel.domain.value_objects.zone_id import ZoneId
 
 PRIMARY_SENSOR_ID = SensorId(value="living_room_primary")
 ZONE_ID = ZoneId(value="living_room")
-TIMESTAMP = datetime(2026, 1, 1, 12, tzinfo=UTC)
+NOW = datetime(2026, 1, 1, 12, tzinfo=UTC)
+MAX_AGE = timedelta(minutes=5)
 
 
-def create_zone() -> Zone:
+class FixedClock:
+    def __init__(self, current_time: datetime):
+        self.current_time = current_time
+        self.calls = 0
+
+    def now(self) -> datetime:
+        self.calls += 1
+        return self.current_time
+
+
+def create_zone(maximum_age: timedelta = MAX_AGE) -> Zone:
     return Zone(
         zone_id=ZONE_ID,
         primary_sensor_id=PRIMARY_SENSOR_ID,
+        primary_measurement_max_age=maximum_age,
         name="Living room",
         target_temperature=Temperature(22),
     )
@@ -47,11 +59,26 @@ def add_sensor(
 def create_aggregator(
     state_store: RuntimeStateStore,
     sensors: SensorRepository,
+    clock: FixedClock | None = None,
 ) -> ZoneTemperatureAggregator:
     return ZoneTemperatureAggregator(
         state_store=state_store,
         sensor_repository=sensors,
+        clock=clock or FixedClock(NOW),
     )
+
+
+def record_primary(
+    state_store: RuntimeStateStore,
+    timestamp: datetime = NOW,
+) -> Measurement:
+    measurement = Measurement(
+        sensor_id=PRIMARY_SENSOR_ID,
+        value=Temperature(20),
+        timestamp=timestamp,
+    )
+    state_store.record(measurement)
+    return measurement
 
 
 def test_returns_none_when_primary_sensor_has_no_latest_measurement():
@@ -64,47 +91,89 @@ def test_returns_none_when_primary_sensor_has_no_latest_measurement():
     assert result is None
 
 
-def test_returns_exact_latest_primary_measurement_with_provenance_and_timestamp():
+@pytest.mark.parametrize(
+    "timestamp",
+    [NOW - timedelta(minutes=1), NOW - MAX_AGE, NOW],
+    ids=["fresh", "cutoff-boundary", "equal-to-now"],
+)
+def test_eligible_primary_returns_exact_stored_measurement(timestamp):
     state_store = RuntimeStateStore()
     sensors = SensorRepository()
     add_sensor(sensors, PRIMARY_SENSOR_ID)
-    measurement = Measurement(
-        sensor_id=PRIMARY_SENSOR_ID,
-        value=Temperature(20),
-        timestamp=TIMESTAMP,
-    )
-    state_store.record(measurement)
+    measurement = record_primary(state_store, timestamp)
 
     result = create_aggregator(state_store, sensors).get_effective(create_zone())
 
     assert result is measurement
-    assert result.sensor_id == PRIMARY_SENSOR_ID
-    assert result.timestamp == TIMESTAMP
 
 
-def test_secondary_measurement_does_not_become_effective():
+@pytest.mark.parametrize(
+    "timestamp",
+    [NOW - MAX_AGE - timedelta(microseconds=1), NOW + timedelta(microseconds=1)],
+    ids=["expired", "future"],
+)
+def test_ineligible_primary_remains_stored_and_store_is_not_mutated(timestamp):
+    state_store = RuntimeStateStore()
+    sensors = SensorRepository()
+    add_sensor(sensors, PRIMARY_SENSOR_ID)
+    measurement = record_primary(state_store, timestamp)
+    before = state_store.list_latest()
+
+    result = create_aggregator(state_store, sensors).get_effective(create_zone())
+
+    assert result is None
+    assert state_store.get_latest(PRIMARY_SENSOR_ID) is measurement
+    assert state_store.list_latest() == before
+
+
+def test_secondary_measurement_does_not_become_effective_or_affect_freshness():
     state_store = RuntimeStateStore()
     sensors = SensorRepository()
     secondary_sensor_id = SensorId(value="living_room_secondary")
     add_sensor(sensors, PRIMARY_SENSOR_ID)
     add_sensor(sensors, secondary_sensor_id)
-    primary = Measurement(
-        sensor_id=PRIMARY_SENSOR_ID,
-        value=Temperature(20),
-        timestamp=TIMESTAMP,
-    )
-    state_store.record(primary)
+    primary = record_primary(state_store, NOW - timedelta(minutes=1))
     state_store.record(
         Measurement(
             sensor_id=secondary_sensor_id,
             value=Temperature(30),
-            timestamp=TIMESTAMP,
+            timestamp=NOW + timedelta(days=1),
         )
     )
 
     result = create_aggregator(state_store, sensors).get_effective(create_zone())
 
     assert result is primary
+
+
+def test_clock_is_read_exactly_once_for_measurement_evaluation():
+    state_store = RuntimeStateStore()
+    sensors = SensorRepository()
+    add_sensor(sensors, PRIMARY_SENSOR_ID)
+    record_primary(state_store)
+    clock = FixedClock(NOW)
+
+    create_aggregator(state_store, sensors, clock).get_effective(create_zone())
+
+    assert clock.calls == 1
+
+
+def test_naive_clock_time_raises_clear_value_error():
+    state_store = RuntimeStateStore()
+    sensors = SensorRepository()
+    add_sensor(sensors, PRIMARY_SENSOR_ID)
+    record_primary(state_store)
+    aggregator = create_aggregator(
+        state_store,
+        sensors,
+        FixedClock(datetime(2026, 1, 1, 12)),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"Clock\.now\(\) must return a timezone-aware datetime",
+    ):
+        aggregator.get_effective(create_zone())
 
 
 def test_missing_primary_sensor_raises_explicit_error_with_typed_ids():
@@ -135,20 +204,3 @@ def test_primary_sensor_in_another_zone_raises_explicit_mismatch_error():
     assert raised.value.sensor_id == PRIMARY_SENSOR_ID
     assert raised.value.expected_zone_id == ZONE_ID
     assert raised.value.actual_zone_id == actual_zone_id
-
-
-def test_get_effective_does_not_mutate_runtime_state():
-    state_store = RuntimeStateStore()
-    sensors = SensorRepository()
-    add_sensor(sensors, PRIMARY_SENSOR_ID)
-    measurement = Measurement(
-        sensor_id=PRIMARY_SENSOR_ID,
-        value=Temperature(20),
-        timestamp=TIMESTAMP,
-    )
-    state_store.record(measurement)
-    before = state_store.list_latest()
-
-    create_aggregator(state_store, sensors).get_effective(create_zone())
-
-    assert state_store.list_latest() == before

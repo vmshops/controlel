@@ -26,10 +26,12 @@ measurement state.
 exactly one configured `Zone`. `Zone.target_temperature` is a typed
 `Temperature` and is the source used to prepare `ControlContext`.
 
-Every zone also requires `primary_sensor_id`. This selects its sole regulation
-input sensor but does not replace `Sensor.zone_id`, which remains the only
-sensor-to-zone association. The configured primary sensor must exist and must
-belong to that zone.
+Every zone also requires `primary_sensor_id` and a strictly positive
+`primary_measurement_max_age` `timedelta` with no default. The sensor identifier
+selects its sole regulation input sensor but does not replace `Sensor.zone_id`,
+which remains the only sensor-to-zone association. The configured primary
+sensor must exist and must belong to that zone. The maximum age defines the
+inclusive elapsed-time freshness boundary for the primary observation.
 
 `SensorId` is observation provenance, while `ZoneId` is the logical regulated
 subject. `ControlContext` and `Decision` carry both. `DecisionCreatedEvent`
@@ -61,10 +63,27 @@ zone's primary sensor. Secondary measurements remain stored and observable but
 do not initiate regulation. Missing primary state produces no decision, and
 there is no automatic fallback or synthetic zone measurement.
 
-Timestamp ordering remains per sensor. Arithmetic mean, weighted aggregation,
-cross-sensor timestamp comparison, elapsed-time freshness and configurable
-aggregation policies are future capabilities. Repeated accepted primary
-measurements may still produce repeated commands.
+The application injects a deterministic `Clock` into aggregation; `SystemClock`
+is the UTC infrastructure implementation. A primary measurement is eligible
+when `now - primary_measurement_max_age <= timestamp <= now`. The cutoff is
+inclusive, while future timestamps are strictly ineligible. A naive clock
+value violates the port contract.
+
+Timestamp ordering remains per sensor and is distinct from elapsed-time
+freshness. Expired and future observations remain stored and observable, and
+there is no deletion or cleanup. Missing primary state returns no effective
+measurement, while invalid primary configuration raises an explicit error.
+
+Freshness is evaluated only when aggregation is invoked. There is no timer,
+silent-sensor reaction, fail-safe command, fallback or health monitoring, and
+previously applied state remains unchanged when an observation is ineligible.
+A stored future-dated measurement can block later lower-timestamp inputs under
+the unchanged store ordering rule. Clock-skew tolerance and timestamp admission
+remain future work.
+
+Arithmetic mean, weighted aggregation, cross-sensor timestamp comparison and
+configurable aggregation policies remain outside the model. Repeated eligible
+primary measurements may still produce repeated decisions.
 
 Applied `ControlState` is stored separately per `ZoneId`. It contains only the
 latest successfully executed logical action, the successful command identity

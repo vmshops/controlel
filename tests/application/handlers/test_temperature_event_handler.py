@@ -69,6 +69,7 @@ def create_zone(target: float = 22) -> Zone:
     return Zone(
         zone_id=ZONE_ID,
         primary_sensor_id=PRIMARY_SENSOR_ID,
+        primary_measurement_max_age=timedelta(minutes=5),
         name="Living room",
         target_temperature=Temperature(target),
     )
@@ -173,6 +174,23 @@ def test_missing_primary_runtime_state_produces_no_decision():
 
     assert result is None
     assert state_store.get_latest(SECONDARY_SENSOR_ID) is secondary
+    assert control_loop.contexts == []
+
+
+@pytest.mark.parametrize("condition", ["expired", "future"])
+def test_ineligible_primary_measurement_remains_stored_without_context(condition):
+    state_store = RuntimeStateStore()
+    measurement = create_measurement()
+    handler, control_loop = create_handler(
+        state_store,
+        RecordingTargetResolver(create_zone()),
+        RecordingAggregator(None),
+    )
+
+    result = handler.handle(TemperatureMeasuredEvent(measurement=measurement))
+
+    assert result is None, condition
+    assert state_store.get_latest(PRIMARY_SENSOR_ID) is measurement
     assert control_loop.contexts == []
 
 

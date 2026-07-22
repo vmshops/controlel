@@ -11,6 +11,7 @@ from controlel.application.state.runtime_state_store import RuntimeStateStore
 from controlel.application.state.zone_temperature_aggregator import (
     ZoneTemperatureAggregator,
 )
+from controlel.application.time.clock import Clock
 from controlel.domain.actuators.actuator_port import ActuatorPort
 from controlel.domain.events.decision_event import DecisionCreatedEvent
 from controlel.domain.events.temperature_measured_event import (
@@ -33,6 +34,7 @@ class ControlRuntime:
         sensor_repository: SensorRepository,
         zone_repository: ZoneRepository,
         actuator: ActuatorPort,
+        clock: Clock,
     ):
         self.event_bus = EventBus()
         self.state_store = RuntimeStateStore()
@@ -49,6 +51,7 @@ class ControlRuntime:
         self.temperature_aggregator = ZoneTemperatureAggregator(
             state_store=self.state_store,
             sensor_repository=sensor_repository,
+            clock=clock,
         )
 
         self.temperature_handler = TemperatureEventHandler(

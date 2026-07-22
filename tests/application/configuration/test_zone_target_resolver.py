@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 import pytest
 
 from controlel.application.configuration.zone_target_resolver import (
@@ -23,6 +25,7 @@ def add_zone(
     zone = Zone(
         zone_id=ZoneId(value=zone_id),
         primary_sensor_id=SensorId(value=primary_sensor_id or f"{zone_id}_temperature"),
+        primary_measurement_max_age=timedelta(minutes=5),
         name=zone_id,
         target_temperature=Temperature(target),
     )

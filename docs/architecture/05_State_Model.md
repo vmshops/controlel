@@ -32,14 +32,44 @@ that this sensor is registered and belongs to the zone, then reads its exact
 latest `Measurement` from `RuntimeStateStore`. That observation is the sole
 current-temperature input for zone regulation.
 
+Each zone also requires a strictly positive
+`primary_measurement_max_age`. `ZoneTemperatureAggregator` reads the injected
+application `Clock` exactly once and accepts the primary observation when:
+
+```text
+now - primary_measurement_max_age <= measurement.timestamp <= now
+```
+
+The cutoff is inclusive. A timestamp older than the cutoff is expired; a
+timestamp later than `now` is future-dated and is strictly ineligible for
+regulation. `Clock.now()` must be timezone-aware. Production composition can
+provide the UTC `SystemClock` infrastructure adapter, while tests provide a
+deterministic clock.
+
 Secondary sensor measurements remain per-`SensorId` runtime observations but
 do not initiate regulation. There is no automatic fallback when primary state
 is missing, and invalid primary configuration raises an explicit application
 error. The store contains no synthetic zone measurement and is not mutated by
 effective-temperature selection.
 
-Staleness remains a same-sensor ordering rule. No timestamps are compared
-across sensors, and no elapsed-time freshness threshold exists.
+Out-of-order rejection and elapsed-time expiry are distinct. Ordering remains
+a same-sensor store rule; freshness is a per-zone eligibility rule evaluated
+only when aggregation runs. No timestamps are compared across sensors.
+
+Missing primary state returns no effective measurement. Expired and
+future-dated observations also return no effective measurement, but remain
+stored and observable; no deletion or cleanup occurs. Invalid primary
+configuration continues to raise its explicit missing-sensor or zone-mismatch
+exception.
+
+There is no background timer, polling, fallback sensor or health monitor. A
+sensor that silently stops reporting triggers no immediate action. Expiry does
+not create a fail-safe command, and previously applied control state remains
+unchanged.
+
+A future-dated observation can remain the latest per-sensor value and cause a
+later lower-timestamp observation to be rejected under the unchanged ordering
+contract. Timestamp admission and clock-skew tolerance are future policy work.
 
 ## Historical measurements
 
