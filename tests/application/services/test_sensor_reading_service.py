@@ -21,4 +21,4 @@ def test_sensor_reading_creates_temperature_event():
     event = service.read_temperature(sensor)
 
     assert event.measurement.value.value == 19
-    assert event.measurement.source == "living_room"
+    assert event.measurement.sensor_id == SensorId(value="living_room")

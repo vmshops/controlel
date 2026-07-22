@@ -8,7 +8,7 @@ from controlel.infrastructure.sensors.fake_temperature_sensor_provider import (
 def test_fake_temperature_sensor_provider_returns_measurement():
     sensor = Sensor(
         sensor_id=SensorId(value="living_room_sensor"),
-        name="living_room_sensor",
+        name="Living room temperature",
     )
 
     provider = FakeTemperatureSensorProvider(
@@ -18,4 +18,4 @@ def test_fake_temperature_sensor_provider_returns_measurement():
     measurement = provider.measure(sensor)
 
     assert measurement.value.value == 19
-    assert measurement.source == "living_room_sensor"
+    assert measurement.sensor_id == SensorId(value="living_room_sensor")

@@ -14,6 +14,6 @@ class FakeTemperatureSensorProvider(SensorProvider):
 
     def measure(self, sensor: Sensor) -> Measurement:
         return Measurement(
+            sensor_id=sensor.sensor_id,
             value=Temperature(self.temperature),
-            source=sensor.name,
         )
