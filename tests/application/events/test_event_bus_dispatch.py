@@ -7,12 +7,12 @@ from controlel.domain.value_objects.sensor_id import SensorId
 from controlel.domain.value_objects.temperature import Temperature
 
 
-def test_event_bus_dispatches_event():
-    called = False
+def test_typed_event_notifies_subscriber_and_discards_return_value():
+    received_events = []
 
     def handler(event):
-        nonlocal called
-        called = True
+        received_events.append(event)
+        return "observer result"
 
     bus = EventBus()
 
@@ -28,6 +28,7 @@ def test_event_bus_dispatches_event():
         )
     )
 
-    bus.publish(event)
+    result = bus.publish(event)
 
-    assert called is True
+    assert result is None
+    assert received_events == [event]

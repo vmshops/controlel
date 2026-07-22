@@ -35,11 +35,6 @@ class ControlRuntime:
             target_temperature=target_temperature,
         )
 
-        self.event_bus.subscribe(
-            TemperatureMeasuredEvent,
-            self.temperature_handler.handle,
-        )
-
     def process_temperature(
         self,
         measurement: Measurement,
@@ -48,7 +43,8 @@ class ControlRuntime:
             measurement=measurement,
         )
 
-        decision_event = self.event_bus.publish(event)
+        decision_event = self.temperature_handler.handle(event)
+        self.event_bus.publish(event)
 
         if decision_event is None:
             return None

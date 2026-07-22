@@ -1,5 +1,24 @@
 # Event Model
 
+## Notification contract
+
+`EventBus` is a synchronous observer-notification mechanism. It notifies every
+matching subscriber in registration order, discards subscriber return values
+and always returns `None`. Dictionary event keys and class-based event keys are
+both supported.
+
+Functional handlers are invoked explicitly by `ControlRuntime`; they are not
+also subscribed by the runtime. This avoids duplicate execution and prevents
+functional results from depending on subscriber ordering.
+
+Temperature measurement processing occurs before `TemperatureMeasuredEvent`
+is published. Observers therefore cannot alter the event before runtime state
+and regulation have processed it. Rejected stale measurement events are still
+published and remain observable.
+
+Subscribers run synchronously and may delay runtime processing. Subscriber
+exceptions currently propagate unchanged.
+
 ## Decision notifications
 
 Regulation produces a `Decision`, which describes what the regulation logic
@@ -7,8 +26,8 @@ decided and why. `ControlLoopService` wraps that result in a
 `DecisionCreatedEvent`.
 
 `ControlRuntime` publishes the event through `EventBus` so notification
-subscribers can observe decisions. Command orchestration does not depend on a
-subscriber return value: after publication, the runtime explicitly passes the
+subscribers can observe decisions. Decision events are notifications, not
+request/response calls. After publication, the runtime explicitly passes the
 event to `DecisionEventHandler`.
 
 The handler maps supported decision actions to an executable `Command`. A

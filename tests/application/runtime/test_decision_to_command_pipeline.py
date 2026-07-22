@@ -5,6 +5,9 @@ from controlel.domain.actuators.actuator_port import ActuatorPort
 from controlel.domain.commands.command import Command
 from controlel.domain.decisions.decision import Decision
 from controlel.domain.events.decision_event import DecisionCreatedEvent
+from controlel.domain.events.temperature_measured_event import (
+    TemperatureMeasuredEvent,
+)
 from controlel.domain.measurements.measurement import Measurement
 from controlel.domain.value_objects.sensor_id import SensorId
 from controlel.domain.value_objects.temperature import Temperature
@@ -71,6 +74,11 @@ def test_stale_measurement_produces_no_additional_decision_or_command():
     current_timestamp = datetime.now(UTC)
     current = create_measurement(19, current_timestamp)
     stale = create_measurement(18, current_timestamp - timedelta(seconds=1))
+    published_measurements = []
+    runtime.event_bus.subscribe(
+        TemperatureMeasuredEvent,
+        lambda event: published_measurements.append(event.measurement),
+    )
     runtime.process_temperature(current)
 
     stale_result = runtime.process_temperature(stale)
@@ -78,6 +86,7 @@ def test_stale_measurement_produces_no_additional_decision_or_command():
     assert stale_result is None
     assert len(actuator.commands) == 1
     assert runtime.state_store.get_latest(current.sensor_id) == current
+    assert published_measurements == [current, stale]
 
 
 def test_unsupported_decision_does_not_invoke_actuator():
@@ -102,6 +111,33 @@ def test_decision_created_event_is_published_and_returned():
 
     assert isinstance(result, DecisionCreatedEvent)
     assert published_events == [result]
+
+
+def test_temperature_handler_runs_before_observer_notification():
+    actuator = RecordingActuator()
+    runtime = create_runtime(actuator)
+    original = create_measurement(19)
+    conflicting = Measurement(
+        sensor_id=original.sensor_id,
+        value=Temperature(30),
+        timestamp=original.timestamp,
+    )
+    observed_stored_measurements = []
+
+    def conflicting_observer(event):
+        observed_stored_measurements.append(runtime.state_store.get_latest(event.measurement.sensor_id))
+        event.measurement = conflicting
+        return "conflicting observer result"
+
+    runtime.event_bus.subscribe(TemperatureMeasuredEvent, conflicting_observer)
+
+    result = runtime.process_temperature(original)
+
+    assert result is not None
+    assert result.decision.action == "enable_heating"
+    assert observed_stored_measurements == [original]
+    assert runtime.state_store.get_latest(original.sensor_id) == original
+    assert [command.action for command in actuator.commands] == ["enable_heating"]
 
 
 def test_repeated_accepted_measurements_produce_repeated_commands():

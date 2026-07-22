@@ -6,7 +6,7 @@ class EventBus:
         self._handlers.setdefault(event_type, [])
         self._handlers[event_type].append(handler)
 
-    def publish(self, event):
+    def publish(self, event) -> None:
         if isinstance(event, dict):
             event_type = event.get("event_type")
         else:
@@ -14,9 +14,5 @@ class EventBus:
 
         handlers = self._handlers.get(event_type, [])
 
-        result = None
-
         for handler in handlers:
-            result = handler(event)
-
-        return result
+            handler(event)
