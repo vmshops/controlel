@@ -11,6 +11,20 @@ observed temperature and a timezone-aware observation timestamp. Newer
 measurements replace older measurements. Equal timestamps are resolved by
 arrival order, while an older measurement is rejected.
 
+Before the store sees an incoming measurement, the application validates its
+timestamp against one mandatory runtime-wide `max_future_skew`. The value is a
+non-negative `timedelta` with no default; zero is allowed. The validator reads
+the injected `Clock` once and admits timestamps at or before the inclusive
+boundary:
+
+```text
+measurement.timestamp <= now + max_future_skew
+```
+
+A timestamp beyond that boundary is rejected without rewriting it or changing
+existing runtime state. The rejected input remains observable as a
+`TemperatureMeasuredEvent` but is not stored.
+
 The store is updated from measurement events before a `ControlContext` is
 prepared. This preserves the flow:
 
@@ -52,24 +66,30 @@ is missing, and invalid primary configuration raises an explicit application
 error. The store contains no synthetic zone measurement and is not mutated by
 effective-temperature selection.
 
-Out-of-order rejection and elapsed-time expiry are distinct. Ordering remains
-a same-sensor store rule; freshness is a per-zone eligibility rule evaluated
-only when aggregation runs. No timestamps are compared across sensors.
+Timestamp admission, out-of-order rejection and elapsed-time expiry are
+distinct. Admission protects the store from excessive future timestamps.
+Admitted measurements then enter the unchanged same-sensor ordering rule.
+Admitted old measurements may be stored and are handled later by freshness,
+which remains a per-zone eligibility rule evaluated only when aggregation
+runs. No timestamps are compared across sensors.
 
-Missing primary state returns no effective measurement. Expired and
-future-dated observations also return no effective measurement, but remain
-stored and observable; no deletion or cleanup occurs. Invalid primary
-configuration continues to raise its explicit missing-sensor or zone-mismatch
-exception.
+Missing primary state returns no effective measurement. Expired observations
+and admitted within-tolerance future observations also return no effective
+measurement, but remain stored and observable; no deletion or cleanup occurs.
+Invalid primary configuration continues to raise its explicit missing-sensor
+or zone-mismatch exception.
 
 There is no background timer, polling, fallback sensor or health monitor. A
 sensor that silently stops reporting triggers no immediate action. Expiry does
 not create a fail-safe command, and previously applied control state remains
 unchanged.
 
-A future-dated observation can remain the latest per-sensor value and cause a
-later lower-timestamp observation to be rejected under the unchanged ordering
-contract. Timestamp admission and clock-skew tolerance are future policy work.
+A positive skew tolerance deliberately permits a bounded future timestamp to
+become the latest per-sensor value and temporarily reject a later lower
+timestamp under the unchanged ordering contract. Zero tolerance provides the
+strongest poisoning protection but may reject legitimate clock differences.
+No timestamp rewriting, cleanup, fallback, health monitoring or fail-safe
+command exists.
 
 ## Historical measurements
 

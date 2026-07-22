@@ -57,6 +57,7 @@ def create_runtime(sensor_targets: dict[str, float]) -> ControlRuntime:
         zone_repository=zones,
         actuator=NoOpActuator(),
         clock=FixedClock(),
+        max_future_skew=timedelta(0),
     )
 
 
@@ -159,5 +160,11 @@ def test_control_runtime_no_longer_accepts_static_target_temperature():
 
 def test_control_runtime_requires_explicit_clock():
     parameter = signature(ControlRuntime).parameters["clock"]
+
+    assert parameter.default is parameter.empty
+
+
+def test_control_runtime_requires_explicit_max_future_skew():
+    parameter = signature(ControlRuntime).parameters["max_future_skew"]
 
     assert parameter.default is parameter.empty

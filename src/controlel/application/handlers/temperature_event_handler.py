@@ -2,6 +2,9 @@ from controlel.application.configuration.zone_target_resolver import (
     ZoneTargetResolver,
 )
 from controlel.application.services.control_loop_service import ControlLoopService
+from controlel.application.services.measurement_timestamp_validator import (
+    MeasurementTimestampValidator,
+)
 from controlel.application.state.runtime_state_store import RuntimeStateStore
 from controlel.application.state.zone_temperature_aggregator import (
     ZoneTemperatureAggregator,
@@ -20,13 +23,18 @@ class TemperatureEventHandler:
         state_store: RuntimeStateStore,
         target_resolver: ZoneTargetResolver,
         temperature_aggregator: ZoneTemperatureAggregator,
+        timestamp_validator: MeasurementTimestampValidator,
     ):
         self.state_store = state_store
         self.target_resolver = target_resolver
         self.temperature_aggregator = temperature_aggregator
+        self.timestamp_validator = timestamp_validator
         self.control_loop = ControlLoopService()
 
     def handle(self, event: TemperatureMeasuredEvent):
+        if not self.timestamp_validator.is_admissible(event.measurement):
+            return None
+
         if not self.state_store.record(event.measurement):
             return None
 

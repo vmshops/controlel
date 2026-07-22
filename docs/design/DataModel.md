@@ -55,6 +55,13 @@ The application maintains one latest `Measurement` per stable `SensorId` in an
 in-memory `RuntimeStateStore`. Measurements contain only the sensor identity,
 observed temperature and timezone-aware observation timestamp.
 
+Timestamp admission runs before storage using the injected application
+`Clock` and mandatory runtime-wide `max_future_skew`. This tolerance is a
+non-negative `timedelta` with no default; zero is allowed. The future boundary
+is inclusive. A measurement beyond `now + max_future_skew` remains observable
+but is not stored, its timestamp is never rewritten, and existing runtime
+state remains unchanged.
+
 Runtime measurement state is used to prepare `ControlContext`. It is separate
 from control state, which describes regulation or actuator condition.
 
@@ -69,17 +76,27 @@ when `now - primary_measurement_max_age <= timestamp <= now`. The cutoff is
 inclusive, while future timestamps are strictly ineligible. A naive clock
 value violates the port contract.
 
-Timestamp ordering remains per sensor and is distinct from elapsed-time
-freshness. Expired and future observations remain stored and observable, and
-there is no deletion or cleanup. Missing primary state returns no effective
-measurement, while invalid primary configuration raises an explicit error.
+Admitted measurements continue through per-sensor ordering, which remains
+distinct from elapsed-time freshness. Admitted old observations may be stored
+and later rejected as expired. Admitted within-tolerance future observations
+may be stored and observable while remaining temporarily ineligible for
+regulation. There is no deletion or cleanup. Missing primary state returns no
+effective measurement, while invalid primary configuration raises an explicit
+error.
 
 Freshness is evaluated only when aggregation is invoked. There is no timer,
 silent-sensor reaction, fail-safe command, fallback or health monitoring, and
 previously applied state remains unchanged when an observation is ineligible.
-A stored future-dated measurement can block later lower-timestamp inputs under
-the unchanged store ordering rule. Clock-skew tolerance and timestamp admission
-remain future work.
+A positive skew tolerance deliberately creates a bounded window in which an
+admitted future measurement can block later lower-timestamp inputs under the
+unchanged store ordering rule. Zero tolerance provides the strongest poisoning
+protection but may reject legitimate source-clock differences.
+
+Admission rejection, same-sensor ordering rejection, freshness rejection,
+missing primary state and configuration failure remain separate outcomes.
+There is no rejection event, fallback, health monitoring or fail-safe command,
+and observers cannot currently identify the exact no-decision reason from
+`TemperatureMeasuredEvent` fields alone.
 
 Arithmetic mean, weighted aggregation, cross-sensor timestamp comparison and
 configurable aggregation policies remain outside the model. Repeated eligible

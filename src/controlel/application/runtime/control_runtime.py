@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from controlel.application.configuration.zone_target_resolver import (
     ZoneTargetResolver,
 )
@@ -7,6 +9,9 @@ from controlel.application.handlers.temperature_event_handler import (
     TemperatureEventHandler,
 )
 from controlel.application.services.command_dispatcher import CommandDispatcher
+from controlel.application.services.measurement_timestamp_validator import (
+    MeasurementTimestampValidator,
+)
 from controlel.application.state.runtime_state_store import RuntimeStateStore
 from controlel.application.state.zone_temperature_aggregator import (
     ZoneTemperatureAggregator,
@@ -35,6 +40,7 @@ class ControlRuntime:
         zone_repository: ZoneRepository,
         actuator: ActuatorPort,
         clock: Clock,
+        max_future_skew: timedelta,
     ):
         self.event_bus = EventBus()
         self.state_store = RuntimeStateStore()
@@ -53,11 +59,16 @@ class ControlRuntime:
             sensor_repository=sensor_repository,
             clock=clock,
         )
+        self.timestamp_validator = MeasurementTimestampValidator(
+            clock=clock,
+            max_future_skew=max_future_skew,
+        )
 
         self.temperature_handler = TemperatureEventHandler(
             state_store=self.state_store,
             target_resolver=self.target_resolver,
             temperature_aggregator=self.temperature_aggregator,
+            timestamp_validator=self.timestamp_validator,
         )
 
     def process_temperature(

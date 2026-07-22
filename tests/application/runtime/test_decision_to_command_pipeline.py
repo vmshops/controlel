@@ -83,6 +83,7 @@ def create_runtime(
     actuator: ActuatorPort,
     configurations: dict[str, tuple[str, float]] | None = None,
     maximum_ages: dict[str, timedelta] | None = None,
+    max_future_skew: timedelta = timedelta(0),
 ) -> ControlRuntime:
     configurations = configurations or {
         "living_room_temperature": ("living_room", 22),
@@ -116,6 +117,7 @@ def create_runtime(
         zone_repository=zones,
         actuator=actuator,
         clock=FixedClock(),
+        max_future_skew=max_future_skew,
     )
 
 
@@ -144,6 +146,7 @@ def create_shared_zone_runtime(actuator: ActuatorPort) -> ControlRuntime:
         zone_repository=zones,
         actuator=actuator,
         clock=FixedClock(),
+        max_future_skew=timedelta(0),
     )
 
 
@@ -275,18 +278,13 @@ def test_cutoff_boundary_measurement_is_accepted_end_to_end():
     assert [command.action for command in actuator.commands] == ["enable_heating"]
 
 
-@pytest.mark.parametrize(
-    "timestamp",
-    [
-        NOW - DEFAULT_MAX_AGE - timedelta(microseconds=1),
-        NOW + timedelta(microseconds=1),
-    ],
-    ids=["expired", "future"],
-)
-def test_ineligible_primary_is_stored_and_observable_without_control_effects(timestamp):
+def test_expired_primary_is_admitted_stored_and_observable_without_control_effects():
     actuator = RecordingActuator()
     runtime = create_runtime(actuator)
-    measurement = create_measurement(19, timestamp)
+    measurement = create_measurement(
+        19,
+        NOW - DEFAULT_MAX_AGE - timedelta(microseconds=1),
+    )
     published_measurements = []
     published_decisions = []
     runtime.event_bus.subscribe(TemperatureMeasuredEvent, published_measurements.append)
@@ -300,6 +298,80 @@ def test_ineligible_primary_is_stored_and_observable_without_control_effects(tim
     assert published_decisions == []
     assert actuator.commands == []
     assert runtime.control_state_repository.get(ZoneId(value="living_room")) is None
+
+
+def test_beyond_future_boundary_is_observable_but_has_no_state_or_control_effects():
+    actuator = RecordingActuator()
+    runtime = create_runtime(actuator, max_future_skew=timedelta(minutes=1))
+    measurement = create_measurement(
+        19,
+        NOW + timedelta(minutes=1, microseconds=1),
+    )
+    published_measurements = []
+    published_decisions = []
+    runtime.event_bus.subscribe(TemperatureMeasuredEvent, published_measurements.append)
+    runtime.event_bus.subscribe(DecisionCreatedEvent, published_decisions.append)
+
+    result = runtime.process_temperature(measurement)
+
+    assert result is None
+    assert runtime.state_store.get_latest(measurement.sensor_id) is None
+    assert [event.measurement for event in published_measurements] == [measurement]
+    assert published_decisions == []
+    assert actuator.commands == []
+    assert runtime.control_state_repository.get(ZoneId(value="living_room")) is None
+
+
+@pytest.mark.parametrize(
+    "timestamp",
+    [NOW + timedelta(seconds=30), NOW + timedelta(minutes=1)],
+    ids=["within-tolerance", "exact-boundary"],
+)
+def test_admitted_future_is_stored_and_observable_but_temporarily_ineligible(timestamp):
+    actuator = RecordingActuator()
+    runtime = create_runtime(actuator, max_future_skew=timedelta(minutes=1))
+    measurement = create_measurement(19, timestamp)
+    published_measurements = []
+    runtime.event_bus.subscribe(TemperatureMeasuredEvent, published_measurements.append)
+
+    result = runtime.process_temperature(measurement)
+
+    assert result is None
+    assert runtime.state_store.get_latest(measurement.sensor_id) is measurement
+    assert [event.measurement for event in published_measurements] == [measurement]
+    assert actuator.commands == []
+    assert runtime.control_state_repository.get(ZoneId(value="living_room")) is None
+
+
+def test_valid_input_processes_normally_after_rejected_poisoning_attempt():
+    actuator = RecordingActuator()
+    runtime = create_runtime(actuator, max_future_skew=timedelta(0))
+    rejected = create_measurement(30, NOW + timedelta(microseconds=1))
+    valid = create_measurement(19, NOW)
+
+    rejected_result = runtime.process_temperature(rejected)
+    valid_result = runtime.process_temperature(valid)
+
+    assert rejected_result is None
+    assert valid_result is not None
+    assert runtime.state_store.get_latest(valid.sensor_id) is valid
+    assert [command.action for command in actuator.commands] == ["enable_heating"]
+
+
+def test_existing_state_remains_unchanged_after_rejected_poisoning_attempt():
+    actuator = RecordingActuator()
+    runtime = create_runtime(actuator, max_future_skew=timedelta(0))
+    valid = create_measurement(19, NOW)
+    runtime.process_temperature(valid)
+    applied_state = runtime.control_state_repository.get(ZoneId(value="living_room"))
+    rejected = create_measurement(30, NOW + timedelta(microseconds=1))
+
+    result = runtime.process_temperature(rejected)
+
+    assert result is None
+    assert runtime.state_store.get_latest(valid.sensor_id) is valid
+    assert runtime.control_state_repository.get(ZoneId(value="living_room")) is applied_state
+    assert len(actuator.commands) == 1
 
 
 def test_zones_apply_independent_primary_measurement_max_ages():
@@ -333,6 +405,7 @@ def test_missing_configuration_stops_before_decision_or_command():
         zone_repository=ZoneRepository(),
         actuator=actuator,
         clock=FixedClock(),
+        max_future_skew=timedelta(0),
     )
     published_decisions = []
     runtime.event_bus.subscribe(DecisionCreatedEvent, published_decisions.append)

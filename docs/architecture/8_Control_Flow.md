@@ -5,6 +5,7 @@ The synchronous in-memory runtime flow is:
 ```text
 Measurement
 -> TemperatureMeasuredEvent
+-> MeasurementTimestampValidator(clock, max_future_skew)
 -> RuntimeStateStore
 -> SensorRepository
 -> Sensor.zone_id
@@ -29,6 +30,15 @@ Measurement
 temperature event through `TemperatureEventHandler` before publishing that
 event to observers. A stale measurement produces no decision or command, but
 its temperature event is still published.
+
+`TemperatureEventHandler` first applies timestamp admission using the injected
+`Clock` and mandatory runtime-wide `max_future_skew`. The non-negative
+`timedelta` has no default; zero is valid. A timestamp equal to
+`now + max_future_skew` is admitted, while one beyond that inclusive boundary
+returns immediately without storage, configuration resolution, aggregation or
+regulation. The runtime still publishes its `TemperatureMeasuredEvent`; no
+rejection event is introduced, and observers cannot identify the exact
+no-decision reason from the event alone.
 
 For an accepted measurement, `TemperatureEventHandler` resolves the target
 from explicit zone configuration using the measurement's typed `SensorId`.
@@ -57,13 +67,20 @@ requires a `Clock` explicitly and does not construct one. This keeps freshness
 tests deterministic and prevents direct wall-clock access in application
 aggregation and handling.
 
-Same-sensor out-of-order rejection remains separate and happens before
-configuration and freshness evaluation. No cross-sensor timestamps are
-compared. A stored future observation may therefore block later
-lower-timestamp inputs under the unchanged state-store ordering contract.
+Admitted measurements continue to same-sensor ordering before configuration
+and freshness evaluation. An admitted old measurement may be stored and then
+rejected by elapsed-time freshness. An admitted within-tolerance future
+measurement may also be stored while remaining temporarily ineligible for
+regulation. No cross-sensor timestamps are compared.
 
-There is no fallback sensor, arithmetic or weighted aggregation, clock-skew
-tolerance, timestamp-admission policy, cleanup, timer or health monitor.
+A positive tolerance therefore creates a deliberate bounded poisoning window:
+an admitted future observation can temporarily block later lower-timestamp
+inputs under the unchanged ordering contract. Zero tolerance provides the
+strongest protection but may reject legitimate clock differences. A rejected
+beyond-boundary input never changes existing runtime or applied control state.
+
+There is no fallback sensor, arithmetic or weighted aggregation, timestamp
+rewriting, cleanup, timer or health monitor.
 Freshness is checked only when aggregation is invoked; a sensor that silently
 stops reporting causes no timed reaction. Expiry emits no fail-safe command and
 does not change previously applied control state.
