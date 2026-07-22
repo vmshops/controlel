@@ -46,6 +46,11 @@ that this sensor is registered and belongs to the zone, then reads its exact
 latest `Measurement` from `RuntimeStateStore`. That observation is the sole
 current-temperature input for zone regulation.
 
+`ZoneTemperatureAggregator` returns an immutable `ZoneTemperatureResult`
+instead of an ambiguous optional measurement. Its stable statuses are
+`effective`, `missing`, `expired` and `future_dated`. Only `effective` contains
+the exact stored `Measurement`; all other statuses contain no measurement.
+
 Each zone also requires a strictly positive
 `primary_measurement_max_age`. `ZoneTemperatureAggregator` reads the injected
 application `Clock` exactly once and accepts the primary observation when:
@@ -78,6 +83,11 @@ and admitted within-tolerance future observations also return no effective
 measurement, but remain stored and observable; no deletion or cleanup occurs.
 Invalid primary configuration continues to raise its explicit missing-sensor
 or zone-mismatch exception.
+
+`TemperatureEventHandler` maps these state outcomes into an immutable
+`TemperatureHandlingResult`, which contains exactly one of a typed no-decision
+reason or the exact `DecisionCreatedEvent`. The handler does not create or
+dispatch commands.
 
 There is no background timer, polling, fallback sensor or health monitor. A
 sensor that silently stops reporting triggers no immediate action. Expiry does

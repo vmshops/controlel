@@ -65,6 +65,12 @@ state remains unchanged.
 Runtime measurement state is used to prepare `ControlContext`. It is separate
 from control state, which describes regulation or actuator condition.
 
+Effective-temperature selection returns an immutable `ZoneTemperatureResult`
+with one stable status: `effective`, `missing`, `expired` or `future_dated`.
+Only `effective` references the exact stored measurement. The handler then
+returns an immutable `TemperatureHandlingResult` containing exactly one typed
+no-decision reason or the exact `DecisionCreatedEvent`.
+
 For regulation, the application selects the exact latest measurement of the
 zone's primary sensor. Secondary measurements remain stored and observable but
 do not initiate regulation. Missing primary state produces no decision, and
@@ -97,6 +103,21 @@ missing primary state and configuration failure remain separate outcomes.
 There is no rejection event, fallback, health monitoring or fail-safe command,
 and observers cannot currently identify the exact no-decision reason from
 `TemperatureMeasuredEvent` fields alone.
+
+For every normally completed call, `ControlRuntime` returns an immutable
+`RuntimeProcessingResult`. `RuntimeProcessingStatus` has stable codes for
+`no_decision`, `decision_without_command`, `command_executed` and
+`command_suppressed`. `TemperatureNoDecisionReason` provides stable codes for
+admission rejection, out-of-order input, secondary input, missing primary
+state, expired primary state and future-dated primary state.
+
+Results reference existing `DecisionCreatedEvent` and `Command` objects rather
+than duplicating decision, command, measurement or identifier fields. Expected
+no-action outcomes are typed results. Configuration, clock, observer, actuator,
+validation and unexpected failures remain exceptions and return no result.
+Events remain notification-only, so event-only observers do not receive the
+synchronous result. No logging, persistence, correlation identifiers or
+diagnostic events are part of the model.
 
 Arithmetic mean, weighted aggregation, cross-sensor timestamp comparison and
 configurable aggregation policies remain outside the model. Repeated eligible

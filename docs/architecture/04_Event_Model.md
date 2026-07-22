@@ -35,6 +35,30 @@ when a sensor silently stops reporting.
 Subscribers run synchronously and may delay runtime processing. Subscriber
 exceptions currently propagate unchanged.
 
+## Synchronous processing outcome
+
+Events remain notification-only and unchanged. Independently of publication,
+`ControlRuntime.process_temperature()` returns an immutable
+`RuntimeProcessingResult` for every normally completed invocation. Its stable
+`RuntimeProcessingStatus` codes distinguish `no_decision`,
+`decision_without_command`, `command_executed` and `command_suppressed`.
+
+A `no_decision` result includes one stable `TemperatureNoDecisionReason` code:
+`timestamp_admission_rejected`, `out_of_order`, `secondary_measurement`,
+`primary_measurement_missing`, `primary_measurement_expired` or
+`primary_measurement_future_dated`. Expected no-action paths are results, not
+exceptions.
+
+The result references the existing `DecisionCreatedEvent` and `Command` when
+present; it does not copy their fields. Result objects exist only when
+processing completes normally. Configuration, clock, observer, actuator,
+validation and unexpected failures remain exceptions, so no misleading result
+is returned when they interrupt processing.
+
+Event-only observers do not receive the synchronous runtime result. No
+diagnostic events, logging, persistence or correlation identifiers are
+introduced.
+
 ## Decision notifications
 
 Regulation produces a `Decision`, which describes what the regulation logic
@@ -53,7 +77,8 @@ observation provenance and `ZoneId` regulated-subject identity.
 Decision notification remains independent of command execution. A decision
 event is still published when its mapped command is later suppressed because
 the same zone action is already applied, and it is published before an
-actuator execution that may fail.
+actuator execution that may fail. The caller receives `command_suppressed` or
+`command_executed` only after dispatch completes normally.
 
 The handler maps supported decision actions to an executable `Command`. A
 decision may produce no command. Unsupported or non-actionable actions return

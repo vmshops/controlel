@@ -2,6 +2,9 @@ from datetime import UTC, datetime, timedelta
 from inspect import signature
 
 from controlel.application.runtime.control_runtime import ControlRuntime
+from controlel.application.runtime.runtime_processing_result import (
+    RuntimeProcessingStatus,
+)
 from controlel.domain.actuators.actuator_port import ActuatorPort
 from controlel.domain.commands.command import Command
 from controlel.domain.entities.zone import Zone
@@ -71,9 +74,12 @@ def test_control_runtime_processes_temperature():
 
     result = runtime.process_temperature(measurement)
 
-    assert result.decision.action == "enable_heating"
+    assert result.status is RuntimeProcessingStatus.COMMAND_EXECUTED
+    assert result.decision_event.decision.action == "enable_heating"
     assert runtime.state_store.get_latest(measurement.sensor_id) == measurement
-    assert runtime.control_state_repository.get(result.decision.zone_id).applied_action == "enable_heating"
+    assert (
+        runtime.control_state_repository.get(result.decision_event.decision.zone_id).applied_action == "enable_heating"
+    )
 
 
 def test_control_runtime_keeps_measurements_for_multiple_sensors():
@@ -123,8 +129,8 @@ def test_equal_temperatures_in_different_zones_use_different_targets():
         )
     )
 
-    assert living_room_result.decision.action == "enable_heating"
-    assert bedroom_result.decision.action == "disable_heating"
+    assert living_room_result.decision_event.decision.action == "enable_heating"
+    assert bedroom_result.decision_event.decision.action == "disable_heating"
 
 
 def test_temperature_observer_return_values_cannot_replace_decision_result():
@@ -149,8 +155,8 @@ def test_temperature_observer_return_values_cannot_replace_decision_result():
 
     result = runtime.process_temperature(measurement)
 
-    assert result is not None
-    assert result.decision.action == "enable_heating"
+    assert result.status is RuntimeProcessingStatus.COMMAND_EXECUTED
+    assert result.decision_event.decision.action == "enable_heating"
     assert notified == ["first", "second"]
 
 

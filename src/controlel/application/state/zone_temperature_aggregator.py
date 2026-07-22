@@ -1,3 +1,6 @@
+from dataclasses import dataclass
+from enum import StrEnum
+
 from controlel.application.state.runtime_state_store import RuntimeStateStore
 from controlel.application.time.clock import Clock
 from controlel.domain.entities.zone import Zone
@@ -5,6 +8,31 @@ from controlel.domain.measurements.measurement import Measurement
 from controlel.domain.repositories.sensor_repository import SensorRepository
 from controlel.domain.value_objects.sensor_id import SensorId
 from controlel.domain.value_objects.zone_id import ZoneId
+
+
+class ZoneTemperatureStatus(StrEnum):
+    EFFECTIVE = "effective"
+    MISSING = "missing"
+    EXPIRED = "expired"
+    FUTURE_DATED = "future_dated"
+
+
+@dataclass(frozen=True)
+class ZoneTemperatureResult:
+    status: ZoneTemperatureStatus
+    measurement: Measurement | None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.status, ZoneTemperatureStatus):
+            raise TypeError("status must be a ZoneTemperatureStatus")
+        if self.measurement is not None and not isinstance(self.measurement, Measurement):
+            raise TypeError("measurement must be a Measurement or None")
+        if self.status is ZoneTemperatureStatus.EFFECTIVE:
+            if self.measurement is None:
+                raise ValueError("EFFECTIVE requires a measurement")
+            return
+        if self.measurement is not None:
+            raise ValueError(f"{self.status.name} requires measurement to be None")
 
 
 class PrimarySensorConfigurationNotFoundError(LookupError):
@@ -45,7 +73,7 @@ class ZoneTemperatureAggregator:
         self.sensor_repository = sensor_repository
         self.clock = clock
 
-    def get_effective(self, zone: Zone) -> Measurement | None:
+    def get_effective(self, zone: Zone) -> ZoneTemperatureResult:
         try:
             primary_sensor = self.sensor_repository.get(zone.primary_sensor_id)
         except KeyError as error:
@@ -63,14 +91,28 @@ class ZoneTemperatureAggregator:
 
         measurement = self.state_store.get_latest(zone.primary_sensor_id)
         if measurement is None:
-            return None
+            return ZoneTemperatureResult(
+                status=ZoneTemperatureStatus.MISSING,
+                measurement=None,
+            )
 
         now = self.clock.now()
         if now.tzinfo is None or now.utcoffset() is None:
             raise ValueError("Clock.now() must return a timezone-aware datetime")
 
         cutoff = now - zone.primary_measurement_max_age
-        if cutoff <= measurement.timestamp <= now:
-            return measurement
+        if measurement.timestamp < cutoff:
+            return ZoneTemperatureResult(
+                status=ZoneTemperatureStatus.EXPIRED,
+                measurement=None,
+            )
+        if measurement.timestamp > now:
+            return ZoneTemperatureResult(
+                status=ZoneTemperatureStatus.FUTURE_DATED,
+                measurement=None,
+            )
 
-        return None
+        return ZoneTemperatureResult(
+            status=ZoneTemperatureStatus.EFFECTIVE,
+            measurement=measurement,
+        )

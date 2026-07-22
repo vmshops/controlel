@@ -13,7 +13,7 @@ Measurement
 -> Zone(zone_id, primary_sensor_id, primary_measurement_max_age, target_temperature)
 -> ZoneTemperatureAggregator
 -> Clock.now()
--> latest primary Measurement | None
+-> ZoneTemperatureResult(effective | missing | expired | future_dated)
 -> ControlContext(sensor_id, zone_id)
 -> Regulation
 -> Decision(sensor_id, zone_id)
@@ -24,6 +24,7 @@ Measurement
 -> StateRepository lookup by ZoneId
 -> suppress identical applied action | ActuatorPort
 -> StateRepository update after success
+-> RuntimeProcessingResult
 ```
 
 `ControlRuntime` explicitly invokes each functional handler. It processes a
@@ -39,6 +40,13 @@ returns immediately without storage, configuration resolution, aggregation or
 regulation. The runtime still publishes its `TemperatureMeasuredEvent`; no
 rejection event is introduced, and observers cannot identify the exact
 no-decision reason from the event alone.
+
+Every normal handler exit is an immutable `TemperatureHandlingResult`. It
+contains either the exact `DecisionCreatedEvent` or one stable
+`TemperatureNoDecisionReason`: admission rejection, out-of-order input,
+secondary measurement, missing primary state, expired primary state or
+future-dated primary state. The existing processing order determines the first
+terminating reason; configuration failures remain exceptions.
 
 For an accepted measurement, `TemperatureEventHandler` resolves the target
 from explicit zone configuration using the measurement's typed `SensorId`.
@@ -94,6 +102,13 @@ change the functional result.
 handler explicitly maps `enable_heating` and `disable_heating` to commands in
 the `heating` command family. Other actions produce no command.
 
+`ControlRuntime.process_temperature()` returns an immutable
+`RuntimeProcessingResult` for normally completed processing. Its stable status
+is `no_decision`, `decision_without_command`, `command_executed` or
+`command_suppressed`. No-decision results carry the exact handler reason.
+Decision and command outcomes reference the existing event and command objects
+without duplicating their data.
+
 `SensorId` is carried from the measurement through `ControlContext` into the
 decision as observation provenance. The configured `ZoneId` is carried through
 the same models as the logical regulated subject. `DecisionCreatedEvent`
@@ -117,8 +132,15 @@ return. Execution exceptions propagate unchanged and preserve the previous
 state, so a later measurement may retry the action.
 
 Suppression does not remove the regulation result: repeated accepted primary
-measurements may still produce and publish decisions, create commands and
-return `DecisionCreatedEvent`. Only redundant actuator execution is skipped.
+measurements may still produce and publish decisions and create commands. The
+runtime result reports `command_suppressed`; only redundant actuator execution
+is skipped.
+
+Events remain notification-only. Event-only observers do not receive the
+returned runtime result. Configuration, clock, observer, actuator, validation
+and unexpected failures propagate as exceptions and produce no result object.
+No logging, persistence, correlation identifiers or diagnostic events are
+introduced.
 
 The current flow has no command routing, retry policy, persistence, physical
 feedback or concurrency protection. A normal adapter return records logical

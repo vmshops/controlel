@@ -8,6 +8,10 @@ from controlel.application.handlers.decision_event_handler import DecisionEventH
 from controlel.application.handlers.temperature_event_handler import (
     TemperatureEventHandler,
 )
+from controlel.application.runtime.runtime_processing_result import (
+    RuntimeProcessingResult,
+    RuntimeProcessingStatus,
+)
 from controlel.application.services.command_dispatcher import CommandDispatcher
 from controlel.application.services.measurement_timestamp_validator import (
     MeasurementTimestampValidator,
@@ -18,7 +22,6 @@ from controlel.application.state.zone_temperature_aggregator import (
 )
 from controlel.application.time.clock import Clock
 from controlel.domain.actuators.actuator_port import ActuatorPort
-from controlel.domain.events.decision_event import DecisionCreatedEvent
 from controlel.domain.events.temperature_measured_event import (
     TemperatureMeasuredEvent,
 )
@@ -74,21 +77,38 @@ class ControlRuntime:
     def process_temperature(
         self,
         measurement: Measurement,
-    ) -> DecisionCreatedEvent | None:
+    ) -> RuntimeProcessingResult:
         event = TemperatureMeasuredEvent(
             measurement=measurement,
         )
 
-        decision_event = self.temperature_handler.handle(event)
+        handling_result = self.temperature_handler.handle(event)
         self.event_bus.publish(event)
 
+        if handling_result.reason is not None:
+            return RuntimeProcessingResult(
+                status=RuntimeProcessingStatus.NO_DECISION,
+                reason=handling_result.reason,
+            )
+
+        decision_event = handling_result.decision_event
         if decision_event is None:
-            return None
+            raise RuntimeError("Decision handling result must contain a decision event")
 
         self.event_bus.publish(decision_event)
 
         command = self.decision_handler.handle(decision_event)
-        if command is not None:
-            self.command_dispatcher.dispatch(command)
+        if command is None:
+            return RuntimeProcessingResult(
+                status=RuntimeProcessingStatus.DECISION_WITHOUT_COMMAND,
+                decision_event=decision_event,
+            )
 
-        return decision_event
+        executed = self.command_dispatcher.dispatch(command)
+        return RuntimeProcessingResult(
+            status=(
+                RuntimeProcessingStatus.COMMAND_EXECUTED if executed else RuntimeProcessingStatus.COMMAND_SUPPRESSED
+            ),
+            decision_event=decision_event,
+            command=command,
+        )

@@ -1,3 +1,4 @@
+from dataclasses import FrozenInstanceError
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -7,6 +8,8 @@ from controlel.application.state.zone_temperature_aggregator import (
     PrimarySensorConfigurationNotFoundError,
     PrimarySensorZoneMismatchError,
     ZoneTemperatureAggregator,
+    ZoneTemperatureResult,
+    ZoneTemperatureStatus,
 )
 from controlel.domain.entities.zone import Zone
 from controlel.domain.measurements.measurement import Measurement
@@ -88,7 +91,8 @@ def test_returns_none_when_primary_sensor_has_no_latest_measurement():
 
     result = create_aggregator(state_store, sensors).get_effective(create_zone())
 
-    assert result is None
+    assert result.status is ZoneTemperatureStatus.MISSING
+    assert result.measurement is None
 
 
 @pytest.mark.parametrize(
@@ -104,15 +108,25 @@ def test_eligible_primary_returns_exact_stored_measurement(timestamp):
 
     result = create_aggregator(state_store, sensors).get_effective(create_zone())
 
-    assert result is measurement
+    assert result.status is ZoneTemperatureStatus.EFFECTIVE
+    assert result.measurement is measurement
 
 
 @pytest.mark.parametrize(
-    "timestamp",
-    [NOW - MAX_AGE - timedelta(microseconds=1), NOW + timedelta(microseconds=1)],
+    ("timestamp", "expected_status"),
+    [
+        (
+            NOW - MAX_AGE - timedelta(microseconds=1),
+            ZoneTemperatureStatus.EXPIRED,
+        ),
+        (NOW + timedelta(microseconds=1), ZoneTemperatureStatus.FUTURE_DATED),
+    ],
     ids=["expired", "future"],
 )
-def test_ineligible_primary_remains_stored_and_store_is_not_mutated(timestamp):
+def test_ineligible_primary_reports_reason_and_store_is_not_mutated(
+    timestamp,
+    expected_status,
+):
     state_store = RuntimeStateStore()
     sensors = SensorRepository()
     add_sensor(sensors, PRIMARY_SENSOR_ID)
@@ -121,7 +135,8 @@ def test_ineligible_primary_remains_stored_and_store_is_not_mutated(timestamp):
 
     result = create_aggregator(state_store, sensors).get_effective(create_zone())
 
-    assert result is None
+    assert result.status is expected_status
+    assert result.measurement is None
     assert state_store.get_latest(PRIMARY_SENSOR_ID) is measurement
     assert state_store.list_latest() == before
 
@@ -143,7 +158,56 @@ def test_secondary_measurement_does_not_become_effective_or_affect_freshness():
 
     result = create_aggregator(state_store, sensors).get_effective(create_zone())
 
-    assert result is primary
+    assert result.status is ZoneTemperatureStatus.EFFECTIVE
+    assert result.measurement is primary
+
+
+def test_zone_temperature_status_has_stable_string_values():
+    assert {status.name: status.value for status in ZoneTemperatureStatus} == {
+        "EFFECTIVE": "effective",
+        "MISSING": "missing",
+        "EXPIRED": "expired",
+        "FUTURE_DATED": "future_dated",
+    }
+    assert all(isinstance(status, str) for status in ZoneTemperatureStatus)
+
+
+def test_zone_temperature_result_is_immutable():
+    result = ZoneTemperatureResult(
+        status=ZoneTemperatureStatus.MISSING,
+        measurement=None,
+    )
+
+    with pytest.raises(FrozenInstanceError):
+        result.status = ZoneTemperatureStatus.EXPIRED
+
+
+def test_effective_result_requires_measurement():
+    with pytest.raises(ValueError, match="EFFECTIVE requires a measurement"):
+        ZoneTemperatureResult(
+            status=ZoneTemperatureStatus.EFFECTIVE,
+            measurement=None,
+        )
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        ZoneTemperatureStatus.MISSING,
+        ZoneTemperatureStatus.EXPIRED,
+        ZoneTemperatureStatus.FUTURE_DATED,
+    ],
+)
+def test_non_effective_result_rejects_measurement(status):
+    with pytest.raises(ValueError, match="requires measurement to be None"):
+        ZoneTemperatureResult(
+            status=status,
+            measurement=Measurement(
+                sensor_id=PRIMARY_SENSOR_ID,
+                value=Temperature(20),
+                timestamp=NOW,
+            ),
+        )
 
 
 def test_clock_is_read_exactly_once_for_measurement_evaluation():

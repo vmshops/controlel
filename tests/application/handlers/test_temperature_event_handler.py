@@ -1,3 +1,4 @@
+from dataclasses import FrozenInstanceError
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -8,19 +9,27 @@ from controlel.application.configuration.zone_target_resolver import (
 )
 from controlel.application.handlers.temperature_event_handler import (
     TemperatureEventHandler,
+    TemperatureHandlingResult,
 )
+from controlel.application.runtime.runtime_processing_result import (
+    TemperatureNoDecisionReason,
+)
+from controlel.application.services.control_loop_service import ControlLoopService
 from controlel.application.services.measurement_timestamp_validator import (
     MeasurementTimestampValidator,
 )
 from controlel.application.state.runtime_state_store import RuntimeStateStore
 from controlel.application.state.zone_temperature_aggregator import (
     PrimarySensorConfigurationNotFoundError,
+    ZoneTemperatureResult,
+    ZoneTemperatureStatus,
 )
 from controlel.domain.entities.zone import Zone
 from controlel.domain.events.temperature_measured_event import (
     TemperatureMeasuredEvent,
 )
 from controlel.domain.measurements.measurement import Measurement
+from controlel.domain.regulation.context import ControlContext
 from controlel.domain.repositories.sensor_repository import SensorRepository
 from controlel.domain.repositories.zone_repository import ZoneRepository
 from controlel.domain.value_objects.sensor_id import SensorId
@@ -64,10 +73,13 @@ class RecordingStateStore(RuntimeStateStore):
 class RecordingControlLoop:
     def __init__(self):
         self.contexts = []
+        self.events = []
 
     def process(self, context):
         self.contexts.append(context)
-        return context
+        event = ControlLoopService().process(context)
+        self.events.append(event)
+        return event
 
 
 class RecordingTargetResolver:
@@ -83,18 +95,29 @@ class RecordingTargetResolver:
 class RecordingAggregator:
     def __init__(
         self,
-        effective: Measurement | None,
+        result: ZoneTemperatureResult,
         error: Exception | None = None,
     ):
-        self.effective = effective
+        self.result = result
         self.error = error
         self.zones = []
 
-    def get_effective(self, zone: Zone) -> Measurement | None:
+    def get_effective(self, zone: Zone) -> ZoneTemperatureResult:
         self.zones.append(zone)
         if self.error is not None:
             raise self.error
-        return self.effective
+        return self.result
+
+
+def effective_result(measurement: Measurement) -> ZoneTemperatureResult:
+    return ZoneTemperatureResult(
+        status=ZoneTemperatureStatus.EFFECTIVE,
+        measurement=measurement,
+    )
+
+
+def no_temperature_result(status: ZoneTemperatureStatus) -> ZoneTemperatureResult:
+    return ZoneTemperatureResult(status=status, measurement=None)
 
 
 def create_zone(target: float = 22) -> Zone:
@@ -136,12 +159,64 @@ def create_handler(
     return handler, control_loop
 
 
+def create_decision_event():
+    return ControlLoopService().process(
+        ControlContext(
+            sensor_id=PRIMARY_SENSOR_ID,
+            zone_id=ZONE_ID,
+            current_temperature=Temperature(19),
+            target_temperature=Temperature(22),
+        )
+    )
+
+
+def test_temperature_handling_result_is_immutable():
+    result = TemperatureHandlingResult(
+        reason=TemperatureNoDecisionReason.OUT_OF_ORDER,
+        decision_event=None,
+    )
+
+    with pytest.raises(FrozenInstanceError):
+        result.reason = TemperatureNoDecisionReason.SECONDARY_MEASUREMENT
+
+
+def test_temperature_handling_result_accepts_exactly_one_branch():
+    decision_event = create_decision_event()
+
+    no_decision = TemperatureHandlingResult(
+        reason=TemperatureNoDecisionReason.OUT_OF_ORDER,
+        decision_event=None,
+    )
+    decision = TemperatureHandlingResult(
+        reason=None,
+        decision_event=decision_event,
+    )
+
+    assert no_decision.reason is TemperatureNoDecisionReason.OUT_OF_ORDER
+    assert decision.decision_event is decision_event
+
+
+@pytest.mark.parametrize(
+    ("reason", "decision_event"),
+    [
+        (None, None),
+        (TemperatureNoDecisionReason.OUT_OF_ORDER, create_decision_event()),
+    ],
+)
+def test_temperature_handling_result_rejects_invalid_branch_combinations(
+    reason,
+    decision_event,
+):
+    with pytest.raises(ValueError, match="exactly one of reason or decision_event is required"):
+        TemperatureHandlingResult(reason=reason, decision_event=decision_event)
+
+
 def test_admission_rejection_stops_before_storage_and_functional_processing():
     state_store = RecordingStateStore()
     measurement = create_measurement(timestamp=NOW + timedelta(minutes=2))
     validator = RecordingTimestampValidator(admissible=False)
     resolver = RecordingTargetResolver(create_zone())
-    aggregator = RecordingAggregator(measurement)
+    aggregator = RecordingAggregator(effective_result(measurement))
     handler, control_loop = create_handler(
         state_store,
         resolver,
@@ -151,7 +226,8 @@ def test_admission_rejection_stops_before_storage_and_functional_processing():
 
     result = handler.handle(TemperatureMeasuredEvent(measurement=measurement))
 
-    assert result is None
+    assert result.reason is TemperatureNoDecisionReason.TIMESTAMP_ADMISSION_REJECTED
+    assert result.decision_event is None
     assert validator.measurements == [measurement]
     assert state_store.record_calls == []
     assert state_store.get_latest(PRIMARY_SENSOR_ID) is None
@@ -168,13 +244,13 @@ def test_existing_valid_state_survives_rejected_future_input():
     handler, control_loop = create_handler(
         state_store,
         RecordingTargetResolver(create_zone()),
-        RecordingAggregator(valid),
+        RecordingAggregator(effective_result(valid)),
         RecordingTimestampValidator(admissible=False),
     )
 
     result = handler.handle(TemperatureMeasuredEvent(measurement=rejected))
 
-    assert result is None
+    assert result.reason is TemperatureNoDecisionReason.TIMESTAMP_ADMISSION_REJECTED
     assert state_store.get_latest(PRIMARY_SENSOR_ID) is valid
     assert control_loop.contexts == []
 
@@ -184,7 +260,7 @@ def test_valid_input_after_rejected_future_input_stores_and_processes_normally()
     rejected = create_measurement(timestamp=NOW + timedelta(minutes=2))
     valid = create_measurement(timestamp=NOW)
     validator = RecordingTimestampValidator(admissible=False)
-    aggregator = RecordingAggregator(valid)
+    aggregator = RecordingAggregator(effective_result(valid))
     handler, control_loop = create_handler(
         state_store,
         RecordingTargetResolver(create_zone()),
@@ -196,7 +272,8 @@ def test_valid_input_after_rejected_future_input_stores_and_processes_normally()
 
     result = handler.handle(TemperatureMeasuredEvent(measurement=valid))
 
-    assert result is control_loop.contexts[0]
+    assert result.reason is None
+    assert result.decision_event is control_loop.events[0]
     assert state_store.get_latest(PRIMARY_SENSOR_ID) is valid
 
 
@@ -207,13 +284,14 @@ def test_stale_measurement_returns_before_zone_resolution_and_aggregation():
     stale = create_measurement(timestamp=newest_timestamp - timedelta(minutes=1))
     state_store.record(newest)
     resolver = RecordingTargetResolver(create_zone())
-    aggregator = RecordingAggregator(newest)
+    aggregator = RecordingAggregator(effective_result(newest))
     validator = RecordingTimestampValidator()
     handler, control_loop = create_handler(state_store, resolver, aggregator, validator)
 
     result = handler.handle(TemperatureMeasuredEvent(measurement=stale))
 
-    assert result is None
+    assert result.reason is TemperatureNoDecisionReason.OUT_OF_ORDER
+    assert result.decision_event is None
     assert validator.measurements == [stale]
     assert resolver.sensor_ids == []
     assert aggregator.zones == []
@@ -226,12 +304,13 @@ def test_accepted_primary_measurement_creates_context_and_invokes_regulation():
     measurement = create_measurement()
     zone = create_zone(target=18)
     resolver = RecordingTargetResolver(zone)
-    aggregator = RecordingAggregator(measurement)
+    aggregator = RecordingAggregator(effective_result(measurement))
     handler, control_loop = create_handler(state_store, resolver, aggregator)
 
     result = handler.handle(TemperatureMeasuredEvent(measurement=measurement))
 
-    assert result is control_loop.contexts[0]
+    assert result.reason is None
+    assert result.decision_event is control_loop.events[0]
     assert state_store.get_latest(PRIMARY_SENSOR_ID) is measurement
     assert aggregator.zones == [zone]
     assert control_loop.contexts[0].sensor_id == PRIMARY_SENSOR_ID
@@ -246,7 +325,7 @@ def test_accepted_secondary_is_stored_but_does_not_invoke_regulation():
     secondary = create_measurement(SECONDARY_SENSOR_ID, value=30)
     state_store.record(primary)
     zone = create_zone()
-    aggregator = RecordingAggregator(primary)
+    aggregator = RecordingAggregator(effective_result(primary))
     handler, control_loop = create_handler(
         state_store,
         RecordingTargetResolver(zone),
@@ -255,7 +334,8 @@ def test_accepted_secondary_is_stored_but_does_not_invoke_regulation():
 
     result = handler.handle(TemperatureMeasuredEvent(measurement=secondary))
 
-    assert result is None
+    assert result.reason is TemperatureNoDecisionReason.SECONDARY_MEASUREMENT
+    assert result.decision_event is None
     assert state_store.get_latest(SECONDARY_SENSOR_ID) is secondary
     assert aggregator.zones == [zone]
     assert control_loop.contexts == []
@@ -267,40 +347,54 @@ def test_missing_primary_runtime_state_produces_no_decision():
     handler, control_loop = create_handler(
         state_store,
         RecordingTargetResolver(create_zone()),
-        RecordingAggregator(None),
+        RecordingAggregator(no_temperature_result(ZoneTemperatureStatus.MISSING)),
     )
 
     result = handler.handle(TemperatureMeasuredEvent(measurement=secondary))
 
-    assert result is None
+    assert result.reason is TemperatureNoDecisionReason.PRIMARY_MEASUREMENT_MISSING
+    assert result.decision_event is None
     assert state_store.get_latest(SECONDARY_SENSOR_ID) is secondary
     assert control_loop.contexts == []
 
 
 @pytest.mark.parametrize(
-    ("timestamp", "max_future_skew"),
+    ("timestamp", "max_future_skew", "temperature_status", "expected_reason"),
     [
-        (NOW - timedelta(minutes=10), timedelta(0)),
-        (NOW + timedelta(seconds=30), timedelta(minutes=1)),
+        (
+            NOW - timedelta(minutes=10),
+            timedelta(0),
+            ZoneTemperatureStatus.EXPIRED,
+            TemperatureNoDecisionReason.PRIMARY_MEASUREMENT_EXPIRED,
+        ),
+        (
+            NOW + timedelta(seconds=30),
+            timedelta(minutes=1),
+            ZoneTemperatureStatus.FUTURE_DATED,
+            TemperatureNoDecisionReason.PRIMARY_MEASUREMENT_FUTURE_DATED,
+        ),
     ],
     ids=["expired-past", "admitted-within-tolerance-future"],
 )
 def test_admitted_but_freshness_ineligible_primary_remains_stored_without_context(
     timestamp,
     max_future_skew,
+    temperature_status,
+    expected_reason,
 ):
     state_store = RuntimeStateStore()
     measurement = create_measurement(timestamp=timestamp)
     handler, control_loop = create_handler(
         state_store,
         RecordingTargetResolver(create_zone()),
-        RecordingAggregator(None),
+        RecordingAggregator(no_temperature_result(temperature_status)),
         MeasurementTimestampValidator(FixedClock(), max_future_skew),
     )
 
     result = handler.handle(TemperatureMeasuredEvent(measurement=measurement))
 
-    assert result is None
+    assert result.reason is expected_reason
+    assert result.decision_event is None
     assert state_store.get_latest(PRIMARY_SENSOR_ID) is measurement
     assert control_loop.contexts == []
 
@@ -312,7 +406,10 @@ def test_primary_configuration_exception_propagates_after_measurement_is_stored(
     handler, control_loop = create_handler(
         state_store,
         RecordingTargetResolver(create_zone()),
-        RecordingAggregator(None, error=error),
+        RecordingAggregator(
+            no_temperature_result(ZoneTemperatureStatus.MISSING),
+            error=error,
+        ),
     )
 
     with pytest.raises(PrimarySensorConfigurationNotFoundError) as raised:
@@ -323,10 +420,52 @@ def test_primary_configuration_exception_propagates_after_measurement_is_stored(
     assert control_loop.contexts == []
 
 
+def test_primary_configuration_exception_precedes_secondary_classification():
+    state_store = RuntimeStateStore()
+    secondary = create_measurement(SECONDARY_SENSOR_ID)
+    error = PrimarySensorConfigurationNotFoundError(PRIMARY_SENSOR_ID, ZONE_ID)
+    handler, control_loop = create_handler(
+        state_store,
+        RecordingTargetResolver(create_zone()),
+        RecordingAggregator(
+            no_temperature_result(ZoneTemperatureStatus.MISSING),
+            error=error,
+        ),
+    )
+
+    with pytest.raises(PrimarySensorConfigurationNotFoundError) as raised:
+        handler.handle(TemperatureMeasuredEvent(measurement=secondary))
+
+    assert raised.value is error
+    assert state_store.get_latest(SECONDARY_SENSOR_ID) is secondary
+    assert control_loop.contexts == []
+
+
+def test_invalid_clock_error_propagates_after_measurement_is_stored():
+    state_store = RuntimeStateStore()
+    measurement = create_measurement()
+    error = ValueError("Clock.now() must return a timezone-aware datetime")
+    handler, control_loop = create_handler(
+        state_store,
+        RecordingTargetResolver(create_zone()),
+        RecordingAggregator(
+            no_temperature_result(ZoneTemperatureStatus.MISSING),
+            error=error,
+        ),
+    )
+
+    with pytest.raises(ValueError) as raised:
+        handler.handle(TemperatureMeasuredEvent(measurement=measurement))
+
+    assert raised.value is error
+    assert state_store.get_latest(PRIMARY_SENSOR_ID) is measurement
+    assert control_loop.contexts == []
+
+
 def test_zone_resolution_exception_propagates_before_aggregation():
     state_store = RuntimeStateStore()
     measurement = create_measurement()
-    aggregator = RecordingAggregator(None)
+    aggregator = RecordingAggregator(no_temperature_result(ZoneTemperatureStatus.MISSING))
     handler, control_loop = create_handler(
         state_store,
         ZoneTargetResolver(SensorRepository(), ZoneRepository()),
