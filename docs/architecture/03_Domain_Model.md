@@ -33,3 +33,14 @@ An executable `Command` carries `ZoneId` as its logical target. It does not
 carry `SensorId`, because sensor provenance is not currently execution data.
 `ZoneId` is not a physical actuator identifier, and the domain defines no
 generic target abstraction.
+
+## Applied control state
+
+`ControlState` is the latest successfully applied logical action for one
+`ZoneId`. It records the applied action, the exact successful command identity
+and the application-level execution time. It contains no measurement or target
+configuration.
+
+Applied state is distinct from a `Decision`, which describes what regulation
+wants, and from a `Command`, which is an executable request that may still fail
+or be suppressed.

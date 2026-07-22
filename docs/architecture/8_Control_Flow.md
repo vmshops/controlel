@@ -19,7 +19,9 @@ Measurement
 -> DecisionEventHandler
 -> Command(zone_id) | None
 -> CommandDispatcher
--> ActuatorPort
+-> StateRepository lookup by ZoneId
+-> suppress identical applied action | ActuatorPort
+-> StateRepository update after success
 ```
 
 `ControlRuntime` explicitly invokes each functional handler. It processes a
@@ -69,14 +71,20 @@ use explicit correlation or causation identity rather than overload
 explicitly invokes command mapping. Decision publication is not a
 request/response operation.
 
-`CommandDispatcher` invokes the injected `ActuatorPort` once with the exact
-command. Execution exceptions propagate to the caller. Repeated accepted
-primary measurements may produce repeated commands; command-state suppression
-is not part of this flow.
+`CommandDispatcher` compares a command with the latest successfully applied
+action for its `ZoneId`. An identical action is suppressed without actuator
+execution or state mutation. A different action executes through the injected
+`ActuatorPort`, then becomes the new immutable `ControlState` only after normal
+return. Execution exceptions propagate unchanged and preserve the previous
+state, so a later measurement may retry the action.
 
-The current flow intentionally has no command routing, retry policy,
-idempotency or applied-state suppression. It also has no hardware adapter;
-platform-specific implementations remain outside the core runtime.
+Suppression does not remove the regulation result: repeated accepted primary
+measurements may still produce and publish decisions, create commands and
+return `DecisionCreatedEvent`. Only redundant actuator execution is skipped.
+
+The current flow has no command routing, retry policy, persistence, physical
+feedback or concurrency protection. A normal adapter return records logical
+application-level success but does not confirm physical hardware state.
 
 `ZoneId` is not a physical actuator identifier. Commands targeted to different
 zones still pass through the same injected `ActuatorPort`; zone-to-actuator

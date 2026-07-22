@@ -31,6 +31,20 @@ class RecordingActuator(ActuatorPort):
         self.commands.append(command)
 
 
+class ActuatorFailure(Exception):
+    pass
+
+
+class FailingActuator(ActuatorPort):
+    def __init__(self, error: Exception):
+        self.error = error
+        self.commands = []
+
+    def execute(self, command: Command) -> None:
+        self.commands.append(command)
+        raise self.error
+
+
 class UnsupportedDecisionControlLoop:
     def process(self, context) -> DecisionCreatedEvent:
         return DecisionCreatedEvent(
@@ -125,6 +139,9 @@ def test_low_temperature_produces_enable_heating_command():
     assert decision_event.decision.zone_id == ZoneId(value="living_room")
     assert [command.action for command in actuator.commands] == ["enable_heating"]
     assert actuator.commands[0].zone_id == ZoneId(value="living_room")
+    state = runtime.control_state_repository.get(ZoneId(value="living_room"))
+    assert state.applied_action == "enable_heating"
+    assert state.command_id == actuator.commands[0].id
 
 
 def test_high_temperature_produces_disable_heating_command():
@@ -139,6 +156,7 @@ def test_high_temperature_produces_disable_heating_command():
     assert decision_event.decision.zone_id == ZoneId(value="living_room")
     assert [command.action for command in actuator.commands] == ["disable_heating"]
     assert actuator.commands[0].zone_id == ZoneId(value="living_room")
+    assert runtime.control_state_repository.get(ZoneId(value="living_room")).applied_action == "disable_heating"
 
 
 def test_two_zones_dispatch_differently_targeted_commands_to_same_actuator():
@@ -162,6 +180,8 @@ def test_two_zones_dispatch_differently_targeted_commands_to_same_actuator():
         ZoneId(value="living_room"),
         ZoneId(value="bedroom"),
     ]
+    assert runtime.control_state_repository.get(ZoneId(value="living_room")).command_id == actuator.commands[0].id
+    assert runtime.control_state_repository.get(ZoneId(value="bedroom")).command_id == actuator.commands[1].id
 
 
 def test_secondary_measurement_is_observable_without_decision_or_command():
@@ -252,6 +272,7 @@ def test_unsupported_decision_does_not_invoke_actuator():
     assert decision_event is not None
     assert decision_event.decision.action == "observe_only"
     assert actuator.commands == []
+    assert runtime.control_state_repository.get(ZoneId(value="living_room")) is None
 
 
 def test_decision_created_event_is_published_and_returned():
@@ -293,14 +314,51 @@ def test_temperature_handler_runs_before_observer_notification():
     assert [command.action for command in actuator.commands] == ["enable_heating"]
 
 
-def test_repeated_accepted_measurements_produce_repeated_commands():
+def test_repeated_decisions_are_published_but_identical_applied_action_executes_once():
+    actuator = RecordingActuator()
+    runtime = create_runtime(actuator)
+    published_decisions = []
+    runtime.event_bus.subscribe(DecisionCreatedEvent, published_decisions.append)
+
+    first = runtime.process_temperature(create_measurement(19))
+    second = runtime.process_temperature(create_measurement(19))
+
+    assert first is not None
+    assert second is not None
+    assert published_decisions == [first, second]
+    assert [command.action for command in actuator.commands] == ["enable_heating"]
+    state = runtime.control_state_repository.get(ZoneId(value="living_room"))
+    assert state.command_id == actuator.commands[0].id
+
+
+def test_changed_action_executes_and_replaces_applied_state():
     actuator = RecordingActuator()
     runtime = create_runtime(actuator)
 
     runtime.process_temperature(create_measurement(19))
-    runtime.process_temperature(create_measurement(19))
+    result = runtime.process_temperature(create_measurement(23))
 
+    assert result is not None
     assert [command.action for command in actuator.commands] == [
         "enable_heating",
-        "enable_heating",
+        "disable_heating",
     ]
+    state = runtime.control_state_repository.get(ZoneId(value="living_room"))
+    assert state.applied_action == "disable_heating"
+    assert state.command_id == actuator.commands[1].id
+
+
+def test_actuator_failure_does_not_record_requested_action():
+    error = ActuatorFailure("execution failed")
+    actuator = FailingActuator(error)
+    runtime = create_runtime(actuator)
+    published_decisions = []
+    runtime.event_bus.subscribe(DecisionCreatedEvent, published_decisions.append)
+
+    with pytest.raises(ActuatorFailure) as raised:
+        runtime.process_temperature(create_measurement(19))
+
+    assert raised.value is error
+    assert len(actuator.commands) == 1
+    assert len(published_decisions) == 1
+    assert runtime.control_state_repository.get(ZoneId(value="living_room")) is None

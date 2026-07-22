@@ -61,6 +61,7 @@ def test_control_runtime_processes_temperature():
 
     assert result.decision.action == "enable_heating"
     assert runtime.state_store.get_latest(measurement.sensor_id) == measurement
+    assert runtime.control_state_repository.get(result.decision.zone_id).applied_action == "enable_heating"
 
 
 def test_control_runtime_keeps_measurements_for_multiple_sensors():

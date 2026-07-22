@@ -1,18 +1,27 @@
 from datetime import UTC, datetime
+from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from controlel.domain.value_objects.temperature import Temperature
+from controlel.domain.value_objects.zone_id import ZoneId
 
 
 class ControlState(BaseModel):
     """
-    Represents current heating control state.
+    Represents the latest successfully applied logical zone action.
     """
 
-    current_temperature: Temperature
-    target_temperature: Temperature
+    zone_id: ZoneId
+    applied_action: str
+    command_id: UUID
+    applied_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
-    heating_enabled: bool = False
+    model_config = ConfigDict(frozen=True)
 
-    updated_at: datetime = datetime.now(UTC)
+    @field_validator("applied_at")
+    @classmethod
+    def applied_at_must_be_timezone_aware(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("applied_at must be timezone-aware")
+
+        return value

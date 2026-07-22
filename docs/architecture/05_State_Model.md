@@ -50,10 +50,23 @@ and persistence design.
 
 ## Control state
 
-Control state describes the condition or output of the regulation process,
-such as whether heating is enabled. It is distinct from sensor observations.
-The existing domain `ControlState` and `StateRepository` are not used as the
-latest measurement store.
+`ControlState` records the latest successfully applied logical action for one
+`ZoneId`. `StateRepository` retains at most one immutable state per zone. A
+state contains the applied action, the exact successful `Command.id` and a
+timezone-aware application time. It contains no current measurement or target
+configuration and is not stored in `RuntimeStateStore`.
+
+Before actuator execution, the application checks the zone's applied state. An
+identical action is suppressed without changing state. A different or missing
+state permits execution, and the repository is updated only after
+`ActuatorPort.execute()` returns normally. A failure propagates and leaves any
+previous state unchanged, allowing a later measurement to request the action
+again.
+
+Applied state is in-memory and lost on restart, so the first command after a
+restart may execute again. A normal adapter return is application-level
+success, not physical hardware confirmation. External hardware changes can
+therefore make the in-memory state inaccurate.
 
 ## Configuration and targets
 
@@ -76,3 +89,5 @@ not part of the current state or configuration model.
 
 `RuntimeStateStore` has no database, integration or plugin dependency. Process
 restart recovery and durable storage are outside the current state model.
+Applied control state is also non-persistent. There is no applied-state history,
+retry mechanism, physical feedback, routing or concurrency protection.

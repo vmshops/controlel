@@ -18,6 +18,7 @@ from controlel.domain.events.temperature_measured_event import (
 )
 from controlel.domain.measurements.measurement import Measurement
 from controlel.domain.repositories.sensor_repository import SensorRepository
+from controlel.domain.repositories.state_repository import StateRepository
 from controlel.domain.repositories.zone_repository import ZoneRepository
 
 
@@ -35,8 +36,12 @@ class ControlRuntime:
     ):
         self.event_bus = EventBus()
         self.state_store = RuntimeStateStore()
+        self.control_state_repository = StateRepository()
         self.decision_handler = DecisionEventHandler()
-        self.command_dispatcher = CommandDispatcher(actuator=actuator)
+        self.command_dispatcher = CommandDispatcher(
+            actuator=actuator,
+            state_repository=self.control_state_repository,
+        )
         self.target_resolver = ZoneTargetResolver(
             sensor_repository=sensor_repository,
             zone_repository=zone_repository,

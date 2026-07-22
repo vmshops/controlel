@@ -66,6 +66,21 @@ cross-sensor timestamp comparison, elapsed-time freshness and configurable
 aggregation policies are future capabilities. Repeated accepted primary
 measurements may still produce repeated commands.
 
+Applied `ControlState` is stored separately per `ZoneId`. It contains only the
+latest successfully executed logical action, the successful command identity
+and the application time. It does not contain measurements, targets or desired
+decisions.
+
+An identical already-applied action is suppressed per zone. State changes only
+after the actuator port returns normally; a failure leaves prior state intact
+and permits a later request to retry. Decisions and decision events remain
+observable even when execution is suppressed.
+
+Applied state is in-memory and is lost on restart. A normal adapter return does
+not physically confirm hardware state, and external changes can make the view
+inaccurate. Persistence, state history, retries, physical feedback, routing and
+concurrency protection are not implemented.
+
 # 6. Historical Data Model
 
 Historical measurements are not part of the runtime store. A future history

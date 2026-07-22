@@ -39,6 +39,11 @@ The contained `Decision` is the authoritative source of its `SensorId`
 observation provenance and `ZoneId` regulated-subject identity.
 `DecisionCreatedEvent` does not duplicate those identifiers as event fields.
 
+Decision notification remains independent of command execution. A decision
+event is still published when its mapped command is later suppressed because
+the same zone action is already applied, and it is published before an
+actuator execution that may fail.
+
 The handler maps supported decision actions to an executable `Command`. A
 decision may produce no command. Unsupported or non-actionable actions return
 `None` and do not reach the actuator boundary.
