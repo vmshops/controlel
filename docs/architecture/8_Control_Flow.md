@@ -6,6 +6,10 @@ The synchronous in-memory runtime flow is:
 Measurement
 -> TemperatureMeasuredEvent
 -> RuntimeStateStore
+-> SensorRepository
+-> Sensor.zone_id
+-> ZoneRepository
+-> Zone.target_temperature
 -> ControlContext
 -> Regulation
 -> Decision
@@ -20,6 +24,13 @@ Measurement
 temperature event through `TemperatureEventHandler` before publishing that
 event to observers. A stale measurement produces no decision or command, but
 its temperature event is still published.
+
+For an accepted measurement, `TemperatureEventHandler` resolves the target
+from explicit zone configuration using the measurement's typed `SensorId`.
+Missing sensor or zone configuration raises without a fallback. The accepted
+measurement remains recorded, functional processing stops before a decision,
+and the temperature event is not published because functional handling occurs
+before observer notification.
 
 Functional handlers are not subscribed by `ControlRuntime`. `EventBus` is
 notification-only: it calls observers synchronously in registration order,
@@ -45,3 +56,7 @@ platform-specific implementations remain outside the core runtime.
 Observers may delay runtime processing, and observer exceptions currently
 propagate to the caller. Observer isolation and concurrency are outside the
 current design.
+
+Scheduling, disabled-state behavior, configuration persistence and mutation,
+zone-based actuator routing, and decision/command zone identity are also
+outside the current flow.

@@ -3,6 +3,7 @@ from pydantic import Field
 from controlel.domain.capabilities.capability import Capability
 from controlel.domain.entities.entity import Entity
 from controlel.domain.value_objects.sensor_id import SensorId
+from controlel.domain.value_objects.zone_id import ZoneId
 
 
 class Sensor(Entity):
@@ -11,6 +12,8 @@ class Sensor(Entity):
     """
 
     sensor_id: SensorId
+
+    zone_id: ZoneId
 
     name: str
 

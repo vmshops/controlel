@@ -1,6 +1,6 @@
-from pydantic import Field
-
 from controlel.domain.entities.entity import Entity
+from controlel.domain.value_objects.temperature import Temperature
+from controlel.domain.value_objects.zone_id import ZoneId
 
 
 class Zone(Entity):
@@ -10,6 +10,8 @@ class Zone(Entity):
     Represents a physical area controlled by Controlel.
     """
 
-    target_temperature: float = Field(default=21.0)
-    current_temperature: float | None = Field(default=None)
-    heating_active: bool = Field(default=False)
+    zone_id: ZoneId
+
+    name: str
+
+    target_temperature: Temperature

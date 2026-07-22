@@ -1,3 +1,6 @@
+from controlel.application.configuration.zone_target_resolver import (
+    ZoneTargetResolver,
+)
 from controlel.application.events.event_bus import EventBus
 from controlel.application.handlers.decision_event_handler import DecisionEventHandler
 from controlel.application.handlers.temperature_event_handler import (
@@ -11,7 +14,8 @@ from controlel.domain.events.temperature_measured_event import (
     TemperatureMeasuredEvent,
 )
 from controlel.domain.measurements.measurement import Measurement
-from controlel.domain.value_objects.temperature import Temperature
+from controlel.domain.repositories.sensor_repository import SensorRepository
+from controlel.domain.repositories.zone_repository import ZoneRepository
 
 
 class ControlRuntime:
@@ -22,17 +26,22 @@ class ControlRuntime:
 
     def __init__(
         self,
-        target_temperature: Temperature,
+        sensor_repository: SensorRepository,
+        zone_repository: ZoneRepository,
         actuator: ActuatorPort,
     ):
         self.event_bus = EventBus()
         self.state_store = RuntimeStateStore()
         self.decision_handler = DecisionEventHandler()
         self.command_dispatcher = CommandDispatcher(actuator=actuator)
+        self.target_resolver = ZoneTargetResolver(
+            sensor_repository=sensor_repository,
+            zone_repository=zone_repository,
+        )
 
         self.temperature_handler = TemperatureEventHandler(
             state_store=self.state_store,
-            target_temperature=target_temperature,
+            target_resolver=self.target_resolver,
         )
 
     def process_temperature(

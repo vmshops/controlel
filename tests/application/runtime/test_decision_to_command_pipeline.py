@@ -4,13 +4,18 @@ from controlel.application.runtime.control_runtime import ControlRuntime
 from controlel.domain.actuators.actuator_port import ActuatorPort
 from controlel.domain.commands.command import Command
 from controlel.domain.decisions.decision import Decision
+from controlel.domain.entities.zone import Zone
 from controlel.domain.events.decision_event import DecisionCreatedEvent
 from controlel.domain.events.temperature_measured_event import (
     TemperatureMeasuredEvent,
 )
 from controlel.domain.measurements.measurement import Measurement
+from controlel.domain.repositories.sensor_repository import SensorRepository
+from controlel.domain.repositories.zone_repository import ZoneRepository
+from controlel.domain.sensors.sensor import Sensor
 from controlel.domain.value_objects.sensor_id import SensorId
 from controlel.domain.value_objects.temperature import Temperature
+from controlel.domain.value_objects.zone_id import ZoneId
 
 
 class RecordingActuator(ActuatorPort):
@@ -40,8 +45,26 @@ def create_measurement(
 
 
 def create_runtime(actuator: ActuatorPort) -> ControlRuntime:
+    sensors = SensorRepository()
+    sensors.add(
+        Sensor(
+            sensor_id=SensorId(value="living_room_temperature"),
+            zone_id=ZoneId(value="living_room"),
+            name="Living room temperature",
+        )
+    )
+    zones = ZoneRepository()
+    zones.add(
+        Zone(
+            zone_id=ZoneId(value="living_room"),
+            name="Living room",
+            target_temperature=Temperature(22),
+        )
+    )
+
     return ControlRuntime(
-        target_temperature=Temperature(22),
+        sensor_repository=sensors,
+        zone_repository=zones,
         actuator=actuator,
     )
 

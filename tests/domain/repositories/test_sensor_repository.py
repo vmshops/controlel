@@ -7,11 +7,13 @@ from controlel.domain.repositories.sensor_repository import (
 )
 from controlel.domain.sensors.sensor import Sensor
 from controlel.domain.value_objects.sensor_id import SensorId
+from controlel.domain.value_objects.zone_id import ZoneId
 
 
 def create_sensor(sensor_id: str, *capabilities: str) -> Sensor:
     return Sensor(
         sensor_id=SensorId(value=sensor_id),
+        zone_id=ZoneId(value="test_zone"),
         name=sensor_id,
         capabilities=[Capability(name=name) for name in capabilities],
     )

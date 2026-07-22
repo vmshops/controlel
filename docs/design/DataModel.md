@@ -22,6 +22,14 @@ Configuration supplies target values and other regulation inputs. Target
 temperature is not an observed measurement and is not stored in runtime
 measurement state.
 
+`SensorId` resolves to a configured `Sensor`, whose required `ZoneId` identifies
+exactly one configured `Zone`. `Zone.target_temperature` is a typed
+`Temperature` and is the source used to prepare `ControlContext`.
+
+Zone configuration contains no latest measurement or applied heating state.
+Scheduling, persistence, disabled-state semantics, actuator routing and
+configuration mutation are intentionally absent.
+
 # 5. Runtime Model
 
 The application maintains one latest `Measurement` per stable `SensorId` in an

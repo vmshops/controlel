@@ -36,9 +36,15 @@ latest measurement store.
 ## Configuration and targets
 
 Target temperatures and other regulation settings are configuration inputs.
-They are supplied explicitly when the runtime is composed and are added while
-preparing `ControlContext`. They are not fields of `Measurement` and are not
-stored as latest sensor state.
+For an accepted measurement, the application resolves its `SensorId` through
+the Sensor Repository, follows `Sensor.zone_id`, and reads the typed target
+from the Zone Repository. The target is added while preparing `ControlContext`.
+It is not a field of `Measurement` and is not stored as latest sensor state.
+
+Missing sensor or zone configuration raises an explicit application
+configuration error. No fallback target is applied. Because the measurement is
+recorded before configuration resolution, an accepted observation remains in
+runtime state when resolution fails, but no regulation decision is produced.
 
 ## Persistence boundary
 
