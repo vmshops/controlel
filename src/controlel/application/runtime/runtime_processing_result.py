@@ -1,11 +1,10 @@
 from dataclasses import dataclass
 from enum import StrEnum
 
-from controlel.domain.commands.heat_source_command import HeatSourceCommand
-from controlel.domain.commands.heating_action import HeatingAction
-from controlel.domain.demands.building_heat_demand import BuildingHeatDemand
-from controlel.domain.demands.building_heat_demand_status import (
-    BuildingHeatDemandStatus,
+from controlel.application.runtime.heat_demand_evaluation_result import (
+    HeatDemandEvaluationResult,
+    HeatDemandEvaluationStatus,
+    HeatDemandEvaluationTrigger,
 )
 from controlel.domain.events.decision_event import DecisionCreatedEvent
 
@@ -16,6 +15,8 @@ class RuntimeProcessingStatus(StrEnum):
     BUILDING_HEAT_DEMAND_INDETERMINATE = "building_heat_demand_indeterminate"
     COMMAND_EXECUTED = "command_executed"
     COMMAND_SUPPRESSED = "command_suppressed"
+    SAFETY_COMMAND_EXECUTED = "safety_command_executed"
+    SAFETY_COMMAND_SUPPRESSED = "safety_command_suppressed"
 
 
 class TemperatureNoDecisionReason(StrEnum):
@@ -32,8 +33,7 @@ class RuntimeProcessingResult:
     status: RuntimeProcessingStatus
     reason: TemperatureNoDecisionReason | None = None
     decision_event: DecisionCreatedEvent | None = None
-    building_heat_demand: BuildingHeatDemand | None = None
-    command: HeatSourceCommand | None = None
+    heat_demand_evaluation: HeatDemandEvaluationResult | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.status, RuntimeProcessingStatus):
@@ -42,73 +42,41 @@ class RuntimeProcessingResult:
             raise TypeError("reason must be a TemperatureNoDecisionReason or None")
         if self.decision_event is not None and not isinstance(self.decision_event, DecisionCreatedEvent):
             raise TypeError("decision_event must be a DecisionCreatedEvent or None")
-        if self.building_heat_demand is not None and not isinstance(
-            self.building_heat_demand,
-            BuildingHeatDemand,
+        if self.heat_demand_evaluation is not None and not isinstance(
+            self.heat_demand_evaluation,
+            HeatDemandEvaluationResult,
         ):
-            raise TypeError("building_heat_demand must be a BuildingHeatDemand or None")
-        if self.command is not None and not isinstance(self.command, HeatSourceCommand):
-            raise TypeError("command must be a HeatSourceCommand or None")
+            raise TypeError("heat_demand_evaluation must be a HeatDemandEvaluationResult or None")
 
         if self.status is RuntimeProcessingStatus.NO_DECISION:
-            if (
-                self.reason is None
-                or self.decision_event is not None
-                or self.building_heat_demand is not None
-                or self.command is not None
-            ):
+            if self.reason is None or self.decision_event is not None or self.heat_demand_evaluation is not None:
                 raise ValueError("NO_DECISION requires only a reason")
             return
 
         if self.status is RuntimeProcessingStatus.DECISION_WITHOUT_COMMAND:
-            if (
-                self.reason is not None
-                or self.decision_event is None
-                or self.building_heat_demand is not None
-                or self.command is not None
-            ):
+            if self.reason is not None or self.decision_event is None or self.heat_demand_evaluation is not None:
                 raise ValueError("DECISION_WITHOUT_COMMAND requires only a decision_event")
             return
 
-        if self.status is RuntimeProcessingStatus.BUILDING_HEAT_DEMAND_INDETERMINATE:
-            if (
-                self.reason is not None
-                or self.decision_event is None
-                or self.building_heat_demand is None
-                or self.building_heat_demand.status is not BuildingHeatDemandStatus.INDETERMINATE
-                or self.command is not None
-            ):
-                raise ValueError(
-                    "BUILDING_HEAT_DEMAND_INDETERMINATE requires a decision_event "
-                    "and indeterminate building_heat_demand without a command"
-                )
-            return
-
-        command_statuses = {
-            RuntimeProcessingStatus.COMMAND_EXECUTED,
-            RuntimeProcessingStatus.COMMAND_SUPPRESSED,
-        }
-        if self.status not in command_statuses:
+        expected_evaluation_status = {
+            RuntimeProcessingStatus.BUILDING_HEAT_DEMAND_INDETERMINATE: (
+                HeatDemandEvaluationStatus.INDETERMINATE_GRACE
+            ),
+            RuntimeProcessingStatus.COMMAND_EXECUTED: HeatDemandEvaluationStatus.DEMAND_COMMAND_EXECUTED,
+            RuntimeProcessingStatus.COMMAND_SUPPRESSED: HeatDemandEvaluationStatus.DEMAND_COMMAND_SUPPRESSED,
+            RuntimeProcessingStatus.SAFETY_COMMAND_EXECUTED: HeatDemandEvaluationStatus.SAFETY_COMMAND_EXECUTED,
+            RuntimeProcessingStatus.SAFETY_COMMAND_SUPPRESSED: HeatDemandEvaluationStatus.SAFETY_COMMAND_SUPPRESSED,
+        }.get(self.status)
+        if expected_evaluation_status is None:
             raise ValueError(f"Unhandled RuntimeProcessingStatus: {self.status!r}")
 
         if (
             self.reason is not None
             or self.decision_event is None
-            or self.building_heat_demand is None
-            or self.command is None
+            or self.heat_demand_evaluation is None
+            or self.heat_demand_evaluation.trigger is not HeatDemandEvaluationTrigger.ACTIONABLE_DECISION
+            or self.heat_demand_evaluation.status is not expected_evaluation_status
         ):
             raise ValueError(
-                f"{self.status.name} requires a decision_event, building_heat_demand and command without a reason"
+                f"{self.status.name} requires a decision_event and matching actionable heat-demand evaluation"
             )
-
-        action_by_status = {
-            BuildingHeatDemandStatus.HEAT_REQUIRED: HeatingAction.ENABLE_HEATING,
-            BuildingHeatDemandStatus.NO_HEAT_REQUIRED: HeatingAction.DISABLE_HEATING,
-        }
-        try:
-            expected_action = action_by_status[self.building_heat_demand.status]
-        except KeyError:
-            raise ValueError(f"{self.status.name} requires a determinate building_heat_demand") from None
-
-        if self.command.action is not expected_action:
-            raise ValueError(f"{self.building_heat_demand.status.name} requires command action {expected_action.value}")

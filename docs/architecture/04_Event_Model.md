@@ -30,9 +30,11 @@ retained `ZoneDemand`; `OBSERVE_ONLY` maps to no demand and leaves existing
 demand unchanged.
 
 The shared-source runtime then derives `BuildingHeatDemand`. A determinate
-aggregate creates `HeatSourceCommand`; indeterminate demand creates no command.
-Source execution is therefore explicit orchestration and never depends on
-event subscriber ordering or return values.
+aggregate creates a demand `HeatSourceCommand`. Indeterminate demand creates no
+command during its finite grace period and creates the explicitly configured
+safety command at or after the timeout boundary. Source execution is therefore
+explicit orchestration and never depends on event subscriber ordering or
+return values.
 
 The existing `DecisionEventHandler` still maps decisions to zone-targeted
 `Command` objects for the independent zone-actuator path. `ControlRuntime` does
@@ -43,13 +45,20 @@ suppressed or fails. If a decision observer raises, demand is not updated and
 source processing does not begin. No result object is returned for observer,
 configuration, clock, validation, or port exceptions.
 
-## Synchronous processing result
+## Synchronous processing results
 
-`RuntimeProcessingResult` retains the existing stable statuses and adds
-`building_heat_demand_indeterminate`. No-decision results retain their existing
-typed reasons. Indeterminate results carry the exact decision event and
-aggregate but no command. Executed and suppressed results carry the exact
-decision event, determinate aggregate, and `HeatSourceCommand`.
+Actionable measurement processing returns `RuntimeProcessingResult`. It keeps
+the stable no-decision, observe-only, indeterminate, executed, and suppressed
+statuses and adds explicit executed/suppressed safety-command statuses. Demand
+evidence, safety assessment, command, trigger, and next deadline are carried by
+one nested `HeatDemandEvaluationResult`; the runtime result retains the exact
+originating `DecisionCreatedEvent`.
+
+Startup, scheduled, and manual arbitration have no originating decision and
+return `HeatDemandEvaluationResult` directly. A timer never fabricates a
+`Measurement`, `SensorId`, `ZoneId`, `Decision`, or `DecisionCreatedEvent`.
+No-decision and `OBSERVE_ONLY` paths do not evaluate demand or alter safety
+state or scheduling.
 
 Event-only observers do not receive this synchronous result. Logging,
 persistence, correlation IDs, and diagnostic events remain outside scope.

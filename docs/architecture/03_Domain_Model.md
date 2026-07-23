@@ -55,9 +55,20 @@ synthetic building zone, or heat-source identifier.
 successfully applied shared-source action. It records the action, command ID,
 and application time. It is not physical boiler confirmation.
 
+`HeatDemandSafetyState` is separate application orchestration state. It records
+the start of one uninterrupted indeterminate period, the last determinate
+aggregate status for diagnostics, and the last evaluation time for
+clock-regression detection. It is neither observed state, requested zone
+demand, aggregate evidence, nor physical source state.
+
 The existing zone-targeted `Command`, per-zone `ControlState`,
 `ZoneActuatorRouter`, `CommandDispatcher`, and `ActuatorPort` remain a separate
 zone-actuator path. They are not used by the shared-source `ControlRuntime`.
 
-There is no persistence, timer, scheduling, modulation, DHW behavior, valve
-control, source routing, multiple-source topology, or real hardware adapter.
+The safety policy requires a finite explicit grace `timedelta` and one explicit
+typed timeout `HeatingAction`. Zero grace deliberately makes the timeout action
+active immediately; there is no implicit action or indefinite mode.
+
+There is no persistence, polling, background thread, production scheduler
+adapter, modulation, DHW behavior, valve control, source routing,
+multiple-source topology, or real hardware adapter.

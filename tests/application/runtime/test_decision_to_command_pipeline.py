@@ -40,6 +40,16 @@ class MutableClock:
         return self.current_time
 
 
+class PassiveScheduledTask:
+    def cancel(self) -> None:
+        pass
+
+
+class PassiveScheduler:
+    def schedule_at(self, when, callback):
+        return PassiveScheduledTask()
+
+
 class RecordingHeatSource:
     def __init__(self, failures: int = 0):
         self.failures = failures
@@ -116,7 +126,10 @@ def create_runtime(
         zone_repository=zone_repository,
         heat_source_port=port,
         clock=clock or MutableClock(),
+        scheduler=PassiveScheduler(),
         max_future_skew=max_future_skew,
+        indeterminate_grace_period=timedelta(days=1),
+        indeterminate_timeout_action=HeatingAction.DISABLE_HEATING,
     )
 
 
@@ -141,7 +154,16 @@ def create_runtime_with_secondary(port: RecordingHeatSource) -> ControlRuntime:
             target_temperature=Temperature(22),
         )
     )
-    return ControlRuntime(sensors, zones, port, MutableClock(), timedelta(0))
+    return ControlRuntime(
+        sensors,
+        zones,
+        port,
+        MutableClock(),
+        PassiveScheduler(),
+        timedelta(0),
+        timedelta(days=1),
+        HeatingAction.DISABLE_HEATING,
+    )
 
 
 def test_single_zone_action_executes_shared_source_command_with_exact_provenance():
@@ -153,9 +175,10 @@ def test_single_zone_action_executes_shared_source_command_with_exact_provenance
 
     assert result.status is RuntimeProcessingStatus.COMMAND_EXECUTED
     assert result.decision_event.decision.observed_at is measurement.timestamp
-    assert result.building_heat_demand.status is BuildingHeatDemandStatus.HEAT_REQUIRED
-    assert result.command is port.commands[0]
-    assert result.command.action is HeatingAction.ENABLE_HEATING
+    evaluation = result.heat_demand_evaluation
+    assert evaluation.building_heat_demand.status is BuildingHeatDemandStatus.HEAT_REQUIRED
+    assert evaluation.command is port.commands[0]
+    assert evaluation.command.action is HeatingAction.ENABLE_HEATING
     assert "zone_id" not in HeatSourceCommand.model_fields
     demand = runtime.zone_demand_store.get(ZoneId(value="living_room"))
     assert demand.observed_at is measurement.timestamp
@@ -169,8 +192,9 @@ def test_first_false_with_other_zone_missing_is_indeterminate_without_source_act
     result = runtime.process_temperature(create_measurement(23))
 
     assert result.status is RuntimeProcessingStatus.BUILDING_HEAT_DEMAND_INDETERMINATE
-    assert result.building_heat_demand.missing_zone_ids == (ZoneId(value="bedroom"),)
-    assert result.command is None
+    evaluation = result.heat_demand_evaluation
+    assert evaluation.building_heat_demand.missing_zone_ids == (ZoneId(value="bedroom"),)
+    assert evaluation.command is None
     assert port.commands == []
     assert runtime.heat_source_state_store.get() is None
 
@@ -182,7 +206,7 @@ def test_first_true_with_other_zone_missing_enables_source():
     result = runtime.process_temperature(create_measurement(19))
 
     assert result.status is RuntimeProcessingStatus.COMMAND_EXECUTED
-    assert result.building_heat_demand.status is BuildingHeatDemandStatus.HEAT_REQUIRED
+    assert result.heat_demand_evaluation.building_heat_demand.status is BuildingHeatDemandStatus.HEAT_REQUIRED
     assert port.commands[0].action is HeatingAction.ENABLE_HEATING
 
 
@@ -193,8 +217,8 @@ def test_single_zone_first_false_creates_explicit_disable_candidate():
     result = runtime.process_temperature(create_measurement(23))
 
     assert result.status is RuntimeProcessingStatus.COMMAND_EXECUTED
-    assert result.building_heat_demand.status is BuildingHeatDemandStatus.NO_HEAT_REQUIRED
-    assert result.command.action is HeatingAction.DISABLE_HEATING
+    assert result.heat_demand_evaluation.building_heat_demand.status is BuildingHeatDemandStatus.NO_HEAT_REQUIRED
+    assert result.heat_demand_evaluation.command.action is HeatingAction.DISABLE_HEATING
 
 
 def test_second_true_creates_candidate_but_is_suppressed():
@@ -206,7 +230,7 @@ def test_second_true_creates_candidate_but_is_suppressed():
 
     assert first.status is RuntimeProcessingStatus.COMMAND_EXECUTED
     assert second.status is RuntimeProcessingStatus.COMMAND_SUPPRESSED
-    assert second.command.id != first.command.id
+    assert second.heat_demand_evaluation.command.id != first.heat_demand_evaluation.command.id
     assert len(port.commands) == 1
 
 
@@ -220,9 +244,9 @@ def test_source_remains_enabled_until_last_true_zone_stops():
     last_stops = runtime.process_temperature(create_measurement(23, sensor_id="bedroom_temperature"))
 
     assert one_stops.status is RuntimeProcessingStatus.COMMAND_SUPPRESSED
-    assert one_stops.command.action is HeatingAction.ENABLE_HEATING
+    assert one_stops.heat_demand_evaluation.command.action is HeatingAction.ENABLE_HEATING
     assert last_stops.status is RuntimeProcessingStatus.COMMAND_EXECUTED
-    assert last_stops.command.action is HeatingAction.DISABLE_HEATING
+    assert last_stops.heat_demand_evaluation.command.action is HeatingAction.DISABLE_HEATING
     assert [command.action for command in port.commands] == [
         HeatingAction.ENABLE_HEATING,
         HeatingAction.DISABLE_HEATING,
@@ -237,7 +261,7 @@ def test_all_zones_fresh_false_explicitly_disables_source():
 
     assert first.status is RuntimeProcessingStatus.BUILDING_HEAT_DEMAND_INDETERMINATE
     assert second.status is RuntimeProcessingStatus.COMMAND_EXECUTED
-    assert second.command.action is HeatingAction.DISABLE_HEATING
+    assert second.heat_demand_evaluation.command.action is HeatingAction.DISABLE_HEATING
 
 
 @pytest.mark.parametrize("expired_requires_heat", [True, False])
@@ -258,8 +282,8 @@ def test_expired_demand_prevents_disable(expired_requires_heat):
     )
 
     assert result.status is RuntimeProcessingStatus.BUILDING_HEAT_DEMAND_INDETERMINATE
-    assert result.building_heat_demand.expired_zone_ids == (ZoneId(value="living_room"),)
-    assert result.command is None
+    assert result.heat_demand_evaluation.building_heat_demand.expired_zone_ids == (ZoneId(value="living_room"),)
+    assert result.heat_demand_evaluation.command is None
     assert all(command.action is not HeatingAction.DISABLE_HEATING for command in port.commands)
 
 
@@ -279,7 +303,7 @@ def test_fresh_true_overrides_expired_uncertainty():
     )
 
     assert result.status is RuntimeProcessingStatus.COMMAND_EXECUTED
-    assert result.building_heat_demand.status is BuildingHeatDemandStatus.HEAT_REQUIRED
+    assert result.heat_demand_evaluation.building_heat_demand.status is BuildingHeatDemandStatus.HEAT_REQUIRED
 
 
 def test_secondary_and_out_of_order_paths_do_not_change_retained_demand():
@@ -395,8 +419,7 @@ def test_observe_only_retains_demand_and_returns_without_aggregate():
     result = runtime.process_temperature(create_measurement(23))
 
     assert result.status is RuntimeProcessingStatus.DECISION_WITHOUT_COMMAND
-    assert result.building_heat_demand is None
-    assert result.command is None
+    assert result.heat_demand_evaluation is None
     assert runtime.zone_demand_store.get(ZoneId(value="living_room")) is retained
 
 
@@ -421,7 +444,7 @@ def test_source_failure_keeps_updated_demand_and_state_then_later_retries():
 
     assert retry.status is RuntimeProcessingStatus.COMMAND_EXECUTED
     assert len(port.commands) == 2
-    assert runtime.heat_source_state_store.get().command_id == retry.command.id
+    assert runtime.heat_source_state_store.get().command_id == retry.heat_demand_evaluation.command.id
 
 
 def test_failed_transition_retains_new_demand_and_previous_applied_state_then_retries():
@@ -435,12 +458,12 @@ def test_failed_transition_retains_new_demand_and_previous_applied_state_then_re
 
     assert runtime.zone_demand_store.get(ZoneId(value="living_room")).requires_heat is False
     assert runtime.heat_source_state_store.get() is previous_state
-    assert previous_state.command_id == enabled.command.id
+    assert previous_state.command_id == enabled.heat_demand_evaluation.command.id
 
     retry = runtime.process_temperature(create_measurement(23))
 
     assert retry.status is RuntimeProcessingStatus.COMMAND_EXECUTED
-    assert retry.command.action is HeatingAction.DISABLE_HEATING
+    assert retry.heat_demand_evaluation.command.action is HeatingAction.DISABLE_HEATING
 
 
 def test_temperature_and_decision_events_are_published_unchanged():

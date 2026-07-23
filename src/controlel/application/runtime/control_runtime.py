@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from controlel.application.configuration.zone_target_resolver import (
     ZoneTargetResolver,
@@ -9,9 +9,22 @@ from controlel.application.handlers.temperature_event_handler import (
 )
 from controlel.application.handlers.zone_demand_handler import ZoneDemandHandler
 from controlel.application.ports.heat_source_port import HeatSourcePort
+from controlel.application.ports.scheduler import ScheduledTaskHandle, Scheduler
+from controlel.application.runtime.heat_demand_evaluation_result import (
+    HeatDemandEvaluationResult,
+    HeatDemandEvaluationStatus,
+    HeatDemandEvaluationTrigger,
+)
 from controlel.application.runtime.runtime_processing_result import (
     RuntimeProcessingResult,
     RuntimeProcessingStatus,
+)
+from controlel.application.services.heat_demand_deadline_calculator import (
+    HeatDemandDeadlineCalculator,
+)
+from controlel.application.services.heat_demand_safety_policy import (
+    HeatDemandSafetyPhase,
+    HeatDemandSafetyPolicy,
 )
 from controlel.application.services.heat_source_command_dispatcher import (
     HeatSourceCommandDispatcher,
@@ -20,6 +33,9 @@ from controlel.application.services.measurement_timestamp_validator import (
     MeasurementTimestampValidator,
 )
 from controlel.application.state.heat_demand_aggregator import HeatDemandAggregator
+from controlel.application.state.heat_demand_safety_state_store import (
+    HeatDemandSafetyStateStore,
+)
 from controlel.application.state.heat_source_state_store import HeatSourceStateStore
 from controlel.application.state.runtime_state_store import RuntimeStateStore
 from controlel.application.state.zone_demand_store import ZoneDemandStore
@@ -42,10 +58,7 @@ from controlel.domain.repositories.zone_repository import ZoneRepository
 
 
 class ControlRuntime:
-    """
-    Composition root for the control system.
-    Connects events, handlers and services.
-    """
+    """Composition root for explicit control and shared-source orchestration."""
 
     def __init__(
         self,
@@ -53,17 +66,31 @@ class ControlRuntime:
         zone_repository: ZoneRepository,
         heat_source_port: HeatSourcePort,
         clock: Clock,
+        scheduler: Scheduler,
         max_future_skew: timedelta,
+        indeterminate_grace_period: timedelta,
+        indeterminate_timeout_action: HeatingAction,
     ) -> None:
+        self.clock = clock
+        self.scheduler = scheduler
         self.event_bus = EventBus()
         self.state_store = RuntimeStateStore()
         self.zone_demand_store = ZoneDemandStore()
+        self.heat_demand_safety_state_store = HeatDemandSafetyStateStore()
         self.heat_source_state_store = HeatSourceStateStore()
         self.zone_demand_handler = ZoneDemandHandler()
         self.heat_demand_aggregator = HeatDemandAggregator(
             demand_store=self.zone_demand_store,
             zone_repository=zone_repository,
             clock=clock,
+        )
+        self.heat_demand_safety_policy = HeatDemandSafetyPolicy(
+            grace_period=indeterminate_grace_period,
+            timeout_action=indeterminate_timeout_action,
+        )
+        self.heat_demand_deadline_calculator = HeatDemandDeadlineCalculator(
+            demand_store=self.zone_demand_store,
+            zone_repository=zone_repository,
         )
         self.heat_source_command_dispatcher = HeatSourceCommandDispatcher(
             heat_source_port=heat_source_port,
@@ -82,7 +109,6 @@ class ControlRuntime:
             clock=clock,
             max_future_skew=max_future_skew,
         )
-
         self.temperature_handler = TemperatureEventHandler(
             state_store=self.state_store,
             target_resolver=self.target_resolver,
@@ -90,13 +116,21 @@ class ControlRuntime:
             timestamp_validator=self.timestamp_validator,
         )
 
+        self._scheduled_handle: ScheduledTaskHandle | None = None
+        self._scheduled_deadline: datetime | None = None
+        self._schedule_generation = 0
+
+    def start(self) -> HeatDemandEvaluationResult:
+        return self._evaluate_heat_demand(HeatDemandEvaluationTrigger.STARTUP)
+
+    def reevaluate_heat_demand(self) -> HeatDemandEvaluationResult:
+        return self._evaluate_heat_demand(HeatDemandEvaluationTrigger.MANUAL)
+
     def process_temperature(
         self,
         measurement: Measurement,
     ) -> RuntimeProcessingResult:
-        event = TemperatureMeasuredEvent(
-            measurement=measurement,
-        )
+        event = TemperatureMeasuredEvent(measurement=measurement)
 
         handling_result = self.temperature_handler.handle(event)
         self.event_bus.publish(event)
@@ -121,28 +155,140 @@ class ControlRuntime:
             )
 
         self.zone_demand_store.record(zone_demand)
-        building_heat_demand = self.heat_demand_aggregator.evaluate()
-        if building_heat_demand.status is BuildingHeatDemandStatus.INDETERMINATE:
-            return RuntimeProcessingResult(
-                status=RuntimeProcessingStatus.BUILDING_HEAT_DEMAND_INDETERMINATE,
-                decision_event=decision_event,
-                building_heat_demand=building_heat_demand,
-            )
-
-        action_by_status = {
-            BuildingHeatDemandStatus.HEAT_REQUIRED: HeatingAction.ENABLE_HEATING,
-            BuildingHeatDemandStatus.NO_HEAT_REQUIRED: HeatingAction.DISABLE_HEATING,
-        }
-        command = HeatSourceCommand(
-            command_type=CommandFamily.HEATING,
-            action=action_by_status[building_heat_demand.status],
+        evaluation = self._evaluate_heat_demand(
+            HeatDemandEvaluationTrigger.ACTIONABLE_DECISION,
         )
-        executed = self.heat_source_command_dispatcher.dispatch(command)
-        return RuntimeProcessingResult(
-            status=(
-                RuntimeProcessingStatus.COMMAND_EXECUTED if executed else RuntimeProcessingStatus.COMMAND_SUPPRESSED
+        runtime_status_by_evaluation = {
+            HeatDemandEvaluationStatus.INDETERMINATE_GRACE: (
+                RuntimeProcessingStatus.BUILDING_HEAT_DEMAND_INDETERMINATE
             ),
+            HeatDemandEvaluationStatus.DEMAND_COMMAND_EXECUTED: RuntimeProcessingStatus.COMMAND_EXECUTED,
+            HeatDemandEvaluationStatus.DEMAND_COMMAND_SUPPRESSED: RuntimeProcessingStatus.COMMAND_SUPPRESSED,
+            HeatDemandEvaluationStatus.SAFETY_COMMAND_EXECUTED: RuntimeProcessingStatus.SAFETY_COMMAND_EXECUTED,
+            HeatDemandEvaluationStatus.SAFETY_COMMAND_SUPPRESSED: RuntimeProcessingStatus.SAFETY_COMMAND_SUPPRESSED,
+        }
+        return RuntimeProcessingResult(
+            status=runtime_status_by_evaluation[evaluation.status],
             decision_event=decision_event,
+            heat_demand_evaluation=evaluation,
+        )
+
+    def _evaluate_heat_demand(
+        self,
+        trigger: HeatDemandEvaluationTrigger,
+        scheduled_for: datetime | None = None,
+        indeterminate_start_hint: datetime | None = None,
+    ) -> HeatDemandEvaluationResult:
+        building_heat_demand = self.heat_demand_aggregator.evaluate()
+        safety_assessment = self.heat_demand_safety_policy.evaluate(
+            demand=building_heat_demand,
+            current_state=self.heat_demand_safety_state_store.get(),
+            indeterminate_start_hint=indeterminate_start_hint,
+        )
+        self.heat_demand_safety_state_store.save(safety_assessment.state)
+
+        eligibility_deadline = self.heat_demand_deadline_calculator.next_eligibility_change_at(building_heat_demand)
+        grace_deadline = (
+            safety_assessment.timeout_at
+            if safety_assessment.phase is HeatDemandSafetyPhase.INDETERMINATE_GRACE
+            else None
+        )
+        deadlines = [deadline for deadline in (eligibility_deadline, grace_deadline) if deadline is not None]
+        next_evaluation_at = min(deadlines) if deadlines else None
+        self._replace_scheduled_evaluation(next_evaluation_at)
+
+        command: HeatSourceCommand | None = None
+        if safety_assessment.phase is HeatDemandSafetyPhase.INDETERMINATE_GRACE:
+            status = HeatDemandEvaluationStatus.INDETERMINATE_GRACE
+        else:
+            if safety_assessment.phase is HeatDemandSafetyPhase.DETERMINATE:
+                action = {
+                    BuildingHeatDemandStatus.HEAT_REQUIRED: HeatingAction.ENABLE_HEATING,
+                    BuildingHeatDemandStatus.NO_HEAT_REQUIRED: HeatingAction.DISABLE_HEATING,
+                }[building_heat_demand.status]
+                executed_status = HeatDemandEvaluationStatus.DEMAND_COMMAND_EXECUTED
+                suppressed_status = HeatDemandEvaluationStatus.DEMAND_COMMAND_SUPPRESSED
+            else:
+                action = safety_assessment.action
+                if action is None:
+                    raise RuntimeError("Timed-out safety assessment must contain an action")
+                executed_status = HeatDemandEvaluationStatus.SAFETY_COMMAND_EXECUTED
+                suppressed_status = HeatDemandEvaluationStatus.SAFETY_COMMAND_SUPPRESSED
+
+            command = HeatSourceCommand(
+                command_type=CommandFamily.HEATING,
+                action=action,
+            )
+            executed = self.heat_source_command_dispatcher.dispatch(command)
+            status = executed_status if executed else suppressed_status
+
+        return HeatDemandEvaluationResult(
+            trigger=trigger,
+            status=status,
             building_heat_demand=building_heat_demand,
+            safety_assessment=safety_assessment,
             command=command,
+            scheduled_for=scheduled_for,
+            next_evaluation_at=next_evaluation_at,
+        )
+
+    def _replace_scheduled_evaluation(
+        self,
+        deadline: datetime | None,
+    ) -> None:
+        if deadline is not None and (deadline.tzinfo is None or deadline.utcoffset() is None):
+            raise ValueError("scheduled deadline must be timezone-aware")
+
+        if deadline == self._scheduled_deadline and self._scheduled_handle is not None:
+            return
+
+        old_handle = self._scheduled_handle
+        if deadline is None:
+            self._schedule_generation += 1
+            self._scheduled_handle = None
+            self._scheduled_deadline = None
+            if old_handle is not None:
+                old_handle.cancel()
+            return
+
+        generation = self._schedule_generation + 1
+
+        def callback() -> None:
+            self._run_scheduled_evaluation(deadline, generation)
+
+        new_handle = self.scheduler.schedule_at(deadline, callback)
+        self._schedule_generation = generation
+        self._scheduled_handle = new_handle
+        self._scheduled_deadline = deadline
+
+        if old_handle is not None:
+            old_handle.cancel()
+
+    def _run_scheduled_evaluation(
+        self,
+        scheduled_for: datetime,
+        generation: int,
+    ) -> None:
+        if (
+            generation != self._schedule_generation
+            or self._scheduled_handle is None
+            or self._scheduled_deadline != scheduled_for
+        ):
+            return
+
+        self._schedule_generation += 1
+        self._scheduled_handle = None
+        self._scheduled_deadline = None
+
+        now = self.clock.now()
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise ValueError("Clock.now() must return a timezone-aware datetime")
+        if now < scheduled_for:
+            self._replace_scheduled_evaluation(scheduled_for)
+            return
+
+        self._evaluate_heat_demand(
+            trigger=HeatDemandEvaluationTrigger.SCHEDULED,
+            scheduled_for=scheduled_for,
+            indeterminate_start_hint=scheduled_for,
         )

@@ -66,7 +66,9 @@ such state. Identical applied actions are suppressed; different or missing
 state permits execution. State changes only after normal port return.
 
 Port failure preserves prior applied state while the newly requested zone
-demand remains retained. Retry requires a later actionable evaluation.
+demand and evaluated safety state remain retained. Retry requires a later
+actionable/manual evaluation or an already-justified deadline; no dedicated
+retry timer exists.
 
 The existing zone-targeted `Command`, `ActuatorPort`, `ZoneActuatorRouter`,
 `CommandDispatcher`, `ControlState`, and `StateRepository` remain a separate
@@ -74,13 +76,36 @@ zone-actuator model and are not used by shared-source `ControlRuntime`.
 
 ## Runtime outcomes
 
-Existing runtime status and no-decision values remain stable. The added
-`building_heat_demand_indeterminate` status carries the exact decision event
-and aggregate without a command. Command outcomes carry the exact determinate
-aggregate and `HeatSourceCommand`; aggregate status and action must agree.
+`HeatDemandSafetyState` separately retains one uninterrupted indeterminate
+period, the last determinate status, and the last evaluated time. A required
+finite grace period and required explicit timeout `HeatingAction` produce:
 
-There is no persistence, timer, cleanup, scheduling, automatic shutdown,
-modulation, DHW behavior, valve control, source routing, multiple-source model,
-real integration, concurrency, or physical-state confirmation. Expiration is
-noticed only during later arbitration, and indeterminate demand preserves the
-last successfully applied source state.
+```text
+determinate heat required       -> enable demand command
+determinate no heat required    -> disable demand command
+indeterminate before timeout    -> no command
+indeterminate at/after timeout  -> configured safety command
+```
+
+Zero grace is explicit immediate timeout behavior; there is no default or
+indefinite mode. Exact demand expiry remains inclusive, so re-evaluation is
+scheduled at expiry plus one microsecond. Future demand activates exactly at
+its observation time.
+
+`HeatDemandEvaluationResult` contains trigger, aggregate, safety assessment,
+command, scheduled origin, and next deadline. Actionable processing nests it in
+`RuntimeProcessingResult`; startup, scheduled, and manual evaluation return it
+directly without a synthetic decision.
+
+The runtime owns one reschedulable earliest-deadline handle guarded by a
+generation token. Constructor creation has no side effects; explicit `start()`
+establishes protection before a first measurement. Scheduler installation
+precedes command creation, so scheduling failure prevents a new source action.
+Late callbacks consume grace from their requested deadline, and completed
+backward-time evaluation raises explicitly.
+
+All in-memory measurement, demand, safety, schedule, and applied state is lost
+on restart. There is no production scheduler adapter, polling, background
+thread, persistence, recurring retry, modulation, DHW behavior, valve control,
+source routing, multiple-source model, real integration, or physical-state
+confirmation.
