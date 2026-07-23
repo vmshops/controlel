@@ -109,3 +109,26 @@ on restart. There is no production scheduler adapter, polling, background
 thread, persistence, recurring retry, modulation, DHW behavior, valve control,
 source routing, multiple-source model, real integration, or physical-state
 confirmation.
+
+## Runtime lifecycle and failure boundary
+
+`ControlRuntime` has a private terminal lifecycle:
+
+```text
+OPEN -> STOPPED
+```
+
+There is no persisted lifecycle model or public lifecycle enum. Repeated
+startup evaluation is supported while open; stop is idempotent and restart is
+not. `RuntimeStoppedError` rejects operational calls after stop, while
+`RuntimeReentrancyError` rejects overlapping or nested operations immediately.
+
+One non-blocking guard protects the full state transition, event publication,
+scheduling transition, and source dispatch. It neither waits nor queues.
+Runtime stores are owned by this guarded flow. Repositories and subscriber
+configuration must not be mutated concurrently.
+
+`ScheduledRuntimeFailure` contains the exact aware requested deadline and exact
+ordinary exception instance. A mandatory `ScheduledRuntimeFailureSink`
+receives scheduled failures after guard release. It does not store history or
+create events. Synchronous errors retain direct propagation.

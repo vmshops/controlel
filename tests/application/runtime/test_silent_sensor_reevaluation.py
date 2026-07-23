@@ -95,6 +95,14 @@ class ManualScheduler:
         return [task for task in self.tasks if not task.cancelled and not task.fired]
 
 
+class RecordingScheduledFailureSink:
+    def __init__(self):
+        self.failures = []
+
+    def report(self, failure) -> None:
+        self.failures.append(failure)
+
+
 class RecordingHeatSource:
     def __init__(self):
         self.commands: list[HeatSourceCommand] = []
@@ -151,6 +159,7 @@ def create_runtime(
         heat_source_port=configured_port,
         clock=configured_clock,
         scheduler=configured_scheduler,
+        scheduled_failure_sink=RecordingScheduledFailureSink(),
         max_future_skew=timedelta(0),
         indeterminate_grace_period=grace,
         indeterminate_timeout_action=timeout_action,
@@ -473,16 +482,17 @@ def test_actionable_timed_out_uncertainty_maps_safety_execution_and_suppression(
 
 def test_timeout_failure_retains_state_and_later_manual_retry_executes():
     runtime, clock, scheduler, port = create_runtime()
+    failure_sink = runtime.scheduled_failure_sink
     runtime.start()
     timeout_task = scheduler.active[0]
     clock.current_time = timeout_task.when
     error = RuntimeError("source failed")
     port.error = error
 
-    with pytest.raises(RuntimeError) as raised:
-        timeout_task.invoke()
+    timeout_task.invoke()
 
-    assert raised.value is error
+    assert failure_sink.failures[0].error is error
+    assert failure_sink.failures[0].scheduled_for == timeout_task.when
     assert runtime.heat_demand_safety_state_store.get().indeterminate_since == NOW
     assert runtime.heat_source_state_store.get() is None
     assert scheduler.active == []

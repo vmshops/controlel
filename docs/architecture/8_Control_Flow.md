@@ -112,3 +112,38 @@ There is no production scheduler implementation. There are no polling loops,
 background threads, cleanup jobs, persistence, recurring retries, modulation,
 DHW behavior, valve control, source routing, multiple sources, or physical
 confirmation.
+
+## Serialized execution and shutdown
+
+The future host submits every public call and scheduled callback through one
+serialized context. `ControlRuntime` additionally acquires a non-blocking
+execution guard for the entire flow above. It never waits or queues. Observer,
+port, scheduler, or competing-thread re-entry raises
+`RuntimeReentrancyError`; a compliant host avoids normal overlap.
+
+`stop()` follows this exact order:
+
+```text
+enter guard
+-> mark STOPPED
+-> invalidate generation
+-> capture handle
+-> clear handle and deadline ownership
+-> best-effort cancel
+```
+
+Repeated stop is a no-op. A direct stop that overlaps an operation is rejected;
+the runtime does not wait. A compliant host submits stop after the active
+operation. If a callback runs first, it completes or fails before shutdown. If
+stop runs first, the callback is a no-op. No shutdown source command is
+created, and stopped runtimes cannot restart.
+
+Scheduled callback exceptions cannot produce a result. Exact ordinary
+exceptions are reported to `ScheduledRuntimeFailureSink` after the guard is
+released. Sink exceptions escape to the host callback boundary. Synchronous
+public exceptions continue to propagate to their caller.
+
+`Scheduler` tasks are one-shot aware absolute wall-clock deadlines. Callbacks
+may be late, cancellation is best effort, and queued callbacks may arrive
+after cancellation. A runtime-compatible Scheduler delivers callbacks on the
+same serialized host context; generation checks remain authoritative.

@@ -50,6 +50,11 @@ class PassiveScheduler:
         return PassiveScheduledTask()
 
 
+class NoOpScheduledFailureSink:
+    def report(self, failure) -> None:
+        pass
+
+
 class RecordingHeatSource:
     def __init__(self, failures: int = 0):
         self.failures = failures
@@ -127,6 +132,7 @@ def create_runtime(
         heat_source_port=port,
         clock=clock or MutableClock(),
         scheduler=PassiveScheduler(),
+        scheduled_failure_sink=NoOpScheduledFailureSink(),
         max_future_skew=max_future_skew,
         indeterminate_grace_period=timedelta(days=1),
         indeterminate_timeout_action=HeatingAction.DISABLE_HEATING,
@@ -160,6 +166,7 @@ def create_runtime_with_secondary(port: RecordingHeatSource) -> ControlRuntime:
         port,
         MutableClock(),
         PassiveScheduler(),
+        NoOpScheduledFailureSink(),
         timedelta(0),
         timedelta(days=1),
         HeatingAction.DISABLE_HEATING,

@@ -62,3 +62,21 @@ state or scheduling.
 
 Event-only observers do not receive this synchronous result. Logging,
 persistence, correlation IDs, and diagnostic events remain outside scope.
+
+## Observer execution ownership
+
+Event publication executes inside the complete guarded runtime operation.
+Subscribers therefore run on the authoritative serialized host context.
+Subscriber configuration must be completed before processing or performed
+through that same context.
+
+If an observer synchronously calls `start()`, `process_temperature()`,
+`reevaluate_heat_demand()`, or `stop()`, the nested call raises
+`RuntimeReentrancyError` immediately before it can mutate runtime state.
+Subscriber exceptions, including that error when uncaught, continue to
+propagate through the synchronous public call.
+
+Scheduled evaluation has no synchronous caller. Its ordinary exceptions are
+reported through the mandatory `ScheduledRuntimeFailureSink`, not through a
+notification event. The sink is invoked only after the runtime guard has been
+released.

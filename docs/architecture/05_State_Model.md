@@ -120,3 +120,33 @@ silent sensor before the first measurement. Startup with no demand begins
 grace, or applies the explicit timeout action immediately when grace is zero.
 Normal port return records application-level success, not physical heat-source
 confirmation.
+
+## Runtime ownership and terminal lifecycle
+
+The host serializes all runtime calls. A defensive non-blocking, non-reentrant
+guard covers reads and writes to `RuntimeStateStore`, `ZoneDemandStore`,
+`HeatDemandSafetyStateStore`, `HeatSourceStateStore`, timer ownership, event
+publication, and source execution. The guard never waits or queues. Concurrent
+or nested entry raises `RuntimeReentrancyError`.
+
+The private lifecycle is:
+
+```text
+OPEN -> STOPPED
+```
+
+Repeated `start()` remains a valid evaluation while open. `stop()` is terminal
+and idempotent. It marks the runtime stopped, invalidates schedule generation,
+and clears handle/deadline ownership before best-effort cancellation.
+Cancellation failure propagates but cannot reopen the runtime. Start,
+temperature processing, and manual evaluation after stop raise
+`RuntimeStoppedError`.
+
+Stale, duplicate, cancelled, and post-stop callbacks perform no evaluation,
+state mutation, command, or failure report. If a valid scheduled operation
+fails, its exact ordinary exception and requested deadline are delivered to
+`ScheduledRuntimeFailureSink` after guard release. Synchronous failures still
+propagate directly and never enter that sink.
+
+All runtime and lifecycle state remains in memory and is lost when the process
+or runtime instance is replaced.

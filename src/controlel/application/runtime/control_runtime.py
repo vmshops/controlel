@@ -1,4 +1,7 @@
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime, timedelta
+from threading import Lock
 
 from controlel.application.configuration.zone_target_resolver import (
     ZoneTargetResolver,
@@ -9,11 +12,19 @@ from controlel.application.handlers.temperature_event_handler import (
 )
 from controlel.application.handlers.zone_demand_handler import ZoneDemandHandler
 from controlel.application.ports.heat_source_port import HeatSourcePort
+from controlel.application.ports.scheduled_runtime_failure_sink import (
+    ScheduledRuntimeFailure,
+    ScheduledRuntimeFailureSink,
+)
 from controlel.application.ports.scheduler import ScheduledTaskHandle, Scheduler
 from controlel.application.runtime.heat_demand_evaluation_result import (
     HeatDemandEvaluationResult,
     HeatDemandEvaluationStatus,
     HeatDemandEvaluationTrigger,
+)
+from controlel.application.runtime.runtime_lifecycle import (
+    RuntimeReentrancyError,
+    RuntimeStoppedError,
 )
 from controlel.application.runtime.runtime_processing_result import (
     RuntimeProcessingResult,
@@ -67,12 +78,14 @@ class ControlRuntime:
         heat_source_port: HeatSourcePort,
         clock: Clock,
         scheduler: Scheduler,
+        scheduled_failure_sink: ScheduledRuntimeFailureSink,
         max_future_skew: timedelta,
         indeterminate_grace_period: timedelta,
         indeterminate_timeout_action: HeatingAction,
     ) -> None:
         self.clock = clock
         self.scheduler = scheduler
+        self.scheduled_failure_sink = scheduled_failure_sink
         self.event_bus = EventBus()
         self.state_store = RuntimeStateStore()
         self.zone_demand_store = ZoneDemandStore()
@@ -119,14 +132,64 @@ class ControlRuntime:
         self._scheduled_handle: ScheduledTaskHandle | None = None
         self._scheduled_deadline: datetime | None = None
         self._schedule_generation = 0
+        self._execution_lock = Lock()
+        self._active_operation: str | None = None
+        self._stopped = False
 
     def start(self) -> HeatDemandEvaluationResult:
-        return self._evaluate_heat_demand(HeatDemandEvaluationTrigger.STARTUP)
+        with self._runtime_operation("start"):
+            return self._evaluate_heat_demand(HeatDemandEvaluationTrigger.STARTUP)
 
     def reevaluate_heat_demand(self) -> HeatDemandEvaluationResult:
-        return self._evaluate_heat_demand(HeatDemandEvaluationTrigger.MANUAL)
+        with self._runtime_operation("reevaluate_heat_demand"):
+            return self._evaluate_heat_demand(HeatDemandEvaluationTrigger.MANUAL)
 
     def process_temperature(
+        self,
+        measurement: Measurement,
+    ) -> RuntimeProcessingResult:
+        with self._runtime_operation("process_temperature"):
+            return self._process_temperature(measurement)
+
+    def stop(self) -> None:
+        with self._runtime_operation("stop"):
+            if self._stopped:
+                return
+
+            self._stopped = True
+            self._schedule_generation += 1
+            handle = self._scheduled_handle
+            self._scheduled_handle = None
+            self._scheduled_deadline = None
+            if handle is not None:
+                handle.cancel()
+
+    @contextmanager
+    def _runtime_operation(
+        self,
+        operation: str,
+        *,
+        allow_stopped: bool = False,
+    ) -> Iterator[None]:
+        if not self._execution_lock.acquire(blocking=False):
+            active_operation = self._active_operation
+            if active_operation is None:
+                active_operation = "unknown"
+            raise RuntimeReentrancyError(
+                active_operation=active_operation,
+                attempted_operation=operation,
+            )
+
+        self._active_operation = operation
+        try:
+            if operation != "stop" and not allow_stopped and self._stopped:
+                raise RuntimeStoppedError("ControlRuntime has been stopped")
+            yield
+        finally:
+            self._active_operation = None
+            self._execution_lock.release()
+
+    def _process_temperature(
         self,
         measurement: Measurement,
     ) -> RuntimeProcessingResult:
@@ -254,7 +317,7 @@ class ControlRuntime:
         generation = self._schedule_generation + 1
 
         def callback() -> None:
-            self._run_scheduled_evaluation(deadline, generation)
+            self._scheduled_callback(deadline, generation)
 
         new_handle = self.scheduler.schedule_at(deadline, callback)
         self._schedule_generation = generation
@@ -264,18 +327,42 @@ class ControlRuntime:
         if old_handle is not None:
             old_handle.cancel()
 
-    def _run_scheduled_evaluation(
+    def _scheduled_callback(
         self,
         scheduled_for: datetime,
         generation: int,
     ) -> None:
-        if (
-            generation != self._schedule_generation
-            or self._scheduled_handle is None
-            or self._scheduled_deadline != scheduled_for
-        ):
+        if self._stopped or generation < self._schedule_generation:
             return
 
+        try:
+            with self._runtime_operation(
+                "scheduled_callback",
+                allow_stopped=True,
+            ):
+                if (
+                    self._stopped
+                    or generation != self._schedule_generation
+                    or self._scheduled_handle is None
+                    or self._scheduled_deadline != scheduled_for
+                ):
+                    return
+
+                self._consume_scheduled_evaluation(
+                    scheduled_for=scheduled_for,
+                )
+        except Exception as error:
+            self.scheduled_failure_sink.report(
+                ScheduledRuntimeFailure(
+                    scheduled_for=scheduled_for,
+                    error=error,
+                )
+            )
+
+    def _consume_scheduled_evaluation(
+        self,
+        scheduled_for: datetime,
+    ) -> None:
         self._schedule_generation += 1
         self._scheduled_handle = None
         self._scheduled_deadline = None

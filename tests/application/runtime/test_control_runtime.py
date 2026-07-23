@@ -32,6 +32,11 @@ class NoOpScheduler:
         return NoOpScheduledTask()
 
 
+class NoOpScheduledFailureSink:
+    def report(self, failure) -> None:
+        pass
+
+
 class NoOpHeatSource:
     def __init__(self):
         self.commands: list[HeatSourceCommand] = []
@@ -63,6 +68,7 @@ def create_runtime() -> tuple[ControlRuntime, NoOpHeatSource]:
             port,
             FixedClock(),
             NoOpScheduler(),
+            NoOpScheduledFailureSink(),
             timedelta(0),
             timedelta(minutes=1),
             HeatingAction.DISABLE_HEATING,
@@ -95,6 +101,7 @@ def test_control_runtime_constructor_uses_shared_source_contract_only():
         "heat_source_port",
         "clock",
         "scheduler",
+        "scheduled_failure_sink",
         "max_future_skew",
         "indeterminate_grace_period",
         "indeterminate_timeout_action",
