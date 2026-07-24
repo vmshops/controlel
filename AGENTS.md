@@ -61,7 +61,7 @@ While editing:
 After editing run:
 
 ```powershell
-pytest
+python -m pytest
 ruff check .
 ruff format --check .
 pre-commit run --all-files
