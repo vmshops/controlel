@@ -41,6 +41,7 @@ strict = true
 
 
 [tool.pytest.ini_options]
+# Home Assistant's asyncio auto mode is scoped to the isolated framework conftest.
 testpaths = [
     "tests"
 ]

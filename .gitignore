@@ -4,6 +4,7 @@ __pycache__/
 
 # Virtual environments
 .venv/
+.venv-ha/
 
 # VS Code
 .vscode/*.log

@@ -13,12 +13,14 @@ def test_manifest_has_required_custom_component_contract():
     assert manifest == {
         "domain": "controlel",
         "name": "Controlel",
-        "version": "0.1.0",
+        "codeowners": ["@vmshops"],
         "config_flow": True,
-        "single_config_entry": True,
+        "documentation": "https://github.com/vmshops/controlel",
         "integration_type": "hub",
         "iot_class": "local_push",
         "requirements": [],
+        "single_config_entry": True,
+        "version": "0.1.0",
     }
 
 

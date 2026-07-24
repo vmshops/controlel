@@ -39,3 +39,28 @@ The repository must be installed as a development package so
 `custom_components.controlel` can import `controlel`. Home Assistant framework
 tests require a separate environment containing Home Assistant and its custom
 component test facilities; core tests remain independent.
+
+## Framework test environment fails to start
+
+Confirm the interpreter and exact packages first:
+
+```text
+python --version
+python -m pip show homeassistant pytest-homeassistant-custom-component
+```
+
+The supported harness uses Python 3.14.2 or newer, Home Assistant `2026.7.3`,
+and `pytest-homeassistant-custom-component==0.13.347`. Install the hashed lock
+with `python -m pip install --require-hashes -r requirements/ha-test.txt`, then
+install the checkout separately with `python -m pip install --no-deps -e .`.
+
+If native Windows reports `ModuleNotFoundError: No module named 'fcntl'` or
+`No module named 'resource'`, run the framework suite in Linux or WSL. These
+modules are imported by the pinned Home Assistant pytest bootstrap and are not
+provided by Windows. Core and dependency-free adapter suites remain supported
+in native Windows and do not require Home Assistant.
+
+If imports resolve to another checkout or an unexpected package version,
+delete and recreate only `.venv-ha`, reinstall the lock, and repeat the
+editable install. Do not add Home Assistant to the ordinary project
+dependencies to repair an environment mix-up.

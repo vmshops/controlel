@@ -131,6 +131,36 @@ def test_service_failure_preserves_context_and_original_exception():
     assert raised.__cause__ is original
 
 
+def test_service_failure_wrapper_does_not_stringify_original_on_worker():
+    class ThreadBoundError(RuntimeError):
+        def __str__(self):
+            raise AssertionError("original exception must not be stringified on the worker")
+
+    async def scenario():
+        hass = FakeHass()
+        original = ThreadBoundError()
+        hass.services.error = original
+        executor = HomeAssistantRuntimeExecutor()
+        port = HomeAssistantHeatSourcePort(
+            hass,
+            HomeAssistantEventLoopBridge(asyncio.get_running_loop()),
+            binding(),
+            lambda: None,
+        )
+        with pytest.raises(HomeAssistantServiceCallError) as raised:
+            await executor.async_submit(
+                port.execute,
+                command(HeatingAction.ENABLE_HEATING),
+            )
+        await executor.async_close()
+        return raised.value, original
+
+    raised, original = asyncio.run(scenario())
+
+    assert raised.original_error is original
+    assert str(raised).endswith("(ThreadBoundError)")
+
+
 def test_service_failure_does_not_update_applied_core_state():
     async def scenario():
         hass = FakeHass()

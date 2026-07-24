@@ -40,7 +40,8 @@ class HomeAssistantServiceCallError(RuntimeError):
         self.target_entity_id = service_call.target_entity_id
         self.original_error = original_error
         super().__init__(
-            f"Home Assistant service {self.domain}.{self.service} failed for {self.target_entity_id}: {original_error}"
+            f"Home Assistant service {self.domain}.{self.service} failed for "
+            f"{self.target_entity_id} ({type(original_error).__name__})"
         )
 
 

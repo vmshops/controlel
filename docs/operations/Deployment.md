@@ -48,3 +48,26 @@ Configuration is immutable for a runtime lifetime. A reload fully unloads the
 host, stops the runtime, closes its executor, and builds new repositories and
 a new runtime. No measurements, demands, safety state, applied action, or
 physical heat-source state are restored or inferred.
+
+## Development deployment
+
+Milestone 24A validates the existing component against Home Assistant
+`2026.7.3`; it is not an ordinary HACS deployment. For a development Home
+Assistant installation, copy or mount `custom_components/controlel` into the
+configuration directory and install this repository into the same Python
+environment:
+
+```text
+python -m pip install --no-deps -e /path/to/controlel
+```
+
+The editable install is required because the manifest deliberately declares
+`"requirements": []` and the `controlel` core package has not been published.
+The component does not vendor the core. Container and Home Assistant OS
+deployments need a purpose-built development image or equivalent environment
+that contains that editable installation; merely copying the component is not
+sufficient.
+
+Do not advertise this build as HACS-ready. Publishing and exactly pinning the
+core package, release packaging, HACS metadata, and supported end-user
+installation instructions remain deferred.

@@ -42,3 +42,12 @@ installed, such as an editable development installation. A future packaging
 milestone must publish and pin the core package before normal HACS deployment.
 The core test suite does not require Home Assistant; Home Assistant framework
 tests require a separate integration-test environment.
+
+Framework compatibility is tested against Home Assistant `2026.7.3` with
+`pytest-homeassistant-custom-component==0.13.347` on Python 3.14.2 or newer.
+The isolated, hashed environment is defined by `requirements/ha-test.in` and
+`requirements/ha-test.txt`; setup and suite commands are in the
+[development guide](docs/development/DevelopmentGuide.md). This compatibility
+harness does not make the integration HACS-ready: the core package is not
+published, `manifest.json` intentionally has `requirements: []`, and no HACS
+metadata is provided.
