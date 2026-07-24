@@ -108,15 +108,16 @@ The existing zone-actuator command, router, dispatcher, port, and per-zone
 applied state remain independently usable but inactive in this shared-source
 runtime.
 
-There is no production scheduler implementation. There are no polling loops,
-background threads, cleanup jobs, persistence, recurring retries, modulation,
-DHW behavior, valve control, source routing, multiple sources, or physical
-confirmation.
+The core has no production scheduler implementation. The first Home Assistant
+host supplies a one-shot absolute-time scheduler adapter. There are no polling
+loops, cleanup jobs, persistence, recurring retries, modulation, DHW behavior,
+valve control, source routing, multiple sources, or physical confirmation.
 
 ## Serialized execution and shutdown
 
-The future host submits every public call and scheduled callback through one
-serialized context. `ControlRuntime` additionally acquires a non-blocking
+The Home Assistant host submits every public call and scheduled callback
+through one dedicated single-worker executor. `ControlRuntime` additionally
+acquires a non-blocking
 execution guard for the entire flow above. It never waits or queues. Observer,
 port, scheduler, or competing-thread re-entry raises
 `RuntimeReentrancyError`; a compliant host avoids normal overlap.
@@ -147,3 +148,25 @@ public exceptions continue to propagate to their caller.
 may be late, cancellation is best effort, and queued callbacks may arrive
 after cancellation. A runtime-compatible Scheduler delivers callbacks on the
 same serialized host context; generation checks remain authoritative.
+
+## Home Assistant observation and startup flow
+
+The adapter subscribes only to the configured temperature entity. It accepts
+finite numeric Celsius and Fahrenheit states, converts Fahrenheit to Celsius,
+and uses the aware `State.last_updated` exactly as
+`Measurement.timestamp`. Unknown, unavailable, empty, malformed, non-finite,
+missing-unit, unsupported-unit, missing-timestamp, and naive-timestamp states
+produce no measurement. Receipt time, `SystemClock.now()`, and
+`State.last_changed` are never timestamp fallbacks.
+
+Startup subscribes in buffering mode before reading the current state. It
+processes the snapshot, drains buffered state changes in arrival order, calls
+`ControlRuntime.start()` on the runtime worker, drains events accumulated
+during start, and atomically switches to live ordered submission. This ensures
+valid initial evidence is processed before a zero-grace startup safety action
+can be selected.
+
+The `HeatSourcePort` maps typed enable and disable actions to two immutable
+Home Assistant service calls. It waits on the runtime worker for blocking
+service completion marshalled to the event loop. Normal completion records
+applied core state but does not prove physical source state.

@@ -1,0 +1,44 @@
+{
+  "title": "Controlel",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Configure one-zone heating control",
+        "description": "Configure one primary temperature sensor and one shared heat source.",
+        "data": {
+          "sensor_id": "Sensor ID",
+          "sensor_name": "Sensor name",
+          "temperature_entity_id": "Temperature entity",
+          "zone_id": "Zone ID",
+          "zone_name": "Zone name",
+          "target_temperature": "Target temperature",
+          "primary_measurement_max_age": "Primary measurement maximum age",
+          "max_future_skew": "Maximum future clock skew",
+          "indeterminate_grace_period": "Indeterminate grace period",
+          "indeterminate_timeout_action": "Timeout action",
+          "enable_service_domain": "Enable service domain",
+          "enable_service_name": "Enable service name",
+          "enable_target_entity_id": "Enable target entity",
+          "disable_service_domain": "Disable service domain",
+          "disable_service_name": "Disable service name",
+          "disable_target_entity_id": "Disable target entity"
+        }
+      }
+    },
+    "error": {
+      "invalid_configuration": "The configuration is invalid.",
+      "controlel_service_not_allowed": "Controlel cannot call its own service domain.",
+      "unsupported_temperature_unit": "The available entity must use Celsius or Fahrenheit."
+    }
+  },
+  "issues": {
+    "heat_source_service_failure": {
+      "title": "Heat-source service call failed",
+      "description": "Controlel could not complete the configured Home Assistant heat-source service call: {error}"
+    },
+    "fatal_runtime_failure": {
+      "title": "Controlel runtime stopped",
+      "description": "Controlel stopped after a fatal runtime failure: {error}. Reload the integration after correcting the cause."
+    }
+  }
+}

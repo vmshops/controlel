@@ -2,11 +2,12 @@
 
 ## Serialized host boundary
 
-The future runtime host or host event loop is the authoritative owner of
-serialized `ControlRuntime` execution. It must submit `start()`,
+The Home Assistant runtime host is the first authoritative owner of serialized
+`ControlRuntime` execution. It submits `start()`,
 `process_temperature()`, `reevaluate_heat_demand()`, scheduled callbacks, and
-`stop()` through one context. `ControlRuntime` does not create a queue,
-executor, worker, thread, or event loop.
+`stop()` through one dedicated `ThreadPoolExecutor(max_workers=1)`.
+`ControlRuntime` itself still creates no queue, executor, worker, thread, or
+event loop.
 
 The runtime defensively holds one non-reentrant execution guard across each
 complete state transition, including event observers, scheduler calls, and
@@ -34,4 +35,16 @@ The host must provide:
 - serialized submission of every runtime entry point;
 - future wall-clock-to-monotonic deadline conversion when appropriate.
 
-There is no production Scheduler or Home Assistant integration in the core.
+The deployable adapter lives in `custom_components/controlel` and imports the
+core. Domain and application modules never import Home Assistant or adapter
+code. One typed `ConfigEntry.runtime_data` container owns one
+`HomeAssistantControlelHost`; no runtime host is stored in `hass.data`.
+
+Home Assistant event callbacks only buffer or submit work. A narrowly scoped
+thread-safe bridge lets the runtime worker request timer installation,
+cancellation, and blocking service completion on the Home Assistant event
+loop. Bridge coroutines never acquire the host's submission/lifecycle lock.
+
+The initial adapter is deliberately one entry, one zone, one primary sensor,
+and one shared heat source. Reconfiguration unloads and reconstructs the
+runtime; repositories are never mutated live.

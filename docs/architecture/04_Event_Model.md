@@ -70,6 +70,13 @@ Subscribers therefore run on the authoritative serialized host context.
 Subscriber configuration must be completed before processing or performed
 through that same context.
 
+For the Home Assistant host, this context is the integration's dedicated
+single runtime worker, not Home Assistant's event loop or general executor.
+The configured `state_changed` callback only captures the new state and
+buffers or queues it. A state change caused by a heat-source service call is
+processed after the currently executing runtime operation and cannot
+synchronously re-enter `ControlRuntime`.
+
 If an observer synchronously calls `start()`, `process_temperature()`,
 `reevaluate_heat_demand()`, or `stop()`, the nested call raises
 `RuntimeReentrancyError` immediately before it can mutate runtime state.
