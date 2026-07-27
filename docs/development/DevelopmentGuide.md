@@ -13,7 +13,7 @@ python -m pytest --ignore=tests/integrations/home_assistant/framework
 python -m pytest tests/integrations/home_assistant \
   --ignore=tests/integrations/home_assistant/framework
 
-# C. Real Home Assistant framework tests (from .venv-ha)
+# C. Real Home Assistant framework tests with local core (from .venv-ha)
 python -m pytest tests/integrations/home_assistant/framework
 ```
 
@@ -36,9 +36,30 @@ python3.14 -m venv .venv-ha
   tests/integrations/home_assistant/framework
 ```
 
-The editable install is intentional: the custom component imports the reusable
-`controlel` package from this checkout. The local project must be installed
-separately and must not be added to the generated lock.
+The editable install is intentional for the local-source composition: the
+custom component imports the reusable `controlel` package from this checkout.
+The local project must be installed separately and must not be added to the
+generated lock.
+
+For public dependency validation, create a separate environment and never
+install the checkout as a distribution:
+
+```bash
+python3.14 -m venv .venv-ha-public
+./.venv-ha-public/bin/python -m pip install --require-hashes \
+  -r requirements/ha-test.txt
+./.venv-ha-public/bin/python -m pip install \
+  --no-cache-dir \
+  --index-url https://pypi.org/simple \
+  controlel==0.1.0
+CONTROLEL_FRAMEWORK_COMPOSITION=public \
+  ./.venv-ha-public/bin/python -m pytest \
+  tests/integrations/home_assistant/framework
+```
+
+This environment loads `custom_components/controlel` from the checkout through
+the normal Home Assistant custom-component test mechanism, but imports the core
+from `site-packages`. It must not add `src` to `PYTHONPATH`.
 
 Home Assistant 2026.7.3 imports POSIX-only `fcntl` and `resource` modules in
 its pytest bootstrap, so the standard framework command does not run in native
@@ -95,10 +116,9 @@ python3 -m script.hassfest --action validate \
   --integration-path /absolute/path/to/controlel/custom_components/controlel
 ```
 
-Framework compatibility is not HACS readiness. The core is not published,
-`custom_components/controlel/manifest.json` intentionally contains
-`"requirements": []`, and publishing plus manifest dependency work remains a
-later milestone.
+Framework compatibility is not HACS readiness. The manifest pins the published
+core as `controlel==0.1.0`, but HACS metadata and integration release packaging
+remain later work.
 
 ## Core artifact validation
 
@@ -116,5 +136,5 @@ python scripts/packaging/verify_clean_install.py dist
 
 The last command creates a clean temporary environment and runs outside the
 checkout. Detailed Windows commands, accepted archive contents, versioning,
-publication security, and the future manifest transition are documented in
+publication security, and the published manifest dependency contract are documented in
 [ReleaseGuide.md](ReleaseGuide.md).

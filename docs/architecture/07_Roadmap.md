@@ -27,13 +27,14 @@ versioned package and referenced by a pinned custom-component requirement.
 
 ## Milestone 24B: controlled core release
 
-Milestone 24B1 prepares the `controlel` core distribution with explicit PEP 517
+Milestone 24B1 prepared the `controlel` core distribution with explicit PEP 517
 metadata, wheel and sdist content validation, clean out-of-checkout wheel
-installation, and non-publishing packaging CI. Version `0.1.0` remains static
-in `pyproject.toml`, and the integration manifest deliberately keeps
-`requirements: []`.
+installation, and non-publishing packaging CI.
 
-Milestone 24B2 requires separate approval. It covers manual publication,
-independent public-index installation verification, and only then the exact
-Home Assistant manifest pin. HACS metadata and end-user distribution remain
-later release work.
+Milestone 24B2 published immutable core `controlel==0.1.0` and independently
+verified its public files. Integration `0.1.1` pins that exact dependency and
+CI validates both local editable compatibility and an isolated public package
+composition. Core and integration versions now evolve independently.
+
+HACS metadata, brands metadata, integration tagging, GitHub release packaging,
+and end-user HACS distribution remain later release work.

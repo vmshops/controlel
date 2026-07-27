@@ -22,7 +22,9 @@ The goal is to create a reliable heating controller capable of optimizing comfor
 
 Project phase: Home Assistant one-zone host vertical slice
 
-Version: 0.1.0
+Core version: 0.1.0
+
+Home Assistant integration version: 0.1.1
 
 ## Home Assistant development integration
 
@@ -36,21 +38,21 @@ enable and disable service calls. It uses a dedicated single-worker executor
 for every synchronous `ControlRuntime` operation. No core method runs on Home
 Assistant's event-loop thread.
 
-The manifest intentionally has `requirements: []`. The custom component is
-therefore deployable only where the local `controlel` core package is already
-installed, such as an editable development installation. A future packaging
-milestone must publish and pin the core package before normal HACS deployment.
-The core test suite does not require Home Assistant; Home Assistant framework
-tests require a separate integration-test environment.
+The integration manifest requires the exact public core release
+`controlel==0.1.0`. A supported custom-component deployment can therefore let
+Home Assistant obtain the core dependency automatically; users do not need to
+install the core manually. Editable installation remains available for local
+source compatibility testing. The core test suite does not require Home
+Assistant, while Home Assistant framework tests use separate local-source and
+public-package compositions.
 
 Framework compatibility is tested against Home Assistant `2026.7.3` with
 `pytest-homeassistant-custom-component==0.13.347` on Python 3.14.2 or newer.
 The isolated, hashed environment is defined by `requirements/ha-test.in` and
 `requirements/ha-test.txt`; setup and suite commands are in the
 [development guide](docs/development/DevelopmentGuide.md). This compatibility
-harness does not make the integration HACS-ready: the core package is not
-published, `manifest.json` intentionally has `requirements: []`, and no HACS
-metadata is provided.
+harness does not make the integration HACS-ready. No HACS metadata, integration
+release, or default-store publication is provided.
 
 ## Core package artifacts
 
@@ -60,9 +62,8 @@ configuration live in `pyproject.toml`; normal installation depends only on
 Pydantic. Packaging validation builds one wheel and one sdist, inspects their
 contents, and installs the wheel into a clean environment outside the checkout.
 
-Nothing is published by this repository configuration. The Home Assistant
-manifest remains empty until a verified artifact is manually published and
-installed from the public index. See the
-[core release guide](docs/development/ReleaseGuide.md) for build commands,
-security checks, the `controlel-core` fallback name, and the exact 24B2
-transition.
+Core `0.1.0` is published on PyPI and is immutable. Future core corrections
+require a new version; rebuilt local `0.1.0` artifacts must never be uploaded.
+Repository packaging CI remains validation-only and contains no publication
+automation. See the [core release guide](docs/development/ReleaseGuide.md) for
+the published release record, build validation, and version separation.

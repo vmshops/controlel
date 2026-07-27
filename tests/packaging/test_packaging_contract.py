@@ -94,12 +94,14 @@ def test_project_version_is_the_only_release_version_source() -> None:
     assert project_version not in package_source
 
 
-def test_manifest_remains_independent_and_has_no_unpublished_requirement() -> None:
+def test_manifest_pins_published_core_and_keeps_version_independent() -> None:
     manifest = json.loads((ROOT / "custom_components" / "controlel" / "manifest.json").read_text(encoding="utf-8"))
+    core_version = load_pyproject()["project"]["version"]
 
-    assert manifest["requirements"] == []
-    assert manifest["version"] == "0.1.0"
-    assert "controlel" not in " ".join(manifest["requirements"]).casefold()
+    assert core_version == "0.1.0"
+    assert manifest["requirements"] == [f"controlel=={core_version}"]
+    assert manifest["version"] == "0.1.1"
+    assert manifest["version"] != core_version
 
 
 def test_packaging_tools_are_pinned_and_isolated() -> None:

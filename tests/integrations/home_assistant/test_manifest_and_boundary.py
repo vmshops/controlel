@@ -1,7 +1,8 @@
 import json
+import tomllib
 from pathlib import Path
 
-from custom_components.controlel.const import CONFIG_ENTRY_VERSION
+from custom_components.controlel.const import CONFIG_ENTRY_VERSION, INTEGRATION_VERSION
 
 ROOT = Path(__file__).parents[3]
 COMPONENT = ROOT / "custom_components" / "controlel"
@@ -18,10 +19,30 @@ def test_manifest_has_required_custom_component_contract():
         "documentation": "https://github.com/vmshops/controlel",
         "integration_type": "hub",
         "iot_class": "local_push",
-        "requirements": [],
+        "requirements": ["controlel==0.1.0"],
         "single_config_entry": True,
-        "version": "0.1.0",
+        "version": "0.1.1",
     }
+
+
+def test_core_and_integration_versions_are_intentionally_independent():
+    manifest = json.loads((COMPONENT / "manifest.json").read_text(encoding="utf-8"))
+    with (ROOT / "pyproject.toml").open("rb") as pyproject_file:
+        core_version = tomllib.load(pyproject_file)["project"]["version"]
+
+    assert core_version == "0.1.0"
+    assert manifest["version"] == INTEGRATION_VERSION == "0.1.1"
+    assert manifest["requirements"] == [f"controlel=={core_version}"]
+    assert manifest["version"] != manifest["requirements"][0].partition("==")[2]
+
+
+def test_manifest_requirement_is_one_exact_public_distribution_pin():
+    manifest = json.loads((COMPONENT / "manifest.json").read_text(encoding="utf-8"))
+    requirements = manifest["requirements"]
+
+    assert requirements == ["controlel==0.1.0"]
+    assert len(requirements) == 1
+    assert not any(marker in requirements[0] for marker in ("~=", ">=", "<=", " @ ", "git+", "-e ", "file:"))
 
 
 def test_required_integration_files_exist():

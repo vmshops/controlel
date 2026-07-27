@@ -11,37 +11,48 @@ Controlel uses distinct release states:
    backend under `dist/`.
 3. **Verified wheel** has passed metadata, archive-content, and clean
    out-of-checkout installation checks.
-4. **Published core package** is a verified artifact uploaded manually to the
-   approved public package index and then independently installed from that
-   index. Milestone 24B1 does not reach this state.
-5. **Home Assistant exact dependency pin** is added only after public-index
-   verification. Until then the custom-component manifest must keep
-   `"requirements": []`.
+4. **Published core package** is the verified `controlel==0.1.0` release on
+   PyPI.
+5. **Home Assistant exact dependency pin** is the integration contract
+   `"requirements": ["controlel==0.1.0"]`.
 6. **HACS readiness** additionally requires integration release packaging and
    HACS metadata. A verified or published core wheel alone does not provide
    HACS readiness.
 
 ## Distribution identity and version
 
-The preferred distribution name and Python import package are both
-`controlel`. A package-index availability check found no existing distribution
-at the time of Milestone 24B1, but availability and project ownership must be
-checked again immediately before publication.
+The distribution name and Python import package are both `controlel`. Version
+`0.1.0` is publicly available on PyPI.
 
-The documented fallback distribution name is `controlel-core`. A fallback
-distribution would still install the unchanged `controlel` import package.
-Do not switch names or versions silently; any collision requires an explicit
-review.
-
-The first core release candidate is `0.1.0`. The single authoritative release
+The first core release is `0.1.0`. The single authoritative release
 version is the static `project.version` in `pyproject.toml`. Runtime access uses
 `controlel.__version__`, which reads installed distribution metadata through
 `importlib.metadata`. An uninstalled source import reports
 `0.0.0+uninstalled`; it never pretends to be a release.
 
 The custom-component manifest version is a separate integration version. It is
-not a second source for the core package version and need not remain identical
-in later releases.
+`0.1.1`, is not a second source for the core package version, and evolves
+independently.
+
+## Published core 0.1.0 record
+
+- Distribution: `controlel`
+- Version: `0.1.0`
+- Exact release-source commit:
+  `99fe58c1461fdb58fd3ed5b4fc49f300d3770a97`
+- Preceding packaging commit:
+  `d96f9f7bb21650c006fc8ef3dd9d7c30b41db76f`
+- Wheel: `controlel-0.1.0-py3-none-any.whl`
+- Wheel SHA-256:
+  `262c1356b997da763d0edab5fe8397018ef50c89524a869b9ab5265b9d6ca16f`
+- Sdist: `controlel-0.1.0.tar.gz`
+- Sdist SHA-256:
+  `af69f97fdfab306130991b73a3caeac510b6c6475eadecc023818eb40c01fcd4`
+- Public-index verification date: 2026-07-27
+
+The classifier correction in the exact release-source commit is part of the
+published artifacts; the release did not come from the preceding packaging
+commit alone.
 
 ## Build configuration and contents
 
@@ -130,14 +141,13 @@ Pop-Location
 Do not run the full source-tree suite as an installed-wheel smoke test. The
 installed test intentionally verifies a small representative package surface.
 
-## Public release checklist
+## Future core release checklist
 
-Milestone 24B1 stops after local and CI artifact verification. Before any first
-publication:
+Core `0.1.0` is immutable. Before any future core publication:
 
-- obtain explicit approval for Milestone 24B2;
-- confirm the `controlel` package-index project is available or controlled by
-  the project owner;
+- obtain explicit approval for the future core release;
+- confirm the `controlel` package-index project is controlled by the project
+  owner;
 - use a package-index account controlled by the project owner;
 - enable two-factor authentication;
 - build from a clean, reviewed commit;
@@ -147,26 +157,20 @@ publication:
 - keep credentials, tokens, `.pypirc`, and release configuration out of the
   repository;
 - upload only the approved artifacts manually;
-- install `controlel==0.1.0` from the public index into another clean
+- install the new exact version from the public index into another clean
   environment;
 - confirm the installed files, version, and hashes correspond to the approved
   release.
 
-No publication credentials, trusted publishing, upload workflow, or automatic
-GitHub release belongs in Milestone 24B1. Trusted publishing can be considered
-separately later.
+The repository still contains no publication credentials, upload workflow, or
+automatic GitHub release. Packaging CI validates current source builds; it
+must not upload rebuilt `0.1.0` artifacts or expect their hashes to reproduce
+the immutable public files.
 
-## Exact Milestone 24B2 transition
+## Home Assistant dependency contract
 
-After the public-index verification succeeds:
-
-1. change the Home Assistant manifest to the exact approved pin
-   `controlel==0.1.0` (or the approved fallback distribution);
-2. use no ranges, wildcard, Git URL, branch, or local path;
-3. remove editable core installation from HA framework CI where appropriate;
-4. run HA framework tests against the published dependency;
-5. run hassfest;
-6. prepare a new custom-component version;
-7. complete separate HACS release work.
-
-The integration must never reference an unavailable distribution.
+Integration `0.1.1` pins exactly `controlel==0.1.0`. CI keeps local editable
+compatibility and public-package framework jobs isolated. The public job never
+installs the repository as a distribution and proves the core resolves from
+`site-packages`. Normal supported integration installation can obtain the core
+automatically. HACS release work remains separate and incomplete.

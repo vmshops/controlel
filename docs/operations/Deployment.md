@@ -37,12 +37,10 @@ replaced. Successful port return is not physical source-state confirmation.
 
 ## Custom-component packaging
 
-The integration source is `custom_components/controlel`. Its manifest version
-matches the project version `0.1.0`, declares one config entry, and has
-`requirements: []`. It therefore assumes the local `controlel` core package is
-already installed. The core is not vendored into the component. A future
-release milestone must publish a distributable core and add an exact pinned
-requirement before ordinary HACS deployment.
+The integration source is `custom_components/controlel`. Integration version
+`0.1.1` declares one config entry and exactly requires `controlel==0.1.0`.
+The integration and core versions are independent, and the core is not
+vendored into the component.
 
 Configuration is immutable for a runtime lifetime. A reload fully unloads the
 host, stops the runtime, closes its executor, and builds new repositories and
@@ -51,33 +49,25 @@ physical heat-source state are restored or inferred.
 
 ## Development deployment
 
-Milestone 24A validates the existing component against Home Assistant
-`2026.7.3`; it is not an ordinary HACS deployment. For a development Home
-Assistant installation, copy or mount `custom_components/controlel` into the
-configuration directory and install this repository into the same Python
+For local source development, copy or mount `custom_components/controlel` into
+the configuration directory and install this repository into the same Python
 environment:
 
 ```text
 python -m pip install --no-deps -e /path/to/controlel
 ```
 
-The editable install is required because the manifest deliberately declares
-`"requirements": []` and the `controlel` core package has not been published.
-The component does not vendor the core. Container and Home Assistant OS
-deployments need a purpose-built development image or equivalent environment
-that contains that editable installation; merely copying the component is not
-sufficient.
+The editable install overrides the public core only for local development.
+Public-package validation instead installs `controlel==0.1.0` into a separate
+environment and never installs the checkout as a distribution.
 
-Do not advertise this build as HACS-ready. Publishing and exactly pinning the
-core package, release packaging, HACS metadata, and supported end-user
-installation instructions remain deferred.
+For a supported custom-component deployment, Home Assistant can install the
+exact manifest dependency automatically; users do not need to install the core
+manually. This does not make the repository HACS-ready: HACS metadata,
+integration release packaging, and supported distribution work remain
+deferred.
 
-Milestone 24B1 verifies locally built core artifacts but does not publish them.
-Consequently, development deployment still requires the editable core install
-shown above. A locally verified wheel is not a public deployment dependency,
-and the Home Assistant manifest must not reference it.
-
-After a separately approved 24B2 publication, deployment will install the
-exact public core version through the custom-component manifest. That
-transition requires a clean public-index installation test first; see the
-[release guide](../development/ReleaseGuide.md).
+Core `0.1.0` is an immutable public release. Any core correction requires a new
+version; never rebuild and re-upload `0.1.0`. See the
+[release guide](../development/ReleaseGuide.md) for its exact source commit and
+published hashes.
