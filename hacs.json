@@ -1,0 +1,7 @@
+{
+  "name": "Controlel",
+  "zip_release": true,
+  "filename": "controlel.zip",
+  "hide_default_branch": true,
+  "homeassistant": "2026.7.3"
+}

@@ -42,6 +42,23 @@ The integration source is `custom_components/controlel`. Integration version
 The integration and core versions are independent, and the core is not
 vendored into the component.
 
+The repository root HACS manifest defines a release asset named
+`controlel.zip`. Its archive root contains the files from
+`custom_components/controlel` directly because HACS extracts the archive into
+`config/custom_components/controlel`. The deterministic builder and independent
+validator are:
+
+```text
+python scripts/packaging/build_hacs_release.py --version 0.1.1
+python scripts/packaging/validate_hacs_release.py \
+  dist/hacs/controlel.zip \
+  --version 0.1.1 \
+  --checksum dist/hacs/controlel.zip.sha256
+```
+
+These commands only create ignored local release candidates. They do not
+create tags, GitHub Releases, or publication state.
+
 Configuration is immutable for a runtime lifetime. A reload fully unloads the
 host, stops the runtime, closes its executor, and builds new repositories and
 a new runtime. No measurements, demands, safety state, applied action, or
@@ -63,9 +80,10 @@ environment and never installs the checkout as a distribution.
 
 For a supported custom-component deployment, Home Assistant can install the
 exact manifest dependency automatically; users do not need to install the core
-manually. This does not make the repository HACS-ready: HACS metadata,
-integration release packaging, and supported distribution work remain
-deferred.
+manually. HACS metadata and deterministic release packaging are prepared, but
+no integration GitHub Release or default HACS-store entry exists. End-user
+installation instructions are in
+[HomeAssistantInstallation.md](HomeAssistantInstallation.md).
 
 Core `0.1.0` is an immutable public release. Any core correction requires a new
 version; never rebuild and re-upload `0.1.0`. See the

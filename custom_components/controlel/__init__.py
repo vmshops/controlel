@@ -22,7 +22,7 @@ from controlel.infrastructure.time.system_clock import SystemClock
 
 from .config import integration_config_from_entry_data
 from .event_loop_bridge import HomeAssistantEventLoopBridge
-from .failure_sink import HomeAssistantScheduledFailureSink
+from .failure_sink import HomeAssistantScheduledFailureSink, clear_entry_issues
 from .heat_source import HomeAssistantHeatSourcePort
 from .host import HomeAssistantControlelHost
 from .measurement_ingestion import HomeAssistantMeasurementMapper
@@ -147,3 +147,11 @@ async def async_unload_entry(
         await host.async_stop()
         runtime_data.host = None
     return True
+
+
+async def async_remove_entry(
+    hass: HomeAssistant,
+    entry: ControlelConfigEntry,
+) -> None:
+    """Remove Repairs issues that belong to a deleted config entry."""
+    clear_entry_issues(hass, entry.entry_id)

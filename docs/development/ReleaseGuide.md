@@ -1,4 +1,4 @@
-# Core package release guide
+# Release guide
 
 ## Release states
 
@@ -173,4 +173,49 @@ Integration `0.1.1` pins exactly `controlel==0.1.0`. CI keeps local editable
 compatibility and public-package framework jobs isolated. The public job never
 installs the repository as a distribution and proves the core resolves from
 `site-packages`. Normal supported integration installation can obtain the core
-automatically. HACS release work remains separate and incomplete.
+automatically.
+
+## Home Assistant integration release contract
+
+Integration releases use a separate version stream:
+
+- manifest and `INTEGRATION_VERSION`: `0.1.1`;
+- integration tag: `v0.1.1`;
+- GitHub Release name:
+  `Controlel Home Assistant Integration v0.1.1`;
+- HACS asset: `controlel.zip`;
+- checksum asset: `controlel.zip.sha256`;
+- exact core dependency: `controlel==0.1.0`.
+
+The repository is prepared for this release but no tag or GitHub Release
+exists. Core provenance tags use `core-vX.Y.Z`, but core GitHub Releases must
+not be created in this monorepo because HACS consumes the repository-wide
+release stream.
+
+The ZIP contains only files originating below
+`custom_components/controlel`, placed directly at archive root. GitHub's
+automatic source archives are not the HACS asset.
+
+## Manual integration release checklist
+
+Every remote step requires explicit approval:
+
+1. Confirm a clean synchronized `main` and record its exact commit.
+2. Confirm source, framework, hassfest, HACS, formatting, and release-artifact
+   CI are green.
+3. Build the archive twice and require byte-identical output.
+4. Run the independent validator and manually inspect the member list.
+5. Record the ZIP SHA-256.
+6. Create annotated tag `v0.1.1` at the reviewed commit.
+7. Create GitHub Release
+   `Controlel Home Assistant Integration v0.1.1`.
+8. Attach `controlel.zip` and `controlel.zip.sha256`; download them again and
+   verify their hashes.
+9. Install through HACS in a clean supported Home Assistant instance.
+10. Verify public core dependency installation, config flow, setup, unload,
+    reload, restart, Repairs cleanup, rollback selection, and removal.
+11. Record commit, tag, filenames, hashes, Home Assistant/HACS versions, and
+    results.
+
+Never move a published tag or replace a published asset. A correction uses a
+higher integration patch version.

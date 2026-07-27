@@ -21,6 +21,17 @@ type DeleteIssue = Callable[[object, str, str], None]
 type FatalHandler = Callable[[Exception], None]
 
 
+def clear_entry_issues(
+    hass: object,
+    entry_id: str,
+    delete_issue: DeleteIssue | None = None,
+) -> None:
+    """Remove every Repairs issue owned by one deleted config entry."""
+    delete = delete_issue or _default_delete_issue
+    delete(hass, DOMAIN, f"{entry_id}_{RECOVERABLE_SERVICE_ISSUE_SUFFIX}")
+    delete(hass, DOMAIN, f"{entry_id}_{FATAL_RUNTIME_ISSUE_SUFFIX}")
+
+
 class HomeAssistantScheduledFailureSink:
     def __init__(
         self,

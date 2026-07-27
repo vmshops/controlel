@@ -36,5 +36,20 @@ verified its public files. Integration `0.1.1` pins that exact dependency and
 CI validates both local editable compatibility and an isolated public package
 composition. Core and integration versions now evolve independently.
 
-HACS metadata, brands metadata, integration tagging, GitHub release packaging,
-and end-user HACS distribution remain later release work.
+At the conclusion of Milestone 24B, HACS metadata, brands metadata,
+integration tagging, GitHub release packaging, and end-user HACS distribution
+remained later release work.
+
+## Milestone 24C: controlled Home Assistant distribution
+
+Milestone 24C1 adds HACS metadata, a deterministic allowlisted integration ZIP,
+independent archive validation, non-publishing CI, removal cleanup, and
+end-user documentation. It does not create a tag or release.
+
+Milestone 24C2 is the separately approved integration tag, GitHub Release, and
+clean custom-HACS installation validation. The repository-wide release stream
+is reserved for integration releases; core provenance may use tags but not
+GitHub Releases in this monorepo.
+
+Milestone 24C3 remains optional Home Assistant Brands work and submission to
+the HACS default repository after the custom-repository release is stable.

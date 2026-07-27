@@ -23,6 +23,7 @@ async def test_real_loader_accepts_manifest_and_discovers_component(hass) -> Non
     assert str(integration.version) == INTEGRATION_VERSION
     assert integration.manifest["codeowners"] == ["@vmshops"]
     assert integration.manifest["documentation"] == "https://github.com/vmshops/controlel"
+    assert integration.manifest["issue_tracker"] == "https://github.com/vmshops/controlel/issues"
     assert integration.manifest["config_flow"] is True
     assert integration.single_config_entry is True
     assert integration.manifest["integration_type"] == "hub"

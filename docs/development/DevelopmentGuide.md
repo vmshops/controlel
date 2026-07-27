@@ -116,9 +116,31 @@ python3 -m script.hassfest --action validate \
   --integration-path /absolute/path/to/controlel/custom_components/controlel
 ```
 
-Framework compatibility is not HACS readiness. The manifest pins the published
-core as `controlel==0.1.0`, but HACS metadata and integration release packaging
-remain later work.
+Framework compatibility is separate from HACS release validation. The manifest
+pins the published core as `controlel==0.1.0`; HACS metadata and deterministic
+integration release packaging are validated without publishing anything.
+
+## HACS release candidate
+
+Build and independently validate the fixed-name release candidate from the
+repository root:
+
+```text
+python scripts/packaging/build_hacs_release.py --version 0.1.1
+python scripts/packaging/validate_hacs_release.py \
+  dist/hacs/controlel.zip \
+  --version 0.1.1 \
+  --checksum dist/hacs/controlel.zip.sha256
+```
+
+The builder requires exactly one integration directory, exact version and
+core dependency metadata, complete strings/translations, and an allowlisted
+file set. It writes normalized deterministic archive metadata. The validator
+re-checks layout, metadata, modes, timestamps, path safety, file content, and
+secret-like patterns without trusting the builder.
+
+Run `tests/packaging/test_hacs_release_contract.py` to prove determinism and
+rejection behavior. Generated files remain below ignored `dist/hacs/`.
 
 ## Core artifact validation
 

@@ -1,5 +1,26 @@
 # Home Assistant integration troubleshooting
 
+## HACS cannot find the repository
+
+Confirm that the exact custom-repository URL is
+`https://github.com/vmshops/controlel` and the selected category is
+**Integration**. The repository must be publicly accessible. Until the first
+integration GitHub Release is published, there is no supported HACS release to
+install.
+
+If HACS downloaded files but Home Assistant cannot find Controlel, confirm
+that `manifest.json` is at
+`config/custom_components/controlel/manifest.json`, restart Home Assistant,
+and refresh the browser cache. A nested path such as
+`config/custom_components/controlel/custom_components/controlel` is invalid.
+
+## Release checksum does not match
+
+Do not install the archive. Download it again and compare its SHA-256 with both
+the checksum asset and release notes. A published asset must never be silently
+replaced. Report the mismatch through
+`https://github.com/vmshops/controlel/issues`.
+
 ## Sensor input is ignored
 
 The configured state must match the exact entity ID, contain a finite numeric
@@ -31,6 +52,11 @@ accepted serialized work finish, calls `ControlRuntime.stop()` on the
 dedicated worker, and closes the executor. A late timer callback is harmless
 because both the host acceptance gate and runtime generation checks reject it.
 Shutdown sends no heat-source command.
+
+After a HACS upgrade, restart Home Assistant rather than relying only on a
+reload. Removing Controlel must start by removing its config entry, which
+stops the runtime and clears its Repairs issues; remove the HACS repository
+second.
 
 ## Core dependency installation
 

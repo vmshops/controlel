@@ -5,7 +5,9 @@ from pathlib import Path
 
 import pytest
 from homeassistant.helpers import issue_registry as ir
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+import custom_components.controlel as component
 from controlel.domain.commands.command_family import CommandFamily
 from controlel.domain.commands.heat_source_command import HeatSourceCommand
 from controlel.domain.commands.heating_action import HeatingAction
@@ -109,6 +111,37 @@ async def test_real_repairs_registry_creates_one_stable_error_issue_for_fatal_fa
     assert issue.translation_placeholders == {"error": "fatal programming failure"}
     assert fatal_errors == [error, error]
     assert len([item for item in registry.issues.values() if item.domain == DOMAIN]) == 1
+
+
+@pytest.mark.asyncio
+async def test_config_entry_removal_clears_all_owned_repairs_issues(hass, entry_data) -> None:
+    entry = MockConfigEntry(domain=DOMAIN, data=entry_data)
+    registry = ir.async_get(hass)
+    recoverable_issue_id = f"{entry.entry_id}_heat_source_service_failure"
+    fatal_issue_id = f"{entry.entry_id}_fatal_runtime_failure"
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        recoverable_issue_id,
+        is_fixable=False,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key="heat_source_service_failure",
+        translation_placeholders={"error": "test"},
+    )
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        fatal_issue_id,
+        is_fixable=False,
+        severity=ir.IssueSeverity.ERROR,
+        translation_key="fatal_runtime_failure",
+        translation_placeholders={"error": "test"},
+    )
+
+    await component.async_remove_entry(hass, entry)
+
+    assert registry.async_get_issue(DOMAIN, recoverable_issue_id) is None
+    assert registry.async_get_issue(DOMAIN, fatal_issue_id) is None
 
 
 def test_repairs_translation_contract_has_matching_keys_and_placeholders() -> None:

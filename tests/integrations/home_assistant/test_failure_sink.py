@@ -10,6 +10,7 @@ from custom_components.controlel.config import HomeAssistantServiceCall
 from custom_components.controlel.event_loop_bridge import HomeAssistantEventLoopBridge
 from custom_components.controlel.failure_sink import (
     HomeAssistantScheduledFailureSink,
+    clear_entry_issues,
 )
 from custom_components.controlel.heat_source import HomeAssistantServiceCallError
 from custom_components.controlel.runtime_executor import HomeAssistantRuntimeExecutor
@@ -87,3 +88,18 @@ def test_fatal_failure_preserves_exception_and_requests_async_shutdown():
     assert fatal == [error]
     assert created[0][0][2] == sink.fatal_issue_id
     assert created[0][1]["severity"] == "error"
+
+
+def test_entry_removal_clears_recoverable_and_fatal_issues():
+    deleted: list[tuple[object, str, str]] = []
+
+    clear_entry_issues(
+        "hass",
+        "entry",
+        lambda *args: deleted.append(args),
+    )
+
+    assert deleted == [
+        ("hass", "controlel", "entry_heat_source_service_failure"),
+        ("hass", "controlel", "entry_fatal_runtime_failure"),
+    ]

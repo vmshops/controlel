@@ -102,6 +102,7 @@ def test_manifest_pins_published_core_and_keeps_version_independent() -> None:
     assert manifest["requirements"] == [f"controlel=={core_version}"]
     assert manifest["version"] == "0.1.1"
     assert manifest["version"] != core_version
+    assert manifest["issue_tracker"] == "https://github.com/vmshops/controlel/issues"
 
 
 def test_packaging_tools_are_pinned_and_isolated() -> None:

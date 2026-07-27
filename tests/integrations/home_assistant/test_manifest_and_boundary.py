@@ -17,6 +17,7 @@ def test_manifest_has_required_custom_component_contract():
         "codeowners": ["@vmshops"],
         "config_flow": True,
         "documentation": "https://github.com/vmshops/controlel",
+        "issue_tracker": "https://github.com/vmshops/controlel/issues",
         "integration_type": "hub",
         "iot_class": "local_push",
         "requirements": ["controlel==0.1.0"],

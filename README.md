@@ -26,6 +26,31 @@ Core version: 0.1.0
 
 Home Assistant integration version: 0.1.1
 
+The repository is prepared for a controlled HACS custom-repository release,
+but no integration tag or GitHub release has been published. Controlel is not
+listed in the default HACS store.
+
+## Home Assistant installation
+
+The first supported distribution will use the public repository
+`https://github.com/vmshops/controlel` as a HACS custom repository. Until an
+integration release is published, use the manual development deployment below
+rather than treating the default branch as a stable release.
+
+After release, the primary installation flow is:
+
+1. In HACS, open the menu and select **Custom repositories**.
+2. Add `https://github.com/vmshops/controlel` with category **Integration**.
+3. Download the latest released integration and restart Home Assistant.
+4. Open **Settings > Devices & services > Add integration** and select
+   **Controlel**.
+
+The integration manifest makes Home Assistant install the exact public core
+dependency `controlel==0.1.0`; users must not install the core manually.
+Detailed prerequisites, configuration, safety behavior, manual installation,
+upgrades, removal, and current limitations are in the
+[Home Assistant installation guide](docs/operations/HomeAssistantInstallation.md).
+
 ## Home Assistant development integration
 
 The reusable core remains under `src/controlel`. The first Home Assistant host
@@ -50,9 +75,10 @@ Framework compatibility is tested against Home Assistant `2026.7.3` with
 `pytest-homeassistant-custom-component==0.13.347` on Python 3.14.2 or newer.
 The isolated, hashed environment is defined by `requirements/ha-test.in` and
 `requirements/ha-test.txt`; setup and suite commands are in the
-[development guide](docs/development/DevelopmentGuide.md). This compatibility
-harness does not make the integration HACS-ready. No HACS metadata, integration
-release, or default-store publication is provided.
+[development guide](docs/development/DevelopmentGuide.md). The compatibility
+harness is separate from HACS release validation. HACS metadata and
+deterministic release packaging are prepared, but no integration release or
+default-store publication exists.
 
 ## Core package artifacts
 
