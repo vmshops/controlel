@@ -4,9 +4,9 @@
   "codeowners": ["@vmshops"],
   "config_flow": true,
   "documentation": "https://github.com/vmshops/controlel",
-  "issue_tracker": "https://github.com/vmshops/controlel/issues",
   "integration_type": "hub",
   "iot_class": "local_push",
+  "issue_tracker": "https://github.com/vmshops/controlel/issues",
   "requirements": ["controlel==0.1.0"],
   "single_config_entry": true,
   "version": "0.1.1"
