@@ -2,22 +2,39 @@ import json
 
 import pytest
 from homeassistant import config_entries, data_entry_flow
-from homeassistant.const import ATTR_UNIT_OF_MEASUREMENT, UnitOfTemperature
+from homeassistant.components.sensor.const import SensorDeviceClass
+from homeassistant.const import (
+    ATTR_DEVICE_CLASS,
+    ATTR_UNIT_OF_MEASUREMENT,
+    UnitOfTemperature,
+)
 from homeassistant.helpers import selector
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.controlel.const import (
+    CONF_CONTROLLED_ENTITY_ID,
     CONF_DISABLE_SERVICE_DOMAIN,
     CONF_DISABLE_SERVICE_NAME,
     CONF_DISABLE_TARGET_ENTITY_ID,
     CONF_ENABLE_SERVICE_DOMAIN,
     CONF_ENABLE_SERVICE_NAME,
     CONF_ENABLE_TARGET_ENTITY_ID,
+    CONF_HEAT_SOURCE_CONTROL_MODE,
     CONF_INDETERMINATE_GRACE_PERIOD,
+    CONF_INDETERMINATE_GRACE_PERIOD_MINUTES,
     CONF_INDETERMINATE_TIMEOUT_ACTION,
     CONF_MAX_FUTURE_SKEW,
     CONF_PRIMARY_MEASUREMENT_MAX_AGE,
+    CONF_PRIMARY_MEASUREMENT_MAX_AGE_MINUTES,
+    CONF_SENSOR_ID,
+    CONF_SENSOR_NAME,
+    CONF_SHOW_ADVANCED,
+    CONF_TARGET_TEMPERATURE,
     CONF_TEMPERATURE_ENTITY_ID,
+    CONF_ZONE_ID,
+    CONF_ZONE_NAME,
+    CONTROL_MODE_CUSTOM,
+    CONTROL_MODE_SIMPLE,
     DOMAIN,
 )
 
@@ -26,8 +43,61 @@ def _schema_fields(result) -> dict[str, object]:
     return {marker.schema: validator for marker, validator in result["data_schema"].schema.items()}
 
 
+def _schema_defaults(result) -> dict[str, object]:
+    defaults = {}
+    for marker in result["data_schema"].schema:
+        if marker.default is not None:
+            try:
+                defaults[marker.schema] = marker.default()
+            except TypeError:
+                pass
+    return defaults
+
+
+def _basic_input(entry_data, **updates) -> dict[str, object]:
+    result = {
+        CONF_ZONE_NAME: entry_data[CONF_ZONE_NAME],
+        CONF_SENSOR_NAME: entry_data[CONF_SENSOR_NAME],
+        CONF_TEMPERATURE_ENTITY_ID: entry_data[CONF_TEMPERATURE_ENTITY_ID],
+        CONF_TARGET_TEMPERATURE: entry_data[CONF_TARGET_TEMPERATURE],
+        CONF_HEAT_SOURCE_CONTROL_MODE: CONTROL_MODE_SIMPLE,
+        CONF_CONTROLLED_ENTITY_ID: entry_data[CONF_ENABLE_TARGET_ENTITY_ID],
+        CONF_SHOW_ADVANCED: False,
+    }
+    result.update(updates)
+    return result
+
+
+def _advanced_input(entry_data, **updates) -> dict[str, object]:
+    result = {
+        CONF_PRIMARY_MEASUREMENT_MAX_AGE_MINUTES: (entry_data[CONF_PRIMARY_MEASUREMENT_MAX_AGE] / 60),
+        CONF_MAX_FUTURE_SKEW: entry_data[CONF_MAX_FUTURE_SKEW],
+        CONF_INDETERMINATE_GRACE_PERIOD_MINUTES: (entry_data[CONF_INDETERMINATE_GRACE_PERIOD] / 60),
+        CONF_INDETERMINATE_TIMEOUT_ACTION: entry_data[CONF_INDETERMINATE_TIMEOUT_ACTION],
+    }
+    result.update(updates)
+    return result
+
+
+def _options_basic_input(entry_data, **updates) -> dict[str, object]:
+    result = _basic_input(entry_data, **updates)
+    result.pop(CONF_SHOW_ADVANCED)
+    return result
+
+
+def _set_temperature_state(hass, entity_id: str, state: str = "20.5") -> None:
+    hass.states.async_set(
+        entity_id,
+        state,
+        {
+            ATTR_DEVICE_CLASS: SensorDeviceClass.TEMPERATURE,
+            ATTR_UNIT_OF_MEASUREMENT: UnitOfTemperature.CELSIUS,
+        },
+    )
+
+
 @pytest.mark.asyncio
-async def test_user_step_shows_expected_real_selectors(hass) -> None:
+async def test_user_step_has_basic_defaults_and_filtered_selectors(hass) -> None:
     result = await hass.config_entries.flow.async_init(
         DOMAIN,
         context={"source": config_entries.SOURCE_USER},
@@ -36,153 +106,462 @@ async def test_user_step_shows_expected_real_selectors(hass) -> None:
     assert result["type"] is data_entry_flow.FlowResultType.FORM
     fields = _schema_fields(result)
     assert set(fields) == {
-        "sensor_id",
-        "sensor_name",
-        "temperature_entity_id",
-        "zone_id",
-        "zone_name",
-        "target_temperature",
-        "primary_measurement_max_age",
-        "max_future_skew",
-        "indeterminate_grace_period",
-        "indeterminate_timeout_action",
-        "enable_service_domain",
-        "enable_service_name",
-        "enable_target_entity_id",
-        "disable_service_domain",
-        "disable_service_name",
-        "disable_target_entity_id",
+        CONF_ZONE_NAME,
+        CONF_SENSOR_NAME,
+        CONF_TEMPERATURE_ENTITY_ID,
+        CONF_TARGET_TEMPERATURE,
+        CONF_HEAT_SOURCE_CONTROL_MODE,
+        CONF_CONTROLLED_ENTITY_ID,
+        CONF_SHOW_ADVANCED,
     }
-    assert isinstance(fields[CONF_TEMPERATURE_ENTITY_ID], selector.EntitySelector)
-    timeout_selector = fields[CONF_INDETERMINATE_TIMEOUT_ACTION]
-    assert isinstance(timeout_selector, selector.SelectSelector)
-    assert set(timeout_selector.config["options"]) == {
-        "enable_heating",
-        "disable_heating",
-    }
+    temperature_selector = fields[CONF_TEMPERATURE_ENTITY_ID]
+    assert isinstance(temperature_selector, selector.EntitySelector)
+    assert temperature_selector.config["filter"] == [{"domain": ["sensor"], "device_class": ["temperature"]}]
+    switch_selector = fields[CONF_CONTROLLED_ENTITY_ID]
+    assert isinstance(switch_selector, selector.EntitySelector)
+    assert switch_selector.config["domain"] == ["switch"]
+    defaults = _schema_defaults(result)
+    assert defaults[CONF_TARGET_TEMPERATURE] == 21.0
+    assert defaults[CONF_HEAT_SOURCE_CONTROL_MODE] == CONTROL_MODE_SIMPLE
+    assert defaults[CONF_SHOW_ADVANCED] is False
 
 
 @pytest.mark.asyncio
-async def test_valid_input_creates_one_entry_with_serializable_primitives(hass, entry_data) -> None:
-    hass.states.async_set(
-        entry_data[CONF_TEMPERATURE_ENTITY_ID],
-        "20.5",
-        {ATTR_UNIT_OF_MEASUREMENT: UnitOfTemperature.CELSIUS},
-    )
+async def test_basic_input_generates_ids_and_stores_mutable_options(hass, entry_data) -> None:
+    entry_data[CONF_ZONE_NAME] = "Patro 1"
+    entry_data[CONF_SENSOR_NAME] = "Teplota obývacího pokoje"
+    _set_temperature_state(hass, entry_data[CONF_TEMPERATURE_ENTITY_ID])
     initial = await hass.config_entries.flow.async_init(
         DOMAIN,
         context={"source": config_entries.SOURCE_USER},
     )
 
-    result = await hass.config_entries.flow.async_configure(initial["flow_id"], entry_data)
+    result = await hass.config_entries.flow.async_configure(
+        initial["flow_id"],
+        _basic_input(entry_data),
+    )
 
     assert result["type"] is data_entry_flow.FlowResultType.CREATE_ENTRY
-    assert result["title"] == "Living room"
-    assert result["data"] == entry_data
-    assert len(hass.config_entries.async_entries(DOMAIN)) == 1
+    assert result["title"] == "Patro 1"
+    assert result["data"] == {
+        CONF_SENSOR_ID: "teplota_obyvaciho_pokoje",
+        CONF_ZONE_ID: "patro_1",
+    }
+    assert result["options"][CONF_PRIMARY_MEASUREMENT_MAX_AGE] == 900.0
+    assert result["options"][CONF_MAX_FUTURE_SKEW] == 30.0
+    assert result["options"][CONF_INDETERMINATE_GRACE_PERIOD] == 120.0
+    assert result["options"][CONF_INDETERMINATE_TIMEOUT_ACTION] == "disable_heating"
+    assert result["options"][CONF_CONTROLLED_ENTITY_ID] == entry_data[CONF_ENABLE_TARGET_ENTITY_ID]
     json.dumps(result["data"])
-    assert all(isinstance(value, str | int | float | bool | type(None)) for value in result["data"].values())
+    json.dumps(result["options"])
 
 
-@pytest.mark.parametrize(
-    ("field", "value"),
-    [
-        (CONF_PRIMARY_MEASUREMENT_MAX_AGE, 0),
-        (CONF_PRIMARY_MEASUREMENT_MAX_AGE, -1),
-        (CONF_MAX_FUTURE_SKEW, -1),
-        (CONF_INDETERMINATE_GRACE_PERIOD, -1),
-        (CONF_INDETERMINATE_TIMEOUT_ACTION, "observe_only"),
-        (CONF_TEMPERATURE_ENTITY_ID, "not-an-entity"),
-        (CONF_ENABLE_TARGET_ENTITY_ID, "not-an-entity"),
-        (CONF_DISABLE_TARGET_ENTITY_ID, "not-an-entity"),
-    ],
-)
 @pytest.mark.asyncio
-async def test_real_flow_manager_rejects_selector_schema_violations(hass, entry_data, field, value) -> None:
-    entry_data[field] = value
+async def test_advanced_initial_flow_accepts_explicit_stable_ids(hass, entry_data) -> None:
+    _set_temperature_state(hass, entry_data[CONF_TEMPERATURE_ENTITY_ID])
     initial = await hass.config_entries.flow.async_init(
         DOMAIN,
         context={"source": config_entries.SOURCE_USER},
     )
+    advanced = await hass.config_entries.flow.async_configure(
+        initial["flow_id"],
+        _basic_input(entry_data, **{CONF_SHOW_ADVANCED: True}),
+    )
 
-    with pytest.raises(data_entry_flow.InvalidData):
-        await hass.config_entries.flow.async_configure(initial["flow_id"], entry_data)
+    result = await hass.config_entries.flow.async_configure(
+        advanced["flow_id"],
+        _advanced_input(
+            entry_data,
+            **{
+                CONF_SENSOR_ID: "explicit_sensor",
+                CONF_ZONE_ID: "explicit_zone",
+            },
+        ),
+    )
 
-    assert not hass.config_entries.async_entries(DOMAIN)
+    assert result["type"] is data_entry_flow.FlowResultType.CREATE_ENTRY
+    assert result["data"] == {
+        CONF_SENSOR_ID: "explicit_sensor",
+        CONF_ZONE_ID: "explicit_zone",
+    }
 
 
 @pytest.mark.parametrize(
-    ("field", "value"),
+    ("sensor_id", "zone_id", "error_field"),
     [
-        (CONF_ENABLE_SERVICE_DOMAIN, "Switch"),
-        (CONF_ENABLE_SERVICE_NAME, "turn-on"),
-        (CONF_DISABLE_SERVICE_DOMAIN, "switch.example"),
-        (CONF_DISABLE_SERVICE_NAME, "turn-off"),
+        ("Invalid-ID", "living_room", CONF_SENSOR_ID),
+        ("living_room_temperature", "1st_floor", CONF_ZONE_ID),
     ],
 )
 @pytest.mark.asyncio
-async def test_component_validation_errors_return_form(hass, entry_data, field, value) -> None:
-    entry_data[field] = value
+async def test_advanced_initial_flow_rejects_invalid_explicit_ids(
+    hass,
+    entry_data,
+    sensor_id,
+    zone_id,
+    error_field,
+) -> None:
+    _set_temperature_state(hass, entry_data[CONF_TEMPERATURE_ENTITY_ID])
     initial = await hass.config_entries.flow.async_init(
         DOMAIN,
         context={"source": config_entries.SOURCE_USER},
     )
+    advanced = await hass.config_entries.flow.async_configure(
+        initial["flow_id"],
+        _basic_input(entry_data, **{CONF_SHOW_ADVANCED: True}),
+    )
 
-    result = await hass.config_entries.flow.async_configure(initial["flow_id"], entry_data)
+    result = await hass.config_entries.flow.async_configure(
+        advanced["flow_id"],
+        _advanced_input(
+            entry_data,
+            **{CONF_SENSOR_ID: sensor_id, CONF_ZONE_ID: zone_id},
+        ),
+    )
 
     assert result["type"] is data_entry_flow.FlowResultType.FORM
-    assert result["errors"]
-    assert not hass.config_entries.async_entries(DOMAIN)
+    assert result["errors"][error_field].startswith("invalid_")
 
 
-@pytest.mark.parametrize(
-    "field",
-    [CONF_ENABLE_SERVICE_DOMAIN, CONF_DISABLE_SERVICE_DOMAIN],
-)
 @pytest.mark.asyncio
-async def test_controlel_service_domain_is_rejected(hass, entry_data, field) -> None:
-    entry_data[field] = DOMAIN
+async def test_basic_flow_reports_name_when_generated_id_would_be_invalid(
+    hass,
+    entry_data,
+) -> None:
+    _set_temperature_state(hass, entry_data[CONF_TEMPERATURE_ENTITY_ID])
     initial = await hass.config_entries.flow.async_init(
         DOMAIN,
         context={"source": config_entries.SOURCE_USER},
     )
 
-    result = await hass.config_entries.flow.async_configure(initial["flow_id"], entry_data)
+    result = await hass.config_entries.flow.async_configure(
+        initial["flow_id"],
+        _basic_input(
+            entry_data,
+            **{CONF_SENSOR_NAME: "123 !!!"},
+        ),
+    )
+
+    assert result["type"] is data_entry_flow.FlowResultType.FORM
+    assert result["errors"] == {CONF_SENSOR_NAME: "cannot_generate_id"}
+
+
+@pytest.mark.asyncio
+async def test_custom_service_mode_preserves_different_bindings(hass, entry_data) -> None:
+    _set_temperature_state(hass, entry_data[CONF_TEMPERATURE_ENTITY_ID])
+    initial = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": config_entries.SOURCE_USER},
+    )
+    advanced = await hass.config_entries.flow.async_configure(
+        initial["flow_id"],
+        _options_basic_input(
+            entry_data,
+            **{CONF_HEAT_SOURCE_CONTROL_MODE: CONTROL_MODE_CUSTOM},
+        ),
+    )
+    custom = _advanced_input(
+        entry_data,
+        **{
+            CONF_ENABLE_SERVICE_DOMAIN: "climate",
+            CONF_ENABLE_SERVICE_NAME: "set_hvac_mode",
+            CONF_ENABLE_TARGET_ENTITY_ID: "climate.boiler",
+            CONF_DISABLE_SERVICE_DOMAIN: "input_boolean",
+            CONF_DISABLE_SERVICE_NAME: "turn_off",
+            CONF_DISABLE_TARGET_ENTITY_ID: "input_boolean.boiler_permission",
+        },
+    )
+
+    result = await hass.config_entries.flow.async_configure(
+        advanced["flow_id"],
+        custom,
+    )
+
+    assert result["type"] is data_entry_flow.FlowResultType.CREATE_ENTRY
+    for key in (
+        CONF_ENABLE_SERVICE_DOMAIN,
+        CONF_ENABLE_SERVICE_NAME,
+        CONF_ENABLE_TARGET_ENTITY_ID,
+        CONF_DISABLE_SERVICE_DOMAIN,
+        CONF_DISABLE_SERVICE_NAME,
+        CONF_DISABLE_TARGET_ENTITY_ID,
+    ):
+        assert result["options"][key] == custom[key]
+
+
+@pytest.mark.asyncio
+async def test_custom_service_mode_rejects_controlel_service_domain(
+    hass,
+    entry_data,
+) -> None:
+    _set_temperature_state(hass, entry_data[CONF_TEMPERATURE_ENTITY_ID])
+    initial = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": config_entries.SOURCE_USER},
+    )
+    advanced = await hass.config_entries.flow.async_configure(
+        initial["flow_id"],
+        _basic_input(
+            entry_data,
+            **{CONF_HEAT_SOURCE_CONTROL_MODE: CONTROL_MODE_CUSTOM},
+        ),
+    )
+
+    result = await hass.config_entries.flow.async_configure(
+        advanced["flow_id"],
+        _advanced_input(
+            entry_data,
+            **{
+                CONF_ENABLE_SERVICE_DOMAIN: DOMAIN,
+                CONF_ENABLE_SERVICE_NAME: "turn_on",
+                CONF_ENABLE_TARGET_ENTITY_ID: "switch.boiler",
+                CONF_DISABLE_SERVICE_DOMAIN: "switch",
+                CONF_DISABLE_SERVICE_NAME: "turn_off",
+                CONF_DISABLE_TARGET_ENTITY_ID: "switch.boiler",
+            },
+        ),
+    )
 
     assert result["type"] is data_entry_flow.FlowResultType.FORM
     assert result["errors"] == {"base": "controlel_service_not_allowed"}
 
 
-@pytest.mark.parametrize("state_value", ["unknown", "unavailable"])
 @pytest.mark.asyncio
-async def test_unavailable_temperature_entity_can_be_selected(hass, entry_data, state_value) -> None:
-    hass.states.async_set(entry_data[CONF_TEMPERATURE_ENTITY_ID], state_value)
+async def test_temperature_entity_with_unsupported_unit_is_rejected(
+    hass,
+    entry_data,
+) -> None:
+    hass.states.async_set(
+        entry_data[CONF_TEMPERATURE_ENTITY_ID],
+        "293",
+        {
+            ATTR_DEVICE_CLASS: SensorDeviceClass.TEMPERATURE,
+            ATTR_UNIT_OF_MEASUREMENT: "K",
+        },
+    )
     initial = await hass.config_entries.flow.async_init(
         DOMAIN,
         context={"source": config_entries.SOURCE_USER},
     )
 
-    result = await hass.config_entries.flow.async_configure(initial["flow_id"], entry_data)
+    result = await hass.config_entries.flow.async_configure(
+        initial["flow_id"],
+        _basic_input(entry_data),
+    )
+
+    assert result["type"] is data_entry_flow.FlowResultType.FORM
+    assert result["errors"] == {CONF_TEMPERATURE_ENTITY_ID: "unsupported_temperature_unit"}
+
+
+@pytest.mark.parametrize(
+    ("entity_id", "attributes"),
+    [
+        ("switch.room", {}),
+        (
+            "sensor.humidity",
+            {
+                ATTR_DEVICE_CLASS: "humidity",
+                ATTR_UNIT_OF_MEASUREMENT: "%",
+            },
+        ),
+        (
+            "sensor.power",
+            {
+                ATTR_DEVICE_CLASS: "power",
+                ATTR_UNIT_OF_MEASUREMENT: "W",
+            },
+        ),
+        (
+            "sensor.unclassified",
+            {ATTR_UNIT_OF_MEASUREMENT: UnitOfTemperature.CELSIUS},
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_server_rejects_non_temperature_entities(
+    hass,
+    entry_data,
+    entity_id,
+    attributes,
+) -> None:
+    hass.states.async_set(entity_id, "20", attributes)
+    initial = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": config_entries.SOURCE_USER},
+    )
+
+    result = await hass.config_entries.flow.async_configure(
+        initial["flow_id"],
+        _basic_input(
+            entry_data,
+            **{CONF_TEMPERATURE_ENTITY_ID: entity_id},
+        ),
+    )
+
+    assert result["type"] is data_entry_flow.FlowResultType.FORM
+    assert result["errors"] == {CONF_TEMPERATURE_ENTITY_ID: "not_temperature_sensor"}
+
+
+@pytest.mark.parametrize("state_value", ["unknown", "unavailable"])
+@pytest.mark.asyncio
+async def test_unavailable_temperature_entity_with_device_class_is_accepted(
+    hass,
+    entry_data,
+    state_value,
+) -> None:
+    _set_temperature_state(
+        hass,
+        entry_data[CONF_TEMPERATURE_ENTITY_ID],
+        state_value,
+    )
+    initial = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": config_entries.SOURCE_USER},
+    )
+
+    result = await hass.config_entries.flow.async_configure(
+        initial["flow_id"],
+        _basic_input(entry_data),
+    )
 
     assert result["type"] is data_entry_flow.FlowResultType.CREATE_ENTRY
 
 
 @pytest.mark.asyncio
-async def test_available_incompatible_temperature_unit_has_field_error(hass, entry_data) -> None:
+async def test_options_prefill_legacy_entry_and_preserve_ids_after_rename(
+    hass,
+    entry_data,
+) -> None:
+    entry_data[CONF_PRIMARY_MEASUREMENT_MAX_AGE] = 7.0
+    entry_data[CONF_INDETERMINATE_GRACE_PERIOD] = 11.0
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Living room",
+        data=entry_data,
+        options={},
+    )
+    entry.add_to_hass(hass)
+    initial = await hass.config_entries.options.async_init(entry.entry_id)
+    defaults = _schema_defaults(initial)
+
+    assert defaults[CONF_ZONE_NAME] == "Living room"
+    assert defaults[CONF_SENSOR_NAME] == "Living room temperature"
+    assert defaults[CONF_HEAT_SOURCE_CONTROL_MODE] == CONTROL_MODE_SIMPLE
+    assert defaults[CONF_CONTROLLED_ENTITY_ID] == "switch.boiler"
+
+    advanced = await hass.config_entries.options.async_configure(
+        initial["flow_id"],
+        _options_basic_input(
+            entry_data,
+            **{
+                CONF_ZONE_NAME: "Upstairs",
+                CONF_SENSOR_NAME: "Upstairs temperature",
+            },
+        ),
+    )
+    result = await hass.config_entries.options.async_configure(
+        advanced["flow_id"],
+        _advanced_input(entry_data),
+    )
+
+    assert result["type"] is data_entry_flow.FlowResultType.CREATE_ENTRY
+    assert entry.data[CONF_SENSOR_ID] == "living_room_temperature"
+    assert entry.data[CONF_ZONE_ID] == "living_room"
+    assert entry.options[CONF_SENSOR_NAME] == "Upstairs temperature"
+    assert entry.options[CONF_ZONE_NAME] == "Upstairs"
+    assert entry.options[CONF_PRIMARY_MEASUREMENT_MAX_AGE] == 7.0
+    assert entry.options[CONF_INDETERMINATE_GRACE_PERIOD] == 11.0
+
+
+@pytest.mark.asyncio
+async def test_opening_and_submitting_legacy_custom_options_loses_no_binding(
+    hass,
+    entry_data,
+) -> None:
+    entry_data.update(
+        {
+            CONF_ENABLE_SERVICE_DOMAIN: "climate",
+            CONF_ENABLE_SERVICE_NAME: "set_hvac_mode",
+            CONF_ENABLE_TARGET_ENTITY_ID: "climate.boiler",
+            CONF_DISABLE_SERVICE_DOMAIN: "input_boolean",
+            CONF_DISABLE_SERVICE_NAME: "turn_off",
+            CONF_DISABLE_TARGET_ENTITY_ID: "input_boolean.boiler_permission",
+        }
+    )
+    entry = MockConfigEntry(domain=DOMAIN, data=entry_data, options={})
+    entry.add_to_hass(hass)
+    initial = await hass.config_entries.options.async_init(entry.entry_id)
+    defaults = _schema_defaults(initial)
+    assert defaults[CONF_HEAT_SOURCE_CONTROL_MODE] == CONTROL_MODE_CUSTOM
+
+    basic = _options_basic_input(
+        entry_data,
+        **{
+            CONF_HEAT_SOURCE_CONTROL_MODE: CONTROL_MODE_CUSTOM,
+            CONF_CONTROLLED_ENTITY_ID: None,
+        },
+    )
+    basic.pop(CONF_CONTROLLED_ENTITY_ID)
+    advanced = await hass.config_entries.options.async_configure(
+        initial["flow_id"],
+        basic,
+    )
+    advanced_defaults = _schema_defaults(advanced)
+    result = await hass.config_entries.options.async_configure(
+        advanced["flow_id"],
+        {
+            **_advanced_input(entry_data),
+            **{
+                key: advanced_defaults[key]
+                for key in (
+                    CONF_ENABLE_SERVICE_DOMAIN,
+                    CONF_ENABLE_SERVICE_NAME,
+                    CONF_ENABLE_TARGET_ENTITY_ID,
+                    CONF_DISABLE_SERVICE_DOMAIN,
+                    CONF_DISABLE_SERVICE_NAME,
+                    CONF_DISABLE_TARGET_ENTITY_ID,
+                )
+            },
+        },
+    )
+
+    assert result["type"] is data_entry_flow.FlowResultType.CREATE_ENTRY
+    for key in (
+        CONF_ENABLE_SERVICE_DOMAIN,
+        CONF_ENABLE_SERVICE_NAME,
+        CONF_ENABLE_TARGET_ENTITY_ID,
+        CONF_DISABLE_SERVICE_DOMAIN,
+        CONF_DISABLE_SERVICE_NAME,
+        CONF_DISABLE_TARGET_ENTITY_ID,
+    ):
+        assert entry.options[key] == entry_data[key]
+
+
+@pytest.mark.asyncio
+async def test_existing_previously_accepted_sensor_remains_editable(
+    hass,
+    entry_data,
+) -> None:
     hass.states.async_set(
         entry_data[CONF_TEMPERATURE_ENTITY_ID],
-        "48",
-        {ATTR_UNIT_OF_MEASUREMENT: "%"},
+        "20",
+        {ATTR_UNIT_OF_MEASUREMENT: UnitOfTemperature.CELSIUS},
     )
-    initial = await hass.config_entries.flow.async_init(
-        DOMAIN,
-        context={"source": config_entries.SOURCE_USER},
-    )
+    entry = MockConfigEntry(domain=DOMAIN, data=entry_data, options={})
+    entry.add_to_hass(hass)
+    initial = await hass.config_entries.options.async_init(entry.entry_id)
 
-    result = await hass.config_entries.flow.async_configure(initial["flow_id"], entry_data)
+    result = await hass.config_entries.options.async_configure(
+        initial["flow_id"],
+        _options_basic_input(entry_data)
+        | {
+            CONF_ZONE_NAME: "Renamed zone",
+        },
+    )
 
     assert result["type"] is data_entry_flow.FlowResultType.FORM
-    assert result["errors"] == {CONF_TEMPERATURE_ENTITY_ID: "unsupported_temperature_unit"}
+    assert result["step_id"] == "advanced"
+    assert not result["errors"]
 
 
 @pytest.mark.asyncio

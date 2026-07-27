@@ -1,12 +1,12 @@
 # Home Assistant installation
 
-Controlel `0.1.1` is a custom Home Assistant integration for one heating zone,
+Controlel `0.2.0` is the current development candidate for one heating zone,
 one primary temperature sensor, and one shared heat source. It requires the
 public core package `controlel==0.1.0`.
 
-The repository is prepared for a controlled HACS custom-repository release,
-but no integration release is published yet. Controlel is not listed in the
-default HACS store.
+Integration `0.1.1` remains the published HACS custom-repository release.
+Candidate `0.2.0` is not published. Controlel is not listed in the default HACS
+store.
 
 ## Prerequisites
 
@@ -22,8 +22,6 @@ Back up the Home Assistant configuration before installing or upgrading a
 custom integration.
 
 ## HACS custom-repository installation
-
-After an integration release is published:
 
 1. Open HACS.
 2. Open the top-right menu and select **Custom repositories**.
@@ -57,24 +55,18 @@ Controlel integration release.
 
 ## First configuration
 
-The config flow stores one immutable configuration:
+The normal form asks for only the zone and sensor names, a temperature sensor,
+the target temperature, and one controlled switch. The temperature selector is
+restricted to `sensor` entities with temperature device class. Controlel
+generates stable lowercase ASCII sensor and zone IDs from the names and does
+not regenerate them after a rename.
 
-- **Sensor ID**: Controlel's stable identifier for the sensor.
-- **Sensor name**: Human-readable sensor name.
-- **Temperature entity**: Home Assistant temperature sensor entity.
-- **Zone ID** and **Zone name**: Stable and display names for the zone.
-- **Target temperature**: Desired zone temperature in Celsius.
-- **Primary measurement maximum age**: Maximum accepted age of the primary
-  measurement.
-- **Maximum future clock skew**: Tolerance for a measurement timestamp ahead
-  of Home Assistant's clock.
-- **Indeterminate grace period**: How long missing or stale evidence is
-  tolerated before applying the configured safety action.
-- **Timeout action**: Enable or disable heating after the grace period.
-- **Enable/disable service domain, name, and target entity**: Exact Home
-  Assistant calls used to control the heat source.
+New entries default to a 21.0 °C target, 15-minute maximum measurement age,
+30-second future timestamp tolerance, 2-minute sensor-failure grace period,
+and **Turn heating off — recommended** after timeout. These defaults apply only
+to new entries; stored values in an existing entry are preserved exactly.
 
-Example for a dedicated boiler switch:
+Simple mode derives these calls without asking the user for service names:
 
 | Purpose | Domain | Service | Target |
 | --- | --- | --- | --- |
@@ -84,6 +76,18 @@ Example for a dedicated boiler switch:
 Controlel accepts configured service names but cannot verify that a target is
 physically safe. Use a dedicated entity with appropriate hardware interlocks.
 Controlel cannot call its own service domain.
+
+For equipment that is not one normal switch, select **Use custom Home
+Assistant services**. Advanced settings keep separate service domains, names,
+and target entities for enabling and disabling heat.
+
+## Edit an existing entry
+
+Open **Settings > Devices & services > Controlel > Configure**. The first
+options step edits basic settings; the second edits safety values and custom
+bindings. Saving options preserves the stable IDs, atomically stores mutable
+settings, updates the entry title from the zone name, and reloads the entry.
+Existing `0.1.1` entries need no migration and no delete/recreate cycle.
 
 ## Expected first setup behavior
 
@@ -130,11 +134,10 @@ manually removed.
 ## Known limitations
 
 - One config entry, one zone, one primary sensor, and one heat source.
-- No options or reconfigure flow.
 - No persistence across reload or restart.
 - No service-call retry.
 - No physical-state confirmation.
-- No discovery, polling, diagnostic entities, multi-zone UI, or generic
+- No discovery, polling, diagnostics payload, diagnostic entities, multi-zone UI, or generic
   service data.
 - Custom-repository distribution only; no default HACS-store claim.
 

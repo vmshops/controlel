@@ -126,10 +126,10 @@ Build and independently validate the fixed-name release candidate from the
 repository root:
 
 ```text
-python scripts/packaging/build_hacs_release.py --version 0.1.1
+python scripts/packaging/build_hacs_release.py --version 0.2.0
 python scripts/packaging/validate_hacs_release.py \
   dist/hacs/controlel.zip \
-  --version 0.1.1 \
+  --version 0.2.0 \
   --checksum dist/hacs/controlel.zip.sha256
 ```
 
@@ -141,6 +141,20 @@ secret-like patterns without trusting the builder.
 
 Run `tests/packaging/test_hacs_release_contract.py` to prove determinism and
 rejection behavior. Generated files remain below ignored `dist/hacs/`.
+
+## Configuration and options development
+
+The integration candidate version is `0.2.0`; the core remains `0.1.0`.
+New entries keep generated stable `sensor_id` and `zone_id` values in
+config-entry data and mutable settings in options. Effective configuration is
+legacy data merged with options, with options taking precedence except that
+stable IDs can never be overridden.
+
+The first-run basic form uses temperature and switch entity selectors and safe
+defaults. Its optional advanced step exposes explicit IDs, normalized safety
+times, and custom service bindings. Existing entries use a two-step Options
+Flow. Tests must cover both an empty-options `0.1.1` entry and repeated options
+updates that unload the old runtime before constructing the replacement.
 
 ## Core artifact validation
 

@@ -17,7 +17,7 @@ source. It includes config flow, lifecycle, initial-state buffering, a
 one-shot Home Assistant scheduler, typed runtime data, and Repairs issues for
 operational failures.
 
-Deferred work includes multi-zone configuration UI, options/reconfigure flows,
+Deferred work included multi-zone configuration UI, options/reconfigure flows,
 persistence, discovery, polling, diagnostic entities, HACS packaging, physical
 confirmation, generic service data, retries, hardware protocols, modulation,
 DHW, valves, learning, and frontend panels.
@@ -53,3 +53,18 @@ GitHub Releases in this monorepo.
 
 Milestone 24C3 remains optional Home Assistant Brands work and submission to
 the HACS default repository after the custom-repository release is stable.
+
+## Milestone 25A: editable configuration UX
+
+Milestone 25A prepares integration `0.2.0` while retaining core
+`controlel==0.1.0`. It adds generated stable IDs, filtered temperature
+selection, safe defaults, a simple controlled-switch mode, lossless advanced
+service bindings, and a two-step Options Flow. Existing `0.1.1` entries load
+without migration: mutable options override legacy data, while IDs remain
+stable in entry data. Every successful update fully unloads and reconstructs
+one runtime.
+
+Milestone 25B and later retain diagnostics, multiple zones or sensors,
+persistence, climate/number/select entities, physical output feedback,
+automatic retry, heating curves, modulation, DHW, learning, and dashboard
+work. Version `0.2.0` remains unpublished until a separate release milestone.

@@ -24,20 +24,17 @@ Project phase: Home Assistant one-zone host vertical slice
 
 Core version: 0.1.0
 
-Home Assistant integration version: 0.1.1
+Home Assistant integration candidate version: 0.2.0
 
-The repository is prepared for a controlled HACS custom-repository release,
-but no integration tag or GitHub release has been published. Controlel is not
-listed in the default HACS store.
+Integration `0.1.1` is published for HACS custom-repository installation.
+Version `0.2.0` is under development and has not been tagged or published.
+Controlel is not listed in the default HACS store.
 
 ## Home Assistant installation
 
-The first supported distribution will use the public repository
-`https://github.com/vmshops/controlel` as a HACS custom repository. Until an
-integration release is published, use the manual development deployment below
-rather than treating the default branch as a stable release.
-
-After release, the primary installation flow is:
+The supported distribution uses the public repository
+`https://github.com/vmshops/controlel` as a HACS custom repository. The primary
+installation flow is:
 
 1. In HACS, open the menu and select **Custom repositories**.
 2. Add `https://github.com/vmshops/controlel` with category **Integration**.
@@ -58,10 +55,13 @@ is a custom component under `custom_components/controlel`; its dependency
 direction is strictly custom component to core.
 
 The integration supports one config entry, one zone, one explicitly bound
-temperature sensor, and one shared heat source controlled through configured
-enable and disable service calls. It uses a dedicated single-worker executor
-for every synchronous `ControlRuntime` operation. No core method runs on Home
-Assistant's event-loop thread.
+temperature sensor, and one shared heat source. New entries use a filtered
+temperature selector, generated stable IDs, safe timing defaults, and a simple
+controlled-switch mode. Existing entries can be edited through **Configure**;
+advanced mode preserves separate enable and disable service calls. Options
+updates fully unload and rebuild the runtime. It uses a dedicated single-worker
+executor for every synchronous `ControlRuntime` operation. No core method runs
+on Home Assistant's event-loop thread.
 
 The integration manifest requires the exact public core release
 `controlel==0.1.0`. A supported custom-component deployment can therefore let
@@ -77,8 +77,8 @@ The isolated, hashed environment is defined by `requirements/ha-test.in` and
 `requirements/ha-test.txt`; setup and suite commands are in the
 [development guide](docs/development/DevelopmentGuide.md). The compatibility
 harness is separate from HACS release validation. HACS metadata and
-deterministic release packaging are prepared, but no integration release or
-default-store publication exists.
+deterministic release packaging are prepared for `0.2.0`, but that candidate
+has not been published and no default-store publication exists.
 
 ## Core package artifacts
 

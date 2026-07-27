@@ -22,7 +22,7 @@ def test_manifest_has_required_custom_component_contract():
         "iot_class": "local_push",
         "requirements": ["controlel==0.1.0"],
         "single_config_entry": True,
-        "version": "0.1.1",
+        "version": "0.2.0",
     }
 
 
@@ -32,7 +32,7 @@ def test_core_and_integration_versions_are_intentionally_independent():
         core_version = tomllib.load(pyproject_file)["project"]["version"]
 
     assert core_version == "0.1.0"
-    assert manifest["version"] == INTEGRATION_VERSION == "0.1.1"
+    assert manifest["version"] == INTEGRATION_VERSION == "0.2.0"
     assert manifest["requirements"] == [f"controlel=={core_version}"]
     assert manifest["version"] != manifest["requirements"][0].partition("==")[2]
 
@@ -68,13 +68,14 @@ def test_required_integration_files_exist():
     }
 
 
-def test_config_flow_is_explicit_and_has_no_options_or_reconfigure_flow():
+def test_config_flow_exposes_supported_options_flow_without_reconfigure_flow():
     source = (COMPONENT / "config_flow.py").read_text(encoding="utf-8")
 
     assert "VERSION = CONFIG_ENTRY_VERSION" in source
     assert CONFIG_ENTRY_VERSION == 1
     assert "async_step_user" in source
-    assert "async_step_options" not in source
+    assert "async_get_options_flow" in source
+    assert "class ControlelOptionsFlow" in source
     assert "async_step_reconfigure" not in source
 
 

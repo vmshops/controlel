@@ -11,7 +11,7 @@ from custom_components.controlel.const import DOMAIN
 
 ROOT = Path(__file__).parents[4].resolve()
 CORE_VERSION = "0.1.0"
-INTEGRATION_VERSION = "0.1.1"
+INTEGRATION_VERSION = "0.2.0"
 FRAMEWORK_COMPOSITION = "CONTROLEL_FRAMEWORK_COMPOSITION"
 
 

@@ -20,7 +20,7 @@ from controlel.domain.repositories.zone_repository import ZoneRepository
 from controlel.domain.sensors.sensor import Sensor
 from controlel.infrastructure.time.system_clock import SystemClock
 
-from .config import integration_config_from_entry_data
+from .config import HomeAssistantIntegrationConfig, integration_config_from_entry
 from .event_loop_bridge import HomeAssistantEventLoopBridge
 from .failure_sink import HomeAssistantScheduledFailureSink, clear_entry_issues
 from .heat_source import HomeAssistantHeatSourcePort
@@ -35,6 +35,8 @@ LOGGER = logging.getLogger(__name__)
 @dataclass
 class ControlelEntryRuntime:
     host: HomeAssistantControlelHost | None
+    config: HomeAssistantIntegrationConfig
+    reloading: bool = False
 
 
 if TYPE_CHECKING:
@@ -48,7 +50,7 @@ async def async_setup_entry(
     entry: ControlelConfigEntry,
 ) -> bool:
     """Set up one Controlel runtime from a config entry."""
-    config = integration_config_from_entry_data(entry.data)
+    config = integration_config_from_entry(entry.data, entry.options)
 
     sensor_repository = SensorRepository()
     zone_repository = ZoneRepository()
@@ -132,7 +134,8 @@ async def async_setup_entry(
             LOGGER.exception("Failed to clean up a partially constructed Controlel host")
         raise
 
-    entry.runtime_data = ControlelEntryRuntime(host=host)
+    entry.runtime_data = ControlelEntryRuntime(host=host, config=config)
+    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     return True
 
 
@@ -155,3 +158,24 @@ async def async_remove_entry(
 ) -> None:
     """Remove Repairs issues that belong to a deleted config entry."""
     clear_entry_issues(hass, entry.entry_id)
+
+
+async def _async_update_listener(
+    hass: HomeAssistant,
+    entry: ControlelConfigEntry,
+) -> None:
+    """Update the title and reload once after an atomic options change."""
+
+    runtime_data = entry.runtime_data
+    config = integration_config_from_entry(entry.data, entry.options)
+    if runtime_data.config == config and entry.title == config.zone_name:
+        return
+    if runtime_data.reloading:
+        return
+    runtime_data.reloading = True
+    if entry.title != config.zone_name:
+        hass.config_entries.async_update_entry(
+            entry,
+            title=config.zone_name,
+        )
+    await hass.config_entries.async_reload(entry.entry_id)

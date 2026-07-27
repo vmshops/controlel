@@ -3,18 +3,36 @@
   "config": {
     "step": {
       "user": {
-        "title": "Configure one-zone heating control",
-        "description": "Configure one primary temperature sensor and one shared heat source.",
+        "title": "Configure heating control",
+        "description": "Choose the temperature measurement and the heat-source switch for this zone. Safe timing defaults are applied automatically unless you open advanced settings.",
+        "data": {
+          "zone_name": "Zone name",
+          "sensor_name": "Sensor name",
+          "temperature_entity_id": "Temperature sensor",
+          "target_temperature": "Target temperature",
+          "heat_source_control_mode": "Heat-source control mode",
+          "controlled_entity_id": "Controlled heat-source switch",
+          "show_advanced": "Configure advanced and safety settings"
+        },
+        "data_description": {
+          "zone_name": "The user-facing name of the controlled area.",
+          "sensor_name": "A user-facing name for this temperature measurement inside Controlel.",
+          "temperature_entity_id": "The Home Assistant temperature entity used for control.",
+          "target_temperature": "Heating is requested while the measured temperature is below this value.",
+          "heat_source_control_mode": "Use one normal switch, or choose custom services for an advanced installation.",
+          "controlled_entity_id": "The switch Controlel turns on and off.",
+          "show_advanced": "Set stable IDs, safety times, or other advanced values before creating the entry."
+        }
+      },
+      "advanced": {
+        "title": "Advanced and safety settings",
+        "description": "The recommended defaults are safe for most installations. Custom-service mode keeps enable and disable commands separate.",
         "data": {
           "sensor_id": "Sensor ID",
-          "sensor_name": "Sensor name",
-          "temperature_entity_id": "Temperature entity",
           "zone_id": "Zone ID",
-          "zone_name": "Zone name",
-          "target_temperature": "Target temperature",
-          "primary_measurement_max_age": "Primary measurement maximum age",
-          "max_future_skew": "Maximum future clock skew",
-          "indeterminate_grace_period": "Indeterminate grace period",
+          "primary_measurement_max_age_minutes": "Maximum measurement age",
+          "max_future_skew": "Future clock tolerance",
+          "indeterminate_grace_period_minutes": "Sensor failure grace period",
           "indeterminate_timeout_action": "Timeout action",
           "enable_service_domain": "Enable service domain",
           "enable_service_name": "Enable service name",
@@ -22,13 +40,95 @@
           "disable_service_domain": "Disable service domain",
           "disable_service_name": "Disable service name",
           "disable_target_entity_id": "Disable target entity"
+        },
+        "data_description": {
+          "sensor_id": "A stable internal identifier generated automatically unless manually specified.",
+          "zone_id": "A stable internal identifier generated automatically unless manually specified.",
+          "primary_measurement_max_age_minutes": "How long the last sensor value may remain valid before Controlel treats it as stale.",
+          "max_future_skew": "How much future timestamp error is tolerated before the measurement is rejected.",
+          "indeterminate_grace_period_minutes": "How long Controlel preserves the current decision when the sensor becomes unknown, unavailable, invalid, or stale before applying the timeout action.",
+          "indeterminate_timeout_action": "What Controlel does if valid measurement data does not return before the grace period expires.",
+          "enable_service_domain": "Home Assistant service domain used when heating is required.",
+          "enable_service_name": "Home Assistant service called when heating is required.",
+          "enable_target_entity_id": "Entity targeted by the enable command.",
+          "disable_service_domain": "Home Assistant service domain used when heating is not required.",
+          "disable_service_name": "Home Assistant service called when heating is not required.",
+          "disable_target_entity_id": "Entity targeted by the disable command."
         }
       }
     },
     "error": {
       "invalid_configuration": "The configuration is invalid.",
+      "invalid_sensor_id": "Use a lowercase letter first, followed only by lowercase letters, numbers, or underscores.",
+      "invalid_zone_id": "Use a lowercase letter first, followed only by lowercase letters, numbers, or underscores.",
+      "invalid_value": "Enter a valid value.",
+      "required": "This field is required.",
+      "cannot_generate_id": "Use a name that begins with a letter and contains at least one ASCII letter.",
+      "controlled_switch_required": "Select the switch that Controlel should turn on and off.",
+      "not_temperature_sensor": "Select a sensor entity whose device class is temperature.",
       "controlel_service_not_allowed": "Controlel cannot call its own service domain.",
-      "unsupported_temperature_unit": "The available entity must use Celsius or Fahrenheit."
+      "unsupported_temperature_unit": "The temperature sensor must use Celsius or Fahrenheit."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Basic settings",
+        "description": "Edit the zone, temperature measurement, target, and heat-source control mode. Stable internal IDs are preserved.",
+        "data": {
+          "zone_name": "Zone name",
+          "sensor_name": "Sensor name",
+          "temperature_entity_id": "Temperature sensor",
+          "target_temperature": "Target temperature",
+          "heat_source_control_mode": "Heat-source control mode",
+          "controlled_entity_id": "Controlled heat-source switch"
+        },
+        "data_description": {
+          "zone_name": "The user-facing name of the controlled area.",
+          "sensor_name": "A user-facing name for this temperature measurement inside Controlel.",
+          "temperature_entity_id": "The Home Assistant temperature entity used for control.",
+          "target_temperature": "Heating is requested while the measured temperature is below this value.",
+          "heat_source_control_mode": "Use one normal switch, or choose custom services for an advanced installation.",
+          "controlled_entity_id": "The switch Controlel turns on and off."
+        }
+      },
+      "advanced": {
+        "title": "Advanced and safety settings",
+        "description": "Review normalized safety times and, in custom mode, the separate enable and disable service calls.",
+        "data": {
+          "primary_measurement_max_age_minutes": "Maximum measurement age",
+          "max_future_skew": "Future clock tolerance",
+          "indeterminate_grace_period_minutes": "Sensor failure grace period",
+          "indeterminate_timeout_action": "Timeout action",
+          "enable_service_domain": "Enable service domain",
+          "enable_service_name": "Enable service name",
+          "enable_target_entity_id": "Enable target entity",
+          "disable_service_domain": "Disable service domain",
+          "disable_service_name": "Disable service name",
+          "disable_target_entity_id": "Disable target entity"
+        },
+        "data_description": {
+          "primary_measurement_max_age_minutes": "How long the last sensor value may remain valid before Controlel treats it as stale.",
+          "max_future_skew": "How much future timestamp error is tolerated before the measurement is rejected.",
+          "indeterminate_grace_period_minutes": "How long Controlel preserves the current decision when the sensor becomes unknown, unavailable, invalid, or stale before applying the timeout action.",
+          "indeterminate_timeout_action": "What Controlel does if valid measurement data does not return before the grace period expires.",
+          "enable_service_domain": "Home Assistant service domain used when heating is required.",
+          "enable_service_name": "Home Assistant service called when heating is required.",
+          "enable_target_entity_id": "Entity targeted by the enable command.",
+          "disable_service_domain": "Home Assistant service domain used when heating is not required.",
+          "disable_service_name": "Home Assistant service called when heating is not required.",
+          "disable_target_entity_id": "Entity targeted by the disable command."
+        }
+      }
+    },
+    "error": {
+      "invalid_configuration": "The configuration is invalid.",
+      "invalid_value": "Enter a valid value.",
+      "required": "This field is required.",
+      "controlled_switch_required": "Select the switch that Controlel should turn on and off.",
+      "not_temperature_sensor": "Select a sensor entity whose device class is temperature.",
+      "controlel_service_not_allowed": "Controlel cannot call its own service domain.",
+      "unsupported_temperature_unit": "The temperature sensor must use Celsius or Fahrenheit."
     }
   },
   "issues": {

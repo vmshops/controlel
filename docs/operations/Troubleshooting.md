@@ -4,9 +4,9 @@
 
 Confirm that the exact custom-repository URL is
 `https://github.com/vmshops/controlel` and the selected category is
-**Integration**. The repository must be publicly accessible. Until the first
-integration GitHub Release is published, there is no supported HACS release to
-install.
+**Integration**. The repository must be publicly accessible. Integration
+`0.1.1` is the current published release; `0.2.0` remains an unpublished
+candidate.
 
 If HACS downloaded files but Home Assistant cannot find Controlel, confirm
 that `manifest.json` is at
@@ -53,6 +53,11 @@ dedicated worker, and closes the executor. A late timer callback is harmless
 because both the host acceptance gate and runtime generation checks reject it.
 Shutdown sends no heat-source command.
 
+When **Configure** saves new options, this same unload-before-rebuild lifecycle
+is used. If a renamed zone is not visible immediately, refresh the integration
+page. Stable sensor and zone IDs intentionally do not follow display-name
+changes.
+
 After a HACS upgrade, restart Home Assistant rather than relying only on a
 reload. Removing Controlel must start by removing its config entry, which
 stops the runtime and clears its Repairs issues; remove the HACS repository
@@ -60,7 +65,7 @@ second.
 
 ## Core dependency installation
 
-Integration `0.1.1` requires exactly `controlel==0.1.0`. Normal supported
+Integration `0.2.0` requires exactly `controlel==0.1.0`. Normal supported
 installation lets Home Assistant obtain that dependency automatically; users
 do not need to install it manually. If setup reports a missing core, confirm
 that the environment can reach PyPI and that `python -m pip show controlel`

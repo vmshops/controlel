@@ -38,7 +38,7 @@ replaced. Successful port return is not physical source-state confirmation.
 ## Custom-component packaging
 
 The integration source is `custom_components/controlel`. Integration version
-`0.1.1` declares one config entry and exactly requires `controlel==0.1.0`.
+`0.2.0` declares one config entry and exactly requires `controlel==0.1.0`.
 The integration and core versions are independent, and the core is not
 vendored into the component.
 
@@ -49,20 +49,24 @@ The repository root HACS manifest defines a release asset named
 validator are:
 
 ```text
-python scripts/packaging/build_hacs_release.py --version 0.1.1
+python scripts/packaging/build_hacs_release.py --version 0.2.0
 python scripts/packaging/validate_hacs_release.py \
   dist/hacs/controlel.zip \
-  --version 0.1.1 \
+  --version 0.2.0 \
   --checksum dist/hacs/controlel.zip.sha256
 ```
 
 These commands only create ignored local release candidates. They do not
 create tags, GitHub Releases, or publication state.
 
-Configuration is immutable for a runtime lifetime. A reload fully unloads the
-host, stops the runtime, closes its executor, and builds new repositories and
-a new runtime. No measurements, demands, safety state, applied action, or
-physical heat-source state are restored or inferred.
+Stable sensor and zone IDs remain in config-entry data. Mutable settings are
+stored in options; options override legacy data while IDs can never be
+overridden. An empty options mapping therefore preserves an existing `0.1.1`
+entry exactly. Saving options triggers the supported update listener. A reload
+fully unloads the host, stops the runtime, closes its executor, snapshots the
+configured temperature entity, and builds new repositories and one new
+runtime. No measurements, demands, safety state, applied action, or physical
+heat-source state are restored or inferred.
 
 ## Development deployment
 
@@ -80,8 +84,9 @@ environment and never installs the checkout as a distribution.
 
 For a supported custom-component deployment, Home Assistant can install the
 exact manifest dependency automatically; users do not need to install the core
-manually. HACS metadata and deterministic release packaging are prepared, but
-no integration GitHub Release or default HACS-store entry exists. End-user
+manually. Integration `0.1.1` is published; metadata and deterministic release
+packaging are prepared for the unpublished `0.2.0` candidate. No default
+HACS-store entry exists. End-user
 installation instructions are in
 [HomeAssistantInstallation.md](HomeAssistantInstallation.md).
 
