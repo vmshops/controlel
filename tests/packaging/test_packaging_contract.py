@@ -4,6 +4,7 @@ import tomllib
 from pathlib import Path
 
 import pytest
+from trove_classifiers import classifiers
 
 import controlel
 from scripts.packaging.validate_artifacts import (
@@ -43,6 +44,15 @@ def test_project_metadata_and_runtime_dependencies_match_release_contract() -> N
     assert project["license"] == "MIT"
     assert project["authors"] == [{"name": "vmshops"}]
     assert project["dependencies"] == ["pydantic>=2.0"]
+    assert project["classifiers"] == [
+        "Development Status :: 3 - Alpha",
+        "Intended Audience :: Developers",
+        "Operating System :: OS Independent",
+        "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3.13",
+        "Programming Language :: Python :: 3.14",
+        "Topic :: Software Development :: Libraries :: Python Modules",
+    ]
     assert project["urls"] == {
         "Source": "https://github.com/vmshops/controlel",
         "Issues": "https://github.com/vmshops/controlel/issues",
@@ -59,6 +69,13 @@ def test_project_metadata_and_runtime_dependencies_match_release_contract() -> N
         "pytest-homeassistant-custom-component",
     }
     assert not any(name in dependency.casefold() for name in forbidden for dependency in project["dependencies"])
+
+
+def test_all_project_classifiers_are_official_trove_classifiers() -> None:
+    declared_classifiers = load_pyproject()["project"]["classifiers"]
+
+    assert len(declared_classifiers) == len(set(declared_classifiers))
+    assert set(declared_classifiers) <= classifiers
 
 
 def test_project_version_is_the_only_release_version_source() -> None:
@@ -88,7 +105,11 @@ def test_manifest_remains_independent_and_has_no_unpublished_requirement() -> No
 def test_packaging_tools_are_pinned_and_isolated() -> None:
     requirements = (ROOT / "requirements" / "package-test.txt").read_text(encoding="utf-8").splitlines()
 
-    assert requirements == ["build==1.5.0", "twine==6.2.0"]
+    assert requirements == [
+        "build==1.5.0",
+        "trove-classifiers==2026.6.1.19",
+        "twine==6.2.0",
+    ]
     assert not (ROOT / "src" / "controlel" / "py.typed").exists()
 
 
