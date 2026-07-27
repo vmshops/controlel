@@ -71,3 +71,13 @@ sufficient.
 Do not advertise this build as HACS-ready. Publishing and exactly pinning the
 core package, release packaging, HACS metadata, and supported end-user
 installation instructions remain deferred.
+
+Milestone 24B1 verifies locally built core artifacts but does not publish them.
+Consequently, development deployment still requires the editable core install
+shown above. A locally verified wheel is not a public deployment dependency,
+and the Home Assistant manifest must not reference it.
+
+After a separately approved 24B2 publication, deployment will install the
+exact public core version through the custom-component manifest. That
+transition requires a clean public-index installation test first; see the
+[release guide](../development/ReleaseGuide.md).

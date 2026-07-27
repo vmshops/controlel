@@ -1,0 +1,11 @@
+include LICENSE
+include README.md
+include pyproject.toml
+graft src/controlel
+prune .github
+prune custom_components
+prune docs
+prune requirements
+prune tests
+global-exclude __pycache__
+global-exclude *.py[cod]

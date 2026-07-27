@@ -24,3 +24,16 @@ DHW, valves, learning, and frontend panels.
 
 Before normal HACS distribution, the reusable core must be released as a
 versioned package and referenced by a pinned custom-component requirement.
+
+## Milestone 24B: controlled core release
+
+Milestone 24B1 prepares the `controlel` core distribution with explicit PEP 517
+metadata, wheel and sdist content validation, clean out-of-checkout wheel
+installation, and non-publishing packaging CI. Version `0.1.0` remains static
+in `pyproject.toml`, and the integration manifest deliberately keeps
+`requirements: []`.
+
+Milestone 24B2 requires separate approval. It covers manual publication,
+independent public-index installation verification, and only then the exact
+Home Assistant manifest pin. HACS metadata and end-user distribution remain
+later release work.

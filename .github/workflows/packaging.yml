@@ -1,0 +1,40 @@
+name: Packaging
+
+on:
+  push:
+    branches:
+      - main
+
+  pull_request:
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: requirements/package-test.txt
+
+      - name: Install pinned packaging tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements/package-test.txt
+
+      - name: Build wheel and source distribution
+        run: python -m build
+
+      - name: Validate package metadata
+        run: python -m twine check dist/*
+
+      - name: Validate artifact contents
+        run: python scripts/packaging/validate_artifacts.py dist
+
+      - name: Verify clean wheel installation
+        run: python scripts/packaging/verify_clean_install.py dist

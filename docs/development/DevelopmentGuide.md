@@ -99,3 +99,22 @@ Framework compatibility is not HACS readiness. The core is not published,
 `custom_components/controlel/manifest.json` intentionally contains
 `"requirements": []`, and publishing plus manifest dependency work remains a
 later milestone.
+
+## Core artifact validation
+
+Core packaging uses a separate `.venv-package` environment with the exact
+development tools in `requirements/package-test.txt`. It does not add build or
+Twine to the core runtime dependencies.
+
+```text
+python -m pip install -r requirements/package-test.txt
+python -m build
+python -m twine check dist/*
+python scripts/packaging/validate_artifacts.py dist
+python scripts/packaging/verify_clean_install.py dist
+```
+
+The last command creates a clean temporary environment and runs outside the
+checkout. Detailed Windows commands, accepted archive contents, versioning,
+publication security, and the future manifest transition are documented in
+[ReleaseGuide.md](ReleaseGuide.md).

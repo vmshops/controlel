@@ -51,3 +51,18 @@ The isolated, hashed environment is defined by `requirements/ha-test.in` and
 harness does not make the integration HACS-ready: the core package is not
 published, `manifest.json` intentionally has `requirements: []`, and no HACS
 metadata is provided.
+
+## Core package artifacts
+
+The reusable core is prepared as the `controlel` distribution and import
+package at version `0.1.0`. Its static version source and PEP 517 build
+configuration live in `pyproject.toml`; normal installation depends only on
+Pydantic. Packaging validation builds one wheel and one sdist, inspects their
+contents, and installs the wheel into a clean environment outside the checkout.
+
+Nothing is published by this repository configuration. The Home Assistant
+manifest remains empty until a verified artifact is manually published and
+installed from the public index. See the
+[core release guide](docs/development/ReleaseGuide.md) for build commands,
+security checks, the `controlel-core` fallback name, and the exact 24B2
+transition.
