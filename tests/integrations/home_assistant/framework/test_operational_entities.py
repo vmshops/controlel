@@ -125,6 +125,8 @@ async def test_reload_rename_and_target_change_keep_one_stable_entity_set(
     entry = await _setup_entry(hass, entry_data)
     registry = er.async_get(hass)
     original = {item.unique_id: item.entity_id for item in er.async_entries_for_config_entry(registry, entry.entry_id)}
+    expected_unique_ids = {f"{entry.entry_id}_{key}" for key in EXPECTED_SENSOR_KEYS | EXPECTED_BINARY_SENSOR_KEYS}
+    assert set(original) == expected_unique_ids
 
     hass.config_entries.async_update_entry(
         entry,
@@ -137,7 +139,7 @@ async def test_reload_rename_and_target_change_keep_one_stable_entity_set(
 
     current_entries = er.async_entries_for_config_entry(registry, entry.entry_id)
     assert {item.unique_id: item.entity_id for item in current_entries} == original
-    assert len(current_entries) == 22
+    assert len(current_entries) == len(expected_unique_ids)
     target = next(item for item in current_entries if item.unique_id.endswith("_target_temperature"))
     assert hass.states.get(target.entity_id).state == "22.5"
     devices = dr.async_entries_for_config_entry(dr.async_get(hass), entry.entry_id)
