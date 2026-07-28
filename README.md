@@ -24,10 +24,10 @@ Project phase: Home Assistant one-zone host vertical slice
 
 Core version: 0.1.0
 
-Home Assistant integration candidate version: 0.2.0
+Home Assistant integration candidate version: 0.3.0
 
-Integration `0.1.1` is published for HACS custom-repository installation.
-Version `0.2.0` is under development and has not been tagged or published.
+Use the latest published release for HACS custom-repository installation.
+Version `0.3.0` is under development and has not been tagged or published.
 Controlel is not listed in the default HACS store.
 
 ## Home Assistant installation
@@ -63,6 +63,15 @@ updates fully unload and rebuild the runtime. It uses a dedicated single-worker
 executor for every synchronous `ControlRuntime` operation. No core method runs
 on Home Assistant's event-loop thread.
 
+Each entry creates one `Controlel — <Zone name>` device with operational and
+diagnostic sensors. They expose the normalized temperature and target,
+measurement validity and age, demand, safety grace/timeout state, the latest
+decision and reason, requested command and dispatch outcome, failure flags,
+and runtime/core versions. Demand and a dispatched service call are not proof
+that the physical heat source changed state. The target remains writable only
+through **Configure**. Diagnostics include the immutable current snapshot and
+a maximum 20-record in-memory decision trace; neither survives reconstruction.
+
 The integration manifest requires the exact public core release
 `controlel==0.1.0`. A supported custom-component deployment can therefore let
 Home Assistant obtain the core dependency automatically; users do not need to
@@ -77,7 +86,7 @@ The isolated, hashed environment is defined by `requirements/ha-test.in` and
 `requirements/ha-test.txt`; setup and suite commands are in the
 [development guide](docs/development/DevelopmentGuide.md). The compatibility
 harness is separate from HACS release validation. HACS metadata and
-deterministic release packaging are prepared for `0.2.0`, but that candidate
+deterministic release packaging are prepared for `0.3.0`, but that candidate
 has not been published and no default-store publication exists.
 
 ## Core package artifacts

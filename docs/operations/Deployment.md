@@ -38,7 +38,7 @@ replaced. Successful port return is not physical source-state confirmation.
 ## Custom-component packaging
 
 The integration source is `custom_components/controlel`. Integration version
-`0.2.0` declares one config entry and exactly requires `controlel==0.1.0`.
+`0.3.0` declares one config entry and exactly requires `controlel==0.1.0`.
 The integration and core versions are independent, and the core is not
 vendored into the component.
 
@@ -49,10 +49,10 @@ The repository root HACS manifest defines a release asset named
 validator are:
 
 ```text
-python scripts/packaging/build_hacs_release.py --version 0.2.0
+python scripts/packaging/build_hacs_release.py --version 0.3.0
 python scripts/packaging/validate_hacs_release.py \
   dist/hacs/controlel.zip \
-  --version 0.2.0 \
+  --version 0.3.0 \
   --checksum dist/hacs/controlel.zip.sha256
 ```
 
@@ -67,6 +67,13 @@ fully unloads the host, stops the runtime, closes its executor, snapshots the
 configured temperature entity, and builds new repositories and one new
 runtime. No measurements, demands, safety state, applied action, or physical
 heat-source state are restored or inferred.
+
+The host also owns one immutable operational snapshot source per runtime.
+Runtime results, scheduler evaluations, and failure transitions update it on
+the serialized host path. Home Assistant entities subscribe read-only;
+30-second interval updates advance measurement age and grace remaining without
+polling once per second. Unload closes the source, and reload constructs a new
+empty snapshot and maximum 20-record non-persistent decision trace.
 
 ## Development deployment
 
@@ -84,8 +91,8 @@ environment and never installs the checkout as a distribution.
 
 For a supported custom-component deployment, Home Assistant can install the
 exact manifest dependency automatically; users do not need to install the core
-manually. Integration `0.1.1` is published; metadata and deterministic release
-packaging are prepared for the unpublished `0.2.0` candidate. No default
+manually. Metadata and deterministic release packaging are prepared for the
+unpublished `0.3.0` candidate. No default
 HACS-store entry exists. End-user
 installation instructions are in
 [HomeAssistantInstallation.md](HomeAssistantInstallation.md).

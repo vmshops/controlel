@@ -4,9 +4,8 @@
 
 Confirm that the exact custom-repository URL is
 `https://github.com/vmshops/controlel` and the selected category is
-**Integration**. The repository must be publicly accessible. Integration
-`0.1.1` is the current published release; `0.2.0` remains an unpublished
-candidate.
+**Integration**. The repository must be publicly accessible. Use the latest
+published release; `0.3.0` remains an unpublished candidate.
 
 If HACS downloaded files but Home Assistant cannot find Controlel, confirm
 that `manifest.json` is at
@@ -37,6 +36,22 @@ logs an error, and creates or updates one stable recoverable Repairs issue. A
 later successful heat-source call clears that issue. There is no automatic
 retry and no physical-state confirmation.
 
+The **Last command outcome** entity distinguishes a dispatched service call,
+a suppressed duplicate, and recoverable or fatal failure. A dispatched state
+still does not confirm the physical device moved. The recoverable failure
+binary sensor clears with the owned Repairs issue after a later successful
+call.
+
+## Measurement, grace, and timeout visibility
+
+Use **Measurement status**, **Measurement age**, **Safety state**, and
+**Safety grace remaining** on the Controlel device. Unknown and unavailable
+remain distinct; malformed values use `invalid_value`, and age/timestamp
+admission can produce `stale` or `future_timestamp`. A valid recovery clears
+the obsolete grace deadline and resumes normal demand evaluation. Diagnostics
+can provide the current snapshot and bounded decision trace if the latest
+reason needs more context.
+
 ## Fatal runtime failures
 
 Scheduler installation/cancellation failure, clock regression, re-entrancy,
@@ -65,7 +80,7 @@ second.
 
 ## Core dependency installation
 
-Integration `0.2.0` requires exactly `controlel==0.1.0`. Normal supported
+Integration `0.3.0` requires exactly `controlel==0.1.0`. Normal supported
 installation lets Home Assistant obtain that dependency automatically; users
 do not need to install it manually. If setup reports a missing core, confirm
 that the environment can reach PyPI and that `python -m pip show controlel`

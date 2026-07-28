@@ -25,17 +25,22 @@ FIXED_ZIP_MODE = stat.S_IFREG | 0o644
 EXPECTED_ARCHIVE_FILES = frozenset(
     {
         "__init__.py",
+        "binary_sensor.py",
         "config.py",
         "config_flow.py",
         "const.py",
+        "diagnostics.py",
+        "entity.py",
         "event_loop_bridge.py",
         "failure_sink.py",
         "heat_source.py",
         "host.py",
         "manifest.json",
         "measurement_ingestion.py",
+        "operational.py",
         "runtime_executor.py",
         "scheduler.py",
+        "sensor.py",
         "strings.json",
         "translations/en.json",
     }

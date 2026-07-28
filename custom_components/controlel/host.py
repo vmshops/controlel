@@ -4,7 +4,8 @@ import asyncio
 import logging
 from collections import deque
 from collections.abc import Callable, Coroutine
-from typing import Any, Protocol
+from datetime import UTC, datetime, timedelta
+from typing import Any, Protocol, cast
 
 from controlel.application.runtime.control_runtime import ControlRuntime
 from controlel.application.runtime.heat_demand_evaluation_result import (
@@ -18,14 +19,38 @@ from controlel.application.runtime.runtime_lifecycle import (
 from controlel.application.runtime.runtime_processing_result import (
     RuntimeProcessingResult,
     RuntimeProcessingStatus,
+    TemperatureNoDecisionReason,
 )
+from controlel.application.services.heat_demand_safety_policy import (
+    HeatDemandSafetyPhase,
+)
+from controlel.domain.commands.heating_action import HeatingAction
+from controlel.domain.demands.building_heat_demand_status import (
+    BuildingHeatDemandStatus,
+)
+from controlel.domain.measurements.measurement import Measurement
 
+from .config import HomeAssistantIntegrationConfig
+from .const import INTEGRATION_VERSION
 from .failure_sink import HomeAssistantScheduledFailureSink
 from .heat_source import HomeAssistantServiceCallError
 from .measurement_ingestion import (
     HomeAssistantMeasurementMapper,
+    MeasurementRejectionReason,
     StateLike,
     StateVersion,
+)
+from .operational import (
+    CommandOutcome,
+    DecisionCode,
+    DecisionReason,
+    DecisionTraceRecord,
+    HeatDemandState,
+    MeasurementStatus,
+    OperationalSnapshotSource,
+    RuntimeStatus,
+    SafetyState,
+    initial_snapshot,
 )
 from .runtime_executor import (
     HomeAssistantRuntimeExecutor,
@@ -37,6 +62,11 @@ type StateListener = Callable[[StateLike | None], None]
 type StateSubscriber = Callable[[object, str, StateListener], Unsubscribe]
 type StateGetter = Callable[[str], StateLike | None]
 type ShutdownSubscriber = Callable[[object, Callable[[], None]], Unsubscribe]
+type IntervalSubscriber = Callable[
+    [object, Callable[[datetime], None], timedelta],
+    Unsubscribe,
+]
+_MEASUREMENT_UNSET = object()
 
 
 class HomeAssistantTaskOwner(Protocol):
@@ -57,28 +87,50 @@ class HomeAssistantControlelHost:
         executor: HomeAssistantRuntimeExecutor,
         measurement_mapper: HomeAssistantMeasurementMapper,
         failure_sink: HomeAssistantScheduledFailureSink,
-        temperature_entity_id: str,
+        config: HomeAssistantIntegrationConfig,
+        core_version: str,
         logger: logging.Logger,
         state_subscriber: StateSubscriber | None = None,
         state_getter: StateGetter | None = None,
         shutdown_subscriber: ShutdownSubscriber | None = None,
+        interval_subscriber: IntervalSubscriber | None = None,
     ) -> None:
         self._hass = hass
         self._runtime = runtime
         self._executor = executor
         self._measurement_mapper = measurement_mapper
         self._failure_sink = failure_sink
-        self._temperature_entity_id = temperature_entity_id
+        self._config = config
+        self._temperature_entity_id = config.temperature_entity_id
         self._logger = logger
         self._state_subscriber = state_subscriber or _default_state_subscriber
         self._state_getter = state_getter or self._default_state_getter
         self._shutdown_subscriber = shutdown_subscriber or _default_shutdown_subscriber
+        self._interval_subscriber = interval_subscriber or _default_interval_subscriber
+        self.snapshot_source = OperationalSnapshotSource(
+            initial_snapshot(
+                zone_name=config.zone_name,
+                zone_id=config.zone_id.value,
+                sensor_name=config.sensor_name,
+                sensor_id=config.sensor_id.value,
+                temperature_entity_id=config.temperature_entity_id,
+                target_temperature=config.target_temperature.value,
+                timeout_action=config.indeterminate_timeout_action.value,
+                integration_version=INTEGRATION_VERSION,
+                core_version=core_version,
+            )
+        )
+        self._failure_sink.bind_state_handlers(
+            recoverable=self._on_recoverable_failure_state,
+            fatal=self._on_fatal_failure_state,
+        )
 
         self._lifecycle_lock = asyncio.Lock()
         self._buffer: deque[StateLike | None] = deque()
         self._live_queue: deque[StateLike | None] = deque()
         self._unsubscribe: Unsubscribe | None = None
         self._unsubscribe_shutdown: Unsubscribe | None = None
+        self._unsubscribe_interval: Unsubscribe | None = None
         self._live_drain_task: asyncio.Task[Any] | None = None
         self._accepted_callback_tasks: set[asyncio.Task[Any]] = set()
         self._fatal_shutdown_task: asyncio.Task[Any] | None = None
@@ -127,6 +179,18 @@ class HomeAssistantControlelHost:
                 self._handle_synchronous_failure(error)
                 raise
             else:
+                now = datetime.now(UTC)
+                self.snapshot_source.update(
+                    now=now,
+                    runtime_status=RuntimeStatus.ACTIVE,
+                    trace_record=self._trace_record(
+                        code=DecisionCode.RUNTIME_STARTED,
+                        reason=DecisionReason.RUNTIME_LIFECYCLE,
+                        timestamp=now,
+                    ),
+                )
+                if isinstance(startup_result, HeatDemandEvaluationResult):
+                    self._observe_evaluation_result(startup_result)
                 self._log_evaluation_result(startup_result)
 
             await self._async_drain_setup_buffer()
@@ -135,6 +199,12 @@ class HomeAssistantControlelHost:
             self._buffering = False
             self._initialized = True
             self._failure_sink.clear_fatal_issue_after_successful_reload()
+            self._unsubscribe_interval = self._interval_subscriber(
+                self._hass,
+                self._on_interval,
+                timedelta(seconds=30),
+            )
+            self._logger.info("Controlel runtime started")
 
     async def async_process_state(
         self,
@@ -155,6 +225,7 @@ class HomeAssistantControlelHost:
         except Exception as error:
             self._handle_synchronous_failure(error)
             raise
+        self._observe_evaluation_result(result)
         self._log_evaluation_result(result)
         return result
 
@@ -182,6 +253,23 @@ class HomeAssistantControlelHost:
         )
         self._accepting = False
         self._fatal_error = error
+        now = datetime.now(UTC)
+        self.snapshot_source.update(
+            now=now,
+            runtime_status=RuntimeStatus.FATAL_ERROR,
+            safety_state=SafetyState.FATAL_ERROR,
+            fatal_failure_active=True,
+            last_command_outcome=CommandOutcome.FAILED_FATAL,
+            last_command_timestamp=now,
+            last_command_failure_type=type(error).__name__,
+            trace_record=self._trace_record(
+                code=DecisionCode.COMMAND_FAILED,
+                reason=DecisionReason.FATAL_RUNTIME_FAILURE,
+                timestamp=now,
+                outcome=CommandOutcome.FAILED_FATAL,
+                safety=SafetyState.FATAL_ERROR,
+            ),
+        )
         if not self._initialized:
             return
         self._fatal_shutdown_task = self._create_task(
@@ -212,6 +300,14 @@ class HomeAssistantControlelHost:
                 except Exception:
                     self._logger.exception("Failed to unsubscribe Controlel shutdown listener")
 
+            unsubscribe_interval = self._unsubscribe_interval
+            self._unsubscribe_interval = None
+            if unsubscribe_interval is not None:
+                try:
+                    unsubscribe_interval()
+                except Exception:
+                    self._logger.exception("Failed to unsubscribe Controlel observation interval")
+
             drain_task = self._live_drain_task
             if drain_task is not None and drain_task is not asyncio.current_task():
                 await asyncio.gather(drain_task, return_exceptions=True)
@@ -236,6 +332,21 @@ class HomeAssistantControlelHost:
             self._buffering = False
             self._stopping = False
             self._stopped = True
+            now = datetime.now(UTC)
+            if self._fatal_error is None:
+                self.snapshot_source.update(
+                    now=now,
+                    runtime_status=RuntimeStatus.STOPPED,
+                    safety_state=SafetyState.STOPPED,
+                    grace_deadline=None,
+                    trace_record=self._trace_record(
+                        code=DecisionCode.RUNTIME_STOPPED,
+                        reason=DecisionReason.RUNTIME_LIFECYCLE,
+                        timestamp=now,
+                    ),
+                )
+            self.snapshot_source.close()
+            self._logger.info("Controlel runtime stopped")
 
     def clear_transient_issues(self) -> None:
         self._failure_sink.clear_transient_issues()
@@ -282,8 +393,9 @@ class HomeAssistantControlelHost:
 
         mapping = self._measurement_mapper.map_state(state)
         if mapping.measurement is None:
+            self._observe_rejected_state(state, mapping.rejection_reason)
             self._logger.debug(
-                "Rejected Home Assistant temperature state: %s",
+                "Rejected Home Assistant temperature state reason=%s",
                 mapping.rejection_reason,
             )
             return None
@@ -302,9 +414,16 @@ class HomeAssistantControlelHost:
         except Exception as error:
             self._handle_synchronous_failure(error)
             if isinstance(error, HomeAssistantServiceCallError):
+                self._observe_service_failure(error, mapping.measurement)
                 return None
             raise
 
+        self._observe_processing_result(result, mapping.measurement)
+        self._logger.debug(
+            "Accepted Controlel measurement timestamp=%s processing_status=%s",
+            mapping.measurement.timestamp,
+            result.status,
+        )
         self._log_processing_result(result)
         return result
 
@@ -314,11 +433,17 @@ class HomeAssistantControlelHost:
     ) -> None:
         if not self._accepting:
             return
+        heat_source_state_store = getattr(self._runtime, "heat_source_state_store", None)
+        previous_state = heat_source_state_store.get() if heat_source_state_store is not None else None
+        previous_failure = self._failure_sink.last_failure
         try:
             await self._executor.async_submit(callback)
         except RuntimeExecutorClosedError:
             if not self._stopping and not self._stopped:
                 raise
+        else:
+            if heat_source_state_store is not None:
+                self._observe_scheduled_state(previous_state, previous_failure)
 
     def _handle_synchronous_failure(self, error: Exception) -> None:
         self._failure_sink.handle_synchronous_failure(error)
@@ -328,6 +453,486 @@ class HomeAssistantControlelHost:
             return
         if isinstance(error, RuntimeReentrancyError):
             self.request_fatal_shutdown(error)
+
+    def _observe_rejected_state(
+        self,
+        state: StateLike | None,
+        reason: MeasurementRejectionReason | None,
+    ) -> None:
+        now = datetime.now(UTC)
+        status_by_reason = {
+            MeasurementRejectionReason.MISSING_STATE: MeasurementStatus.NOT_RECEIVED,
+            MeasurementRejectionReason.UNKNOWN: MeasurementStatus.UNKNOWN,
+            MeasurementRejectionReason.UNAVAILABLE: MeasurementStatus.UNAVAILABLE,
+        }
+        status = status_by_reason.get(reason, MeasurementStatus.INVALID_VALUE)
+        timestamp = state.last_updated if state is not None else None
+        if timestamp is not None and (timestamp.tzinfo is None or timestamp.utcoffset() is None):
+            timestamp = None
+        self.snapshot_source.update(
+            now=now,
+            current_temperature=None,
+            measurement_status=status,
+            measurement_timestamp=timestamp,
+            last_meaningful_event_at=now,
+        )
+
+    def _observe_processing_result(
+        self,
+        result: RuntimeProcessingResult,
+        measurement: Measurement,
+    ) -> None:
+        now = datetime.now(UTC)
+        base: dict[str, Any] = {
+            "current_temperature": measurement.value.value,
+            "measurement_status": MeasurementStatus.VALID,
+            "measurement_timestamp": measurement.timestamp,
+            "last_meaningful_event_at": now,
+        }
+        if result.status is RuntimeProcessingStatus.NO_DECISION:
+            if result.reason in {
+                TemperatureNoDecisionReason.TIMESTAMP_ADMISSION_REJECTED,
+                TemperatureNoDecisionReason.PRIMARY_MEASUREMENT_FUTURE_DATED,
+            }:
+                base.update(
+                    current_temperature=None,
+                    measurement_status=MeasurementStatus.FUTURE_TIMESTAMP,
+                    demand_reason=DecisionReason.MEASUREMENT_FUTURE_TIMESTAMP,
+                )
+            elif result.reason is TemperatureNoDecisionReason.PRIMARY_MEASUREMENT_EXPIRED:
+                base.update(
+                    current_temperature=None,
+                    measurement_status=MeasurementStatus.STALE,
+                    zone_heat_demand=HeatDemandState.INDETERMINATE,
+                    demand_reason=DecisionReason.MEASUREMENT_STALE,
+                )
+            self.snapshot_source.update(now=now, **base)
+            return
+
+        decision_event = result.decision_event
+        if decision_event is None:
+            self.snapshot_source.update(now=now, **base)
+            return
+        decision = decision_event.decision
+        demand = (
+            HeatDemandState.HEAT_REQUIRED
+            if decision.action.value == HeatingAction.ENABLE_HEATING.value
+            else HeatDemandState.NO_HEAT_REQUIRED
+        )
+        reason = (
+            DecisionReason.TEMPERATURE_BELOW_TARGET
+            if demand is HeatDemandState.HEAT_REQUIRED
+            else DecisionReason.TEMPERATURE_AT_OR_ABOVE_TARGET
+        )
+        base.update(zone_heat_demand=demand, demand_reason=reason)
+        evaluation = result.heat_demand_evaluation
+        if evaluation is None:
+            code = (
+                DecisionCode.HEAT_REQUESTED
+                if demand is HeatDemandState.HEAT_REQUIRED
+                else DecisionCode.HEAT_NOT_REQUIRED
+            )
+            trace = self._trace_record(
+                code=code,
+                reason=reason,
+                timestamp=decision.timestamp,
+                measured=measurement.value.value,
+                demand=demand,
+            )
+        else:
+            evaluation_changes, trace = self._evaluation_observation(
+                evaluation,
+                measured=measurement.value.value,
+                reason=reason,
+                timestamp=decision.timestamp,
+            )
+            base.update(evaluation_changes)
+        self._log_demand_transition(
+            self.snapshot_source.current.zone_heat_demand,
+            demand,
+            reason,
+        )
+        self.snapshot_source.update(
+            now=now,
+            trace_record=trace,
+            **base,
+        )
+
+    def _observe_evaluation_result(
+        self,
+        result: HeatDemandEvaluationResult,
+    ) -> None:
+        reason = self._reason_from_building_demand(result)
+        changes, trace = self._evaluation_observation(
+            result,
+            measured=self.snapshot_source.current.current_temperature,
+            reason=reason,
+            timestamp=result.building_heat_demand.evaluated_at,
+        )
+        if reason is DecisionReason.MEASUREMENT_STALE:
+            changes.update(
+                current_temperature=None,
+                measurement_status=MeasurementStatus.STALE,
+            )
+        elif reason is DecisionReason.MEASUREMENT_FUTURE_TIMESTAMP:
+            changes.update(
+                current_temperature=None,
+                measurement_status=MeasurementStatus.FUTURE_TIMESTAMP,
+            )
+        self._log_demand_transition(
+            self.snapshot_source.current.zone_heat_demand,
+            changes["zone_heat_demand"],
+            reason,
+        )
+        self.snapshot_source.update(
+            now=datetime.now(UTC),
+            trace_record=trace,
+            **changes,
+        )
+
+    def _evaluation_observation(
+        self,
+        result: HeatDemandEvaluationResult,
+        *,
+        measured: float | None,
+        reason: DecisionReason,
+        timestamp: datetime,
+    ) -> tuple[dict[str, Any], DecisionTraceRecord]:
+        demand = {
+            BuildingHeatDemandStatus.HEAT_REQUIRED: HeatDemandState.HEAT_REQUIRED,
+            BuildingHeatDemandStatus.NO_HEAT_REQUIRED: HeatDemandState.NO_HEAT_REQUIRED,
+            BuildingHeatDemandStatus.INDETERMINATE: HeatDemandState.INDETERMINATE,
+        }[result.building_heat_demand.status]
+        safety = {
+            HeatDemandSafetyPhase.DETERMINATE: SafetyState.NORMAL,
+            HeatDemandSafetyPhase.INDETERMINATE_GRACE: SafetyState.INDETERMINATE_GRACE,
+            HeatDemandSafetyPhase.INDETERMINATE_TIMED_OUT: SafetyState.TIMEOUT_ACTION_APPLIED,
+        }[result.safety_assessment.phase]
+        outcome = {
+            HeatDemandEvaluationStatus.INDETERMINATE_GRACE: CommandOutcome.NONE,
+            HeatDemandEvaluationStatus.DEMAND_COMMAND_EXECUTED: CommandOutcome.DISPATCHED,
+            HeatDemandEvaluationStatus.DEMAND_COMMAND_SUPPRESSED: (CommandOutcome.SUPPRESSED_DUPLICATE),
+            HeatDemandEvaluationStatus.SAFETY_COMMAND_EXECUTED: CommandOutcome.DISPATCHED,
+            HeatDemandEvaluationStatus.SAFETY_COMMAND_SUPPRESSED: (CommandOutcome.SUPPRESSED_DUPLICATE),
+        }[result.status]
+        if result.status is HeatDemandEvaluationStatus.INDETERMINATE_GRACE:
+            code = DecisionCode.INDETERMINATE_PRESERVE_PREVIOUS
+        elif result.status in {
+            HeatDemandEvaluationStatus.SAFETY_COMMAND_EXECUTED,
+            HeatDemandEvaluationStatus.SAFETY_COMMAND_SUPPRESSED,
+        }:
+            code = (
+                DecisionCode.TIMEOUT_DISABLE_HEATING
+                if result.command is not None and result.command.action is HeatingAction.DISABLE_HEATING
+                else DecisionCode.TIMEOUT_ENABLE_HEATING
+            )
+            reason = DecisionReason.SAFETY_GRACE_EXPIRED
+        elif outcome is CommandOutcome.SUPPRESSED_DUPLICATE:
+            code = DecisionCode.COMMAND_SUPPRESSED_DUPLICATE
+            reason = DecisionReason.DUPLICATE_COMMAND
+        else:
+            code = DecisionCode.COMMAND_DISPATCHED
+        command = result.command.action.value if result.command is not None else None
+        command_timestamp = result.command.created_at if result.command is not None else None
+        changes: dict[str, Any] = {
+            "zone_heat_demand": demand,
+            "demand_reason": reason,
+            "safety_state": safety,
+            "grace_deadline": result.safety_assessment.timeout_at
+            if safety is SafetyState.INDETERMINATE_GRACE
+            else None,
+        }
+        if command is not None:
+            changes.update(
+                last_requested_command=command,
+                last_command_outcome=outcome,
+                last_command_timestamp=command_timestamp,
+                last_command_failure_type=None,
+            )
+        if outcome is CommandOutcome.SUPPRESSED_DUPLICATE:
+            changes["duplicate_commands_suppressed"] = self.snapshot_source.current.duplicate_commands_suppressed + 1
+        if outcome is CommandOutcome.DISPATCHED:
+            changes["recoverable_failure_active"] = False
+        return (
+            changes,
+            self._trace_record(
+                code=code,
+                reason=reason,
+                timestamp=timestamp,
+                measured=measured,
+                demand=demand,
+                requested=command,
+                outcome=outcome,
+                safety=safety,
+            ),
+        )
+
+    def _reason_from_building_demand(
+        self,
+        result: HeatDemandEvaluationResult,
+    ) -> DecisionReason:
+        demand = result.building_heat_demand
+        if demand.status is BuildingHeatDemandStatus.HEAT_REQUIRED:
+            return DecisionReason.TEMPERATURE_BELOW_TARGET
+        if demand.status is BuildingHeatDemandStatus.NO_HEAT_REQUIRED:
+            return DecisionReason.TEMPERATURE_AT_OR_ABOVE_TARGET
+        if demand.expired_zone_ids:
+            return DecisionReason.MEASUREMENT_STALE
+        if demand.future_dated_zone_ids:
+            return DecisionReason.MEASUREMENT_FUTURE_TIMESTAMP
+        current_status = self.snapshot_source.current.measurement_status
+        return {
+            MeasurementStatus.UNKNOWN: DecisionReason.MEASUREMENT_UNKNOWN,
+            MeasurementStatus.UNAVAILABLE: DecisionReason.MEASUREMENT_UNAVAILABLE,
+            MeasurementStatus.INVALID_VALUE: DecisionReason.MEASUREMENT_INVALID,
+        }.get(current_status, DecisionReason.WAITING_FOR_FIRST_MEASUREMENT)
+
+    def _observe_service_failure(
+        self,
+        error: HomeAssistantServiceCallError,
+        measurement: Measurement,
+    ) -> None:
+        demand = (
+            HeatDemandState.HEAT_REQUIRED
+            if error.action is HeatingAction.ENABLE_HEATING
+            else HeatDemandState.NO_HEAT_REQUIRED
+        )
+        reason = (
+            DecisionReason.TEMPERATURE_BELOW_TARGET
+            if demand is HeatDemandState.HEAT_REQUIRED
+            else DecisionReason.TEMPERATURE_AT_OR_ABOVE_TARGET
+        )
+        self.snapshot_source.update(
+            now=datetime.now(UTC),
+            current_temperature=measurement.value.value,
+            measurement_status=MeasurementStatus.VALID,
+            measurement_timestamp=measurement.timestamp,
+            zone_heat_demand=demand,
+            demand_reason=reason,
+        )
+
+    def _observe_scheduled_state(
+        self,
+        previous_heat_source_state: object | None,
+        previous_failure: object | None,
+    ) -> None:
+        safety = self._runtime.heat_demand_safety_state_store.get()
+        if safety is None:
+            return
+        now = safety.last_evaluated_at
+        current = self.snapshot_source.current
+        latest = self._runtime.state_store.get_latest(self._config.sensor_id)
+        deadline = (
+            safety.indeterminate_since + self._config.indeterminate_grace_period
+            if safety.indeterminate_since is not None
+            else None
+        )
+        if safety.indeterminate_since is None:
+            safety_state = SafetyState.NORMAL
+        elif deadline is not None and now < deadline:
+            safety_state = SafetyState.INDETERMINATE_GRACE
+        else:
+            safety_state = SafetyState.TIMEOUT_ACTION_APPLIED
+        measurement_status = current.measurement_status
+        measured: float | None = current.current_temperature
+        if latest is None:
+            demand = HeatDemandState.INDETERMINATE
+            reason = DecisionReason.WAITING_FOR_FIRST_MEASUREMENT
+            measured = None
+        else:
+            age = now - latest.timestamp
+            if age > self._config.primary_measurement_max_age:
+                demand = HeatDemandState.INDETERMINATE
+                reason = DecisionReason.MEASUREMENT_STALE
+                measured = None
+                if measurement_status is MeasurementStatus.VALID:
+                    measurement_status = MeasurementStatus.STALE
+            elif latest.timestamp - now > self._config.max_future_skew:
+                demand = HeatDemandState.INDETERMINATE
+                reason = DecisionReason.MEASUREMENT_FUTURE_TIMESTAMP
+                measured = None
+                measurement_status = MeasurementStatus.FUTURE_TIMESTAMP
+            else:
+                zone_demand = self._runtime.zone_demand_store.get(self._config.zone_id)
+                demand = (
+                    HeatDemandState.HEAT_REQUIRED
+                    if zone_demand is not None and zone_demand.requires_heat
+                    else HeatDemandState.NO_HEAT_REQUIRED
+                )
+                reason = (
+                    DecisionReason.TEMPERATURE_BELOW_TARGET
+                    if demand is HeatDemandState.HEAT_REQUIRED
+                    else DecisionReason.TEMPERATURE_AT_OR_ABOVE_TARGET
+                )
+                measurement_status = MeasurementStatus.VALID
+                measured = latest.value.value
+        changes: dict[str, Any] = {
+            "current_temperature": measured,
+            "measurement_status": measurement_status,
+            "measurement_timestamp": latest.timestamp if latest is not None else None,
+            "zone_heat_demand": demand,
+            "demand_reason": reason,
+            "safety_state": safety_state,
+            "grace_deadline": deadline if safety_state is SafetyState.INDETERMINATE_GRACE else None,
+        }
+        trace: DecisionTraceRecord | None = None
+        if safety_state is SafetyState.INDETERMINATE_GRACE:
+            if current.safety_state is not SafetyState.INDETERMINATE_GRACE:
+                trace = self._trace_record(
+                    code=DecisionCode.INDETERMINATE_PRESERVE_PREVIOUS,
+                    reason=reason,
+                    timestamp=now,
+                    measured=measured,
+                    demand=demand,
+                    safety=safety_state,
+                )
+        elif safety_state is SafetyState.TIMEOUT_ACTION_APPLIED:
+            requested = self._config.indeterminate_timeout_action.value
+            new_failure = self._failure_sink.last_failure
+            current_heat_source_state = self._runtime.heat_source_state_store.get()
+            if new_failure is not None and new_failure is not previous_failure:
+                outcome = CommandOutcome.FAILED_RECOVERABLE
+            elif current_heat_source_state is previous_heat_source_state:
+                outcome = CommandOutcome.SUPPRESSED_DUPLICATE
+                changes["duplicate_commands_suppressed"] = current.duplicate_commands_suppressed + 1
+            else:
+                outcome = CommandOutcome.DISPATCHED
+            changes.update(
+                last_requested_command=requested,
+                last_command_outcome=outcome,
+                last_command_timestamp=now,
+            )
+            trace = self._trace_record(
+                code=(
+                    DecisionCode.TIMEOUT_DISABLE_HEATING
+                    if self._config.indeterminate_timeout_action is HeatingAction.DISABLE_HEATING
+                    else DecisionCode.TIMEOUT_ENABLE_HEATING
+                ),
+                reason=DecisionReason.SAFETY_GRACE_EXPIRED,
+                timestamp=now,
+                measured=None,
+                demand=HeatDemandState.INDETERMINATE,
+                requested=requested,
+                outcome=outcome,
+                safety=safety_state,
+            )
+            self._logger.info(
+                "Controlel safety timeout applied action=%s outcome=%s",
+                requested,
+                outcome,
+            )
+            self._logger.warning(
+                "Controlel measurement remained indeterminate through safety grace reason=%s",
+                reason,
+            )
+        self._log_demand_transition(
+            current.zone_heat_demand,
+            demand,
+            reason,
+        )
+        self.snapshot_source.update(
+            now=datetime.now(UTC),
+            trace_record=trace,
+            **changes,
+        )
+
+    def _on_recoverable_failure_state(
+        self,
+        active: bool,
+        error: Exception | None,
+    ) -> None:
+        now = datetime.now(UTC)
+        changes: dict[str, Any] = {"recoverable_failure_active": active}
+        trace = None
+        if active and error is not None:
+            requested = (
+                error.action.value
+                if isinstance(error, HomeAssistantServiceCallError)
+                else self.snapshot_source.current.last_requested_command
+            )
+            changes.update(
+                last_requested_command=requested,
+                last_command_outcome=CommandOutcome.FAILED_RECOVERABLE,
+                last_command_timestamp=now,
+                last_command_failure_type=type(error).__name__,
+            )
+            trace = self._trace_record(
+                code=DecisionCode.COMMAND_FAILED,
+                reason=DecisionReason.SERVICE_CALL_FAILED,
+                timestamp=now,
+                requested=requested,
+                outcome=CommandOutcome.FAILED_RECOVERABLE,
+            )
+            self._logger.warning(
+                "Controlel service call failed failure_type=%s",
+                type(error).__name__,
+            )
+        self.snapshot_source.update(now=now, trace_record=trace, **changes)
+
+    def _on_fatal_failure_state(
+        self,
+        active: bool,
+        error: Exception | None,
+    ) -> None:
+        self.snapshot_source.update(
+            now=datetime.now(UTC),
+            fatal_failure_active=active,
+        )
+
+    def _on_interval(self, now: datetime) -> None:
+        if self._accepting:
+            self.snapshot_source.refresh_elapsed(now)
+
+    def _trace_record(
+        self,
+        *,
+        code: DecisionCode,
+        reason: DecisionReason,
+        timestamp: datetime,
+        measured: float | None | object = _MEASUREMENT_UNSET,
+        demand: HeatDemandState | None = None,
+        requested: str | None = None,
+        outcome: CommandOutcome = CommandOutcome.NONE,
+        safety: SafetyState | None = None,
+    ) -> DecisionTraceRecord:
+        current = self.snapshot_source.current
+        measured_temperature = (
+            current.current_temperature if measured is _MEASUREMENT_UNSET else cast(float | None, measured)
+        )
+        return DecisionTraceRecord(
+            decision_code=code,
+            reason_code=reason,
+            timestamp=timestamp,
+            measured_temperature=measured_temperature,
+            target_temperature=self._config.target_temperature.value,
+            resulting_demand=demand or current.zone_heat_demand,
+            requested_command=requested,
+            command_outcome=outcome,
+            safety_state=safety or current.safety_state,
+        )
+
+    @property
+    def active_issue_ids(self) -> tuple[str, ...]:
+        issue_ids: list[str] = []
+        if self._failure_sink.recoverable_failure_active:
+            issue_ids.append(self._failure_sink.recoverable_issue_id)
+        if self._failure_sink.fatal_failure_active:
+            issue_ids.append(self._failure_sink.fatal_issue_id)
+        return tuple(issue_ids)
+
+    def _log_demand_transition(
+        self,
+        previous: HeatDemandState,
+        current: HeatDemandState,
+        reason: DecisionReason,
+    ) -> None:
+        if current is not previous:
+            self._logger.debug(
+                "Controlel demand transition previous=%s current=%s reason=%s",
+                previous,
+                current,
+                reason,
+            )
 
     def _log_processing_result(self, result: RuntimeProcessingResult) -> None:
         if result.status is RuntimeProcessingStatus.NO_DECISION:
@@ -399,3 +1004,13 @@ def _default_shutdown_subscriber(
         listener()
 
     return hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, on_stop)
+
+
+def _default_interval_subscriber(
+    hass: object,
+    listener: Callable[[datetime], None],
+    interval: timedelta,
+) -> Unsubscribe:
+    from homeassistant.helpers.event import async_track_time_interval
+
+    return async_track_time_interval(hass, listener, interval)

@@ -131,6 +131,115 @@
       "unsupported_temperature_unit": "The temperature sensor must use Celsius or Fahrenheit."
     }
   },
+  "entity": {
+    "sensor": {
+      "current_temperature": {"name": "Current temperature"},
+      "target_temperature": {"name": "Target temperature"},
+      "measurement_age": {"name": "Measurement age"},
+      "measurement_status": {
+        "name": "Measurement status",
+        "state": {
+          "valid": "Valid",
+          "unavailable": "Unavailable",
+          "unknown": "Unknown",
+          "invalid_value": "Invalid value",
+          "stale": "Stale",
+          "future_timestamp": "Future timestamp",
+          "not_received": "Waiting for first measurement"
+        }
+      },
+      "heat_demand": {
+        "name": "Heat demand",
+        "state": {
+          "heat_required": "Heat required",
+          "no_heat_required": "No heat required",
+          "indeterminate": "Indeterminate"
+        }
+      },
+      "safety_state": {
+        "name": "Safety state",
+        "state": {
+          "normal": "Normal",
+          "indeterminate_grace": "Sensor failure grace period",
+          "timeout_action_applied": "Timeout action applied",
+          "stopped": "Stopped",
+          "fatal_error": "Fatal error"
+        }
+      },
+      "grace_remaining": {"name": "Safety grace remaining"},
+      "last_decision": {
+        "name": "Last decision",
+        "state": {
+          "heat_requested": "Heat requested",
+          "heat_not_required": "Heat not required",
+          "indeterminate_preserve_previous": "Preserved previous demand during grace",
+          "timeout_disable_heating": "Timeout requested heating off",
+          "timeout_enable_heating": "Timeout requested heating on",
+          "command_suppressed_duplicate": "Duplicate command suppressed",
+          "command_dispatched": "Command dispatched",
+          "command_failed": "Command failed",
+          "runtime_started": "Runtime started",
+          "runtime_stopped": "Runtime stopped"
+        }
+      },
+      "last_decision_reason": {
+        "name": "Last decision reason",
+        "state": {
+          "temperature_below_target": "Temperature below target",
+          "temperature_at_or_above_target": "Temperature at or above target",
+          "measurement_unavailable": "Measurement unavailable",
+          "measurement_unknown": "Measurement unknown",
+          "measurement_stale": "Measurement stale",
+          "measurement_invalid": "Measurement invalid",
+          "measurement_future_timestamp": "Measurement timestamp is in the future",
+          "waiting_for_first_measurement": "Waiting for first measurement",
+          "safety_grace_expired": "Safety grace period expired",
+          "duplicate_command": "Command duplicates current requested state",
+          "service_call_failed": "Home Assistant service call failed",
+          "fatal_runtime_failure": "Fatal runtime failure",
+          "runtime_lifecycle": "Runtime lifecycle"
+        }
+      },
+      "last_requested_command": {
+        "name": "Last requested command",
+        "state": {
+          "enable_heating": "Enable heating",
+          "disable_heating": "Disable heating"
+        }
+      },
+      "last_command_outcome": {
+        "name": "Last command outcome",
+        "state": {
+          "none": "Not sent",
+          "dispatched": "Service call dispatched",
+          "suppressed_duplicate": "Duplicate command suppressed",
+          "failed_recoverable": "Recoverable service failure",
+          "failed_fatal": "Fatal runtime failure"
+        }
+      },
+      "last_command_time": {"name": "Last command time"},
+      "last_meaningful_event": {"name": "Last meaningful event"},
+      "runtime_status": {
+        "name": "Runtime status",
+        "state": {
+          "starting": "Starting",
+          "active": "Active",
+          "stopped": "Stopped",
+          "fatal_error": "Fatal error"
+        }
+      },
+      "integration_version": {"name": "Integration version"},
+      "core_version": {"name": "Core version"},
+      "duplicate_commands_suppressed": {"name": "Duplicate commands suppressed"}
+    },
+    "binary_sensor": {
+      "heat_required": {"name": "Heat required"},
+      "measurement_valid": {"name": "Measurement valid"},
+      "runtime_active": {"name": "Runtime active"},
+      "recoverable_failure": {"name": "Recoverable failure"},
+      "fatal_failure": {"name": "Fatal failure"}
+    }
+  },
   "issues": {
     "heat_source_service_failure": {
       "title": "Heat-source service call failed",

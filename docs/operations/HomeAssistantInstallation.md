@@ -1,11 +1,11 @@
 # Home Assistant installation
 
-Controlel `0.2.0` is the current development candidate for one heating zone,
+Controlel `0.3.0` is the current development candidate for one heating zone,
 one primary temperature sensor, and one shared heat source. It requires the
 public core package `controlel==0.1.0`.
 
-Integration `0.1.1` remains the published HACS custom-repository release.
-Candidate `0.2.0` is not published. Controlel is not listed in the default HACS
+Candidate `0.3.0` is not published; use the latest published release for HACS
+custom-repository installation. Controlel is not listed in the default HACS
 store.
 
 ## Prerequisites
@@ -89,6 +89,30 @@ bindings. Saving options preserves the stable IDs, atomically stores mutable
 settings, updates the entry title from the zone name, and reloads the entry.
 Existing `0.1.1` entries need no migration and no delete/recreate cycle.
 
+## Operational device and diagnostics
+
+Each entry creates one device named `Controlel — <Zone name>`. Its primary
+entities show current and target temperature, heat demand, whether heat is
+required, and the safety state. Diagnostic entities show measurement validity
+(`valid`, `unavailable`, `unknown`, `invalid_value`, `stale`,
+`future_timestamp`, or `not_received`), measurement age, grace remaining,
+latest decision and reason, requested command and service-call outcome,
+meaningful-event and command times, runtime state, failure flags, suppression
+count, and integration/core versions. Age and grace countdowns refresh every
+30 seconds as well as on runtime events.
+
+These entities report Controlel's demand and requests. “Service call
+dispatched” means Home Assistant accepted the blocking service call; it does
+not confirm physical boiler or heat-source state. The target remains editable
+through **Configure**, not through a writable dashboard entity.
+
+Home Assistant's config-entry diagnostics download contains only normalized
+configuration, version data, the immutable current operational snapshot,
+entity and owned Repairs IDs, counters, and at most 20 recent in-memory
+decision records. Unknown config-entry fields and unrelated Home Assistant
+state or attributes are excluded. The snapshot and trace are reconstructed on
+reload/restart and are not persistent.
+
 ## Expected first setup behavior
 
 Setup subscribes to the configured temperature entity in buffering mode,
@@ -137,8 +161,10 @@ manually removed.
 - No persistence across reload or restart.
 - No service-call retry.
 - No physical-state confirmation.
-- No discovery, polling, diagnostics payload, diagnostic entities, multi-zone UI, or generic
+- No discovery, multi-zone UI, writable operational entities, or generic
   service data.
+- No persistent decision history; diagnostics expose only the bounded
+  in-memory trace.
 - Custom-repository distribution only; no default HACS-store claim.
 
 See [Troubleshooting](Troubleshooting.md) for failure diagnosis.

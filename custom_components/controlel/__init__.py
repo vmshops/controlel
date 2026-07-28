@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from importlib import metadata
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -30,6 +31,7 @@ from .runtime_executor import HomeAssistantRuntimeExecutor
 from .scheduler import HomeAssistantScheduler
 
 LOGGER = logging.getLogger(__name__)
+PLATFORMS = ("sensor", "binary_sensor")
 
 
 @dataclass
@@ -116,7 +118,8 @@ async def async_setup_entry(
             executor=executor,
             measurement_mapper=HomeAssistantMeasurementMapper(config.sensor_binding),
             failure_sink=failure_sink,
-            temperature_entity_id=config.temperature_entity_id,
+            config=config,
+            core_version=metadata.version("controlel"),
             logger=LOGGER,
         )
         failure_sink.bind_fatal_handler(host.request_fatal_shutdown)
@@ -135,6 +138,12 @@ async def async_setup_entry(
         raise
 
     entry.runtime_data = ControlelEntryRuntime(host=host, config=config)
+    try:
+        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    except BaseException:
+        await host.async_stop()
+        entry.runtime_data.host = None
+        raise
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     return True
 
@@ -145,11 +154,15 @@ async def async_unload_entry(
 ) -> bool:
     """Unload the entry through the host's terminal serialized stop path."""
     runtime_data = entry.runtime_data
+    platforms_unloaded = await hass.config_entries.async_unload_platforms(
+        entry,
+        PLATFORMS,
+    )
     host = runtime_data.host
     if host is not None:
         await host.async_stop()
         runtime_data.host = None
-    return True
+    return platforms_unloaded
 
 
 async def async_remove_entry(
@@ -179,3 +192,4 @@ async def _async_update_listener(
             title=config.zone_name,
         )
     await hass.config_entries.async_reload(entry.entry_id)
+    LOGGER.info("Controlel configuration reloaded entry_id=%s", entry.entry_id)

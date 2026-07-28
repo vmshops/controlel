@@ -10,6 +10,11 @@ from controlel.domain.commands.heating_action import HeatingAction
 from custom_components.controlel.config import HomeAssistantServiceCall
 from custom_components.controlel.const import DOMAIN
 from custom_components.controlel.heat_source import HomeAssistantServiceCallError
+from custom_components.controlel.operational import (
+    CommandOutcome,
+    RuntimeStatus,
+    SafetyState,
+)
 from custom_components.controlel.scheduler import HomeAssistantSchedulerInstallationError
 
 from .test_state_ingestion import RecordingRuntime, make_host
@@ -50,6 +55,10 @@ async def test_real_ha_scheduled_failure_is_fatal_and_schedules_terminal_shutdow
     assert host.accepting is False
     assert host.stopped is True
     assert host._executor.closed is True
+    assert host.snapshot_source.current.runtime_status is RuntimeStatus.FATAL_ERROR
+    assert host.snapshot_source.current.safety_state is SafetyState.FATAL_ERROR
+    assert host.snapshot_source.current.fatal_failure_active is True
+    assert host.snapshot_source.current.last_command_outcome is CommandOutcome.FAILED_FATAL
     assert [operation for operation, _ in runtime.operations].count("stop") == 1
     assert "Fatal Controlel runtime failure" in caplog.text
     assert "Stopping Controlel after fatal runtime failure" in caplog.text
@@ -76,4 +85,9 @@ async def test_recoverable_real_service_failure_leaves_host_running(hass) -> Non
     assert issue.severity is ir.IssueSeverity.WARNING
     assert host.accepting is True
     assert host.stopped is False
+    assert host.snapshot_source.current.recoverable_failure_active is True
+    assert host.snapshot_source.current.last_command_outcome is CommandOutcome.FAILED_RECOVERABLE
+    host._failure_sink.clear_service_failure_issue()
+    await hass.async_block_till_done()
+    assert host.snapshot_source.current.recoverable_failure_active is False
     await host.async_stop()

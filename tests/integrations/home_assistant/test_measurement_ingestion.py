@@ -61,7 +61,7 @@ def test_converts_fahrenheit_to_celsius():
     [
         (None, MeasurementRejectionReason.MISSING_STATE),
         (FakeState(entity_id="sensor.other"), MeasurementRejectionReason.WRONG_ENTITY),
-        (FakeState(state="unknown"), MeasurementRejectionReason.UNAVAILABLE),
+        (FakeState(state="unknown"), MeasurementRejectionReason.UNKNOWN),
         (FakeState(state="unavailable"), MeasurementRejectionReason.UNAVAILABLE),
         (FakeState(state=""), MeasurementRejectionReason.EMPTY),
         (FakeState(state="abc"), MeasurementRejectionReason.NON_NUMERIC),

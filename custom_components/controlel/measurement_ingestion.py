@@ -31,6 +31,7 @@ class MeasurementRejectionReason(StrEnum):
     MISSING_STATE = "missing_state"
     WRONG_ENTITY = "wrong_entity"
     UNAVAILABLE = "unavailable"
+    UNKNOWN = "unknown"
     EMPTY = "empty"
     NON_NUMERIC = "non_numeric"
     NON_FINITE = "non_finite"
@@ -69,7 +70,9 @@ class HomeAssistantMeasurementMapper:
         raw_value = state.state.strip()
         if not raw_value:
             return _rejected(MeasurementRejectionReason.EMPTY)
-        if raw_value.casefold() in {STATE_UNKNOWN, STATE_UNAVAILABLE}:
+        if raw_value.casefold() == STATE_UNKNOWN:
+            return _rejected(MeasurementRejectionReason.UNKNOWN)
+        if raw_value.casefold() == STATE_UNAVAILABLE:
             return _rejected(MeasurementRejectionReason.UNAVAILABLE)
 
         try:

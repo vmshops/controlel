@@ -14,6 +14,8 @@ from controlel.application.runtime.runtime_processing_result import (
     TemperatureNoDecisionReason,
 )
 from controlel.domain.value_objects.sensor_id import SensorId
+from controlel.domain.value_objects.temperature import Temperature
+from controlel.domain.value_objects.zone_id import ZoneId
 from custom_components.controlel.config import HomeAssistantSensorBinding
 from custom_components.controlel.event_loop_bridge import HomeAssistantEventLoopBridge
 from custom_components.controlel.failure_sink import HomeAssistantScheduledFailureSink
@@ -24,6 +26,18 @@ from custom_components.controlel.measurement_ingestion import (
 from custom_components.controlel.runtime_executor import HomeAssistantRuntimeExecutor
 
 NOW = datetime(2026, 7, 23, 10, 0, tzinfo=UTC)
+
+
+def host_config():
+    return SimpleNamespace(
+        zone_name="Room",
+        zone_id=ZoneId("room"),
+        sensor_name="Room temperature",
+        sensor_id=SensorId("room_temperature"),
+        temperature_entity_id="sensor.room",
+        target_temperature=Temperature(21),
+        indeterminate_timeout_action=SimpleNamespace(value="disable_heating"),
+    )
 
 
 @dataclass
@@ -122,11 +136,13 @@ def test_snapshot_buffer_start_live_and_stop_ordering():
                 )
             ),
             failure_sink=failure_sink,
-            temperature_entity_id="sensor.room",
+            config=host_config(),
+            core_version="0.1.0",
             logger=logging.getLogger(__name__),
             state_subscriber=subscribe,
             state_getter=lambda entity_id: FakeState("19", NOW),
             shutdown_subscriber=lambda hass, listener: lambda: None,
+            interval_subscriber=lambda hass, listener, interval: lambda: None,
         )
         failure_sink.bind_fatal_handler(host.request_fatal_shutdown)
 
@@ -204,11 +220,13 @@ def test_unavailable_snapshot_reaches_start_without_synthetic_measurement():
                 )
             ),
             failure_sink=failure_sink,
-            temperature_entity_id="sensor.room",
+            config=host_config(),
+            core_version="0.1.0",
             logger=logging.getLogger(__name__),
             state_subscriber=lambda hass, entity_id, listener: lambda: None,
             state_getter=lambda entity_id: FakeState("unavailable", NOW),
             shutdown_subscriber=lambda hass, listener: lambda: None,
+            interval_subscriber=lambda hass, listener, interval: lambda: None,
         )
         failure_sink.bind_fatal_handler(host.request_fatal_shutdown)
         await host.async_initialize()

@@ -23,6 +23,8 @@ from controlel.application.runtime.runtime_processing_result import (
     TemperatureNoDecisionReason,
 )
 from controlel.domain.value_objects.sensor_id import SensorId
+from controlel.domain.value_objects.temperature import Temperature
+from controlel.domain.value_objects.zone_id import ZoneId
 from custom_components.controlel.config import HomeAssistantSensorBinding
 from custom_components.controlel.event_loop_bridge import HomeAssistantEventLoopBridge
 from custom_components.controlel.failure_sink import HomeAssistantScheduledFailureSink
@@ -99,7 +101,16 @@ def make_host(hass, runtime: RecordingRuntime) -> HomeAssistantControlelHost:
             )
         ),
         failure_sink=sink,
-        temperature_entity_id=ENTITY_ID,
+        config=SimpleNamespace(
+            zone_name="Living room",
+            zone_id=ZoneId("living_room"),
+            sensor_name="Living room temperature",
+            sensor_id=SensorId("living_room_temperature"),
+            temperature_entity_id=ENTITY_ID,
+            target_temperature=Temperature(21),
+            indeterminate_timeout_action=SimpleNamespace(value="disable_heating"),
+        ),
+        core_version="0.1.0",
         logger=logging.getLogger(__name__),
     )
     sink.bind_fatal_handler(host.request_fatal_shutdown)

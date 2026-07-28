@@ -19,6 +19,7 @@ from .heat_source import HomeAssistantServiceCallError
 type CreateIssue = Callable[..., None]
 type DeleteIssue = Callable[[object, str, str], None]
 type FatalHandler = Callable[[Exception], None]
+type FailureStateHandler = Callable[[bool, Exception | None], None]
 
 
 def clear_entry_issues(
@@ -53,6 +54,10 @@ class HomeAssistantScheduledFailureSink:
         self._warning_severity = warning_severity
         self._error_severity = error_severity
         self._fatal_handler: FatalHandler | None = None
+        self._recoverable_state_handler: FailureStateHandler | None = None
+        self._fatal_state_handler: FailureStateHandler | None = None
+        self.recoverable_failure_active = False
+        self.fatal_failure_active = False
         self.last_failure: ScheduledRuntimeFailure | None = None
         self.last_synchronous_error: Exception | None = None
 
@@ -69,6 +74,17 @@ class HomeAssistantScheduledFailureSink:
             raise RuntimeError("fatal failure handler is already bound")
         self._fatal_handler = handler
 
+    def bind_state_handlers(
+        self,
+        *,
+        recoverable: FailureStateHandler,
+        fatal: FailureStateHandler,
+    ) -> None:
+        if self._recoverable_state_handler is not None or self._fatal_state_handler is not None:
+            raise RuntimeError("failure state handlers are already bound")
+        self._recoverable_state_handler = recoverable
+        self._fatal_state_handler = fatal
+
     def report(self, failure: ScheduledRuntimeFailure) -> None:
         self.last_failure = failure
         self._bridge.call_soon(self._handle_scheduled_failure, failure)
@@ -83,6 +99,9 @@ class HomeAssistantScheduledFailureSink:
 
     def clear_fatal_issue_after_successful_reload(self) -> None:
         self._delete_issue(self._hass, DOMAIN, self.fatal_issue_id)
+        self.fatal_failure_active = False
+        if self._fatal_state_handler is not None:
+            self._fatal_state_handler(False, None)
 
     def clear_transient_issues(self) -> None:
         self._delete_recoverable_issue()
@@ -95,6 +114,9 @@ class HomeAssistantScheduledFailureSink:
 
     def _handle_error(self, error: Exception) -> None:
         if isinstance(error, HomeAssistantServiceCallError):
+            self.recoverable_failure_active = True
+            if self._recoverable_state_handler is not None:
+                self._recoverable_state_handler(True, error)
             self._logger.error(
                 "Controlel heat-source service call failed",
                 exc_info=(type(error), error, error.__traceback__),
@@ -110,6 +132,9 @@ class HomeAssistantScheduledFailureSink:
             )
             return
 
+        self.fatal_failure_active = True
+        if self._fatal_state_handler is not None:
+            self._fatal_state_handler(True, error)
         self._logger.error(
             "Fatal Controlel runtime failure",
             exc_info=(type(error), error, error.__traceback__),
@@ -128,6 +153,10 @@ class HomeAssistantScheduledFailureSink:
 
     def _delete_recoverable_issue(self) -> None:
         self._delete_issue(self._hass, DOMAIN, self.recoverable_issue_id)
+        was_active = self.recoverable_failure_active
+        self.recoverable_failure_active = False
+        if was_active and self._recoverable_state_handler is not None:
+            self._recoverable_state_handler(False, None)
 
 
 def _default_create_issue(*args: Any, **kwargs: Any) -> None:

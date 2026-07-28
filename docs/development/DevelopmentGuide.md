@@ -126,10 +126,10 @@ Build and independently validate the fixed-name release candidate from the
 repository root:
 
 ```text
-python scripts/packaging/build_hacs_release.py --version 0.2.0
+python scripts/packaging/build_hacs_release.py --version 0.3.0
 python scripts/packaging/validate_hacs_release.py \
   dist/hacs/controlel.zip \
-  --version 0.2.0 \
+  --version 0.3.0 \
   --checksum dist/hacs/controlel.zip.sha256
 ```
 
@@ -144,7 +144,7 @@ rejection behavior. Generated files remain below ignored `dist/hacs/`.
 
 ## Configuration and options development
 
-The integration candidate version is `0.2.0`; the core remains `0.1.0`.
+The integration candidate version is `0.3.0`; the core remains `0.1.0`.
 New entries keep generated stable `sensor_id` and `zone_id` values in
 config-entry data and mutable settings in options. Effective configuration is
 legacy data merged with options, with options taking precedence except that
@@ -155,6 +155,20 @@ defaults. Its optional advanced step exposes explicit IDs, normalized safety
 times, and custom service bindings. Existing entries use a two-step Options
 Flow. Tests must cover both an empty-options `0.1.1` entry and repeated options
 updates that unload the old runtime before constructing the replacement.
+
+## Operational snapshot development
+
+`operational.py` is the integration-side observation contract. It is immutable
+and read-only to entities: it mirrors existing runtime/host results and never
+decides demand or dispatches commands. Updates increment a revision and
+immediately deliver one consistent snapshot to subscribers. The host refreshes
+elapsed age and grace values every 30 seconds, while scheduler callbacks still
+provide exact safety-deadline behavior. The trace is an in-memory deque capped
+at 20 records and is cleared on runtime reconstruction.
+
+Framework tests assert one device, 22 deterministic unique IDs using
+`<config_entry_id>_<entity_key>`, entity categories, rename/reload stability,
+truthful states, diagnostics allowlisting, and normal unload behavior.
 
 ## Core artifact validation
 

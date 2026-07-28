@@ -64,7 +64,18 @@ without migration: mutable options override legacy data, while IDs remain
 stable in entry data. Every successful update fully unloads and reconstructs
 one runtime.
 
-Milestone 25B and later retain diagnostics, multiple zones or sensors,
-persistence, climate/number/select entities, physical output feedback,
-automatic retry, heating curves, modulation, DHW, learning, and dashboard
-work. Version `0.2.0` remains unpublished until a separate release milestone.
+## Milestone 25B: operational visibility
+
+Milestone 25B prepares integration `0.3.0` with one immutable integration-side
+operational snapshot, one zone-controller device, read-only operational and
+diagnostic entities, explicit measurement/demand/safety/command states, and
+allowlisted config-entry diagnostics. A bounded 20-record decision trace and
+all snapshot state are in memory only. Entity unique IDs use the config entry
+ID, so display-name changes and reloads do not duplicate entities. This
+milestone does not change core `0.1.0` heating behavior and does not claim
+physical output confirmation.
+
+Milestone 26 and later retain multiple zones or sensors, persistence,
+climate/number/select entities, physical output feedback, automatic retry,
+heating curves, modulation, DHW, learning, and dashboard work. Version `0.3.0`
+remains unpublished until a separate release milestone.
