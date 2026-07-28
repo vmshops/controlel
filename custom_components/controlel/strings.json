@@ -151,7 +151,7 @@
       "heat_demand": {
         "name": "Heat demand",
         "state": {
-          "heat_required": "Heat required",
+            "heat_required": "Heating requested",
           "no_heat_required": "No heat required",
           "indeterminate": "Indeterminate"
         }
@@ -166,16 +166,17 @@
           "fatal_error": "Fatal error"
         }
       },
-      "grace_remaining": {"name": "Safety grace remaining"},
+      "grace_remaining": {"name": "Sensor failure grace time remaining"},
+      "grace_deadline": {"name": "Sensor failure grace deadline"},
       "last_decision": {
         "name": "Last decision",
         "state": {
           "heat_requested": "Heat requested",
           "heat_not_required": "Heat not required",
-          "indeterminate_preserve_previous": "Preserved previous demand during grace",
-          "timeout_disable_heating": "Timeout requested heating off",
-          "timeout_enable_heating": "Timeout requested heating on",
-          "command_suppressed_duplicate": "Duplicate command suppressed",
+          "indeterminate_preserve_previous": "Previous demand preserved during sensor failure grace period",
+          "timeout_disable_heating": "Heating-off command requested",
+          "timeout_enable_heating": "Heating-on command requested",
+          "command_suppressed_duplicate": "Duplicate command suppressed because it was already requested",
           "command_dispatched": "Command dispatched",
           "command_failed": "Command failed",
           "runtime_started": "Runtime started",
@@ -189,12 +190,12 @@
           "temperature_at_or_above_target": "Temperature at or above target",
           "measurement_unavailable": "Measurement unavailable",
           "measurement_unknown": "Measurement unknown",
-          "measurement_stale": "Measurement stale",
+          "measurement_stale": "Measurement became stale",
           "measurement_invalid": "Measurement invalid",
           "measurement_future_timestamp": "Measurement timestamp is in the future",
           "waiting_for_first_measurement": "Waiting for first measurement",
-          "safety_grace_expired": "Safety grace period expired",
-          "duplicate_command": "Command duplicates current requested state",
+          "safety_grace_expired": "Sensor failure grace period expired",
+          "duplicate_command": "Command suppressed because it was already requested",
           "service_call_failed": "Home Assistant service call failed",
           "fatal_runtime_failure": "Fatal runtime failure",
           "runtime_lifecycle": "Runtime lifecycle"
@@ -212,7 +213,7 @@
         "state": {
           "none": "Not sent",
           "dispatched": "Service call dispatched",
-          "suppressed_duplicate": "Duplicate command suppressed",
+          "suppressed_duplicate": "Duplicate command suppressed because it was already requested",
           "failed_recoverable": "Recoverable service failure",
           "failed_fatal": "Fatal runtime failure"
         }
@@ -233,11 +234,11 @@
       "duplicate_commands_suppressed": {"name": "Duplicate commands suppressed"}
     },
     "binary_sensor": {
-      "heat_required": {"name": "Heat required"},
-      "measurement_valid": {"name": "Measurement valid"},
-      "runtime_active": {"name": "Runtime active"},
-      "recoverable_failure": {"name": "Recoverable failure"},
-      "fatal_failure": {"name": "Fatal failure"}
+      "heat_required": {"name": "Heating is requested"},
+      "measurement_valid": {"name": "Measurement is valid"},
+      "runtime_active": {"name": "Runtime is active"},
+      "recoverable_failure": {"name": "Recoverable failure is active"},
+      "fatal_failure": {"name": "Fatal failure is active"}
     }
   },
   "issues": {

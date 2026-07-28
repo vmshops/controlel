@@ -38,6 +38,7 @@ type SensorValue = str | int | float | datetime | None
 @dataclass(frozen=True, kw_only=True)
 class ControlelSensorDescription(SensorEntityDescription):
     value_fn: Callable[[OperationalSnapshot], SensorValue]
+    available_fn: Callable[[OperationalSnapshot], bool] = lambda snapshot: True
     always_available: bool = False
 
 
@@ -104,6 +105,15 @@ SENSORS: tuple[ControlelSensorDescription, ...] = (
         native_unit_of_measurement=UnitOfTime.SECONDS,
         suggested_display_precision=0,
         value_fn=lambda snapshot: snapshot.grace_remaining_seconds,
+        available_fn=lambda snapshot: snapshot.grace_remaining_seconds is not None,
+    ),
+    ControlelSensorDescription(
+        key="grace_deadline",
+        translation_key="grace_deadline",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        device_class=SensorDeviceClass.TIMESTAMP,
+        value_fn=lambda snapshot: snapshot.grace_deadline,
+        available_fn=lambda snapshot: snapshot.grace_deadline is not None,
     ),
     ControlelSensorDescription(
         key="last_decision",
@@ -206,6 +216,10 @@ class ControlelSensor(ControlelSnapshotEntity, SensorEntity):
     @property
     def native_value(self) -> Any:
         return self.entity_description.value_fn(self._snapshot)
+
+    @property
+    def available(self) -> bool:
+        return super().available and self.entity_description.available_fn(self._snapshot)
 
 
 async def async_setup_entry(

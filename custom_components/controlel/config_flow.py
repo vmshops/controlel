@@ -1,5 +1,6 @@
 """One-zone Controlel configuration and options flows."""
 
+import logging
 from collections.abc import Mapping
 from typing import Any
 
@@ -77,6 +78,52 @@ _ADVANCED_BINDING_KEYS = (
     CONF_DISABLE_SERVICE_NAME,
     CONF_DISABLE_TARGET_ENTITY_ID,
 )
+_SEMANTIC_LOG_FIELDS = (
+    ("zone_name", lambda config: config.zone_name),
+    ("sensor_name", lambda config: config.sensor_name),
+    ("temperature_entity_id", lambda config: config.temperature_entity_id),
+    ("target_temperature", lambda config: config.target_temperature.value),
+    (
+        "primary_measurement_max_age_seconds",
+        lambda config: config.primary_measurement_max_age.total_seconds(),
+    ),
+    ("max_future_skew_seconds", lambda config: config.max_future_skew.total_seconds()),
+    (
+        "indeterminate_grace_period_seconds",
+        lambda config: config.indeterminate_grace_period.total_seconds(),
+    ),
+    (
+        "indeterminate_timeout_action",
+        lambda config: config.indeterminate_timeout_action.value,
+    ),
+    ("heat_source_control_mode", lambda config: config.heat_source_control_mode),
+    ("controlled_entity_id", lambda config: config.controlled_entity_id),
+    (
+        "enable_service_domain",
+        lambda config: config.heat_source.enable_heating.domain,
+    ),
+    (
+        "enable_service_name",
+        lambda config: config.heat_source.enable_heating.service,
+    ),
+    (
+        "enable_target_entity_id",
+        lambda config: config.heat_source.enable_heating.target_entity_id,
+    ),
+    (
+        "disable_service_domain",
+        lambda config: config.heat_source.disable_heating.domain,
+    ),
+    (
+        "disable_service_name",
+        lambda config: config.heat_source.disable_heating.service,
+    ),
+    (
+        "disable_target_entity_id",
+        lambda config: config.heat_source.disable_heating.target_entity_id,
+    ),
+)
+LOGGER = logging.getLogger(__name__)
 
 
 class ControlelConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -227,6 +274,10 @@ class ControlelOptionsFlow(OptionsFlow):
             _preserve_unchanged_seconds(configuration, user_input, current)
             errors.update(_configuration_errors(configuration))
             if not errors:
+                _log_semantic_configuration_diff(
+                    integration_config_from_entry_data(current),
+                    integration_config_from_entry_data(configuration),
+                )
                 return self.async_create_entry(
                     title="",
                     data=_mutable_options(configuration),
@@ -541,6 +592,33 @@ def _preserve_unchanged_seconds(
         current_seconds = current[seconds_key]
         if float(advanced_input[minutes_key]) == float(current_seconds) / 60:
             configuration[seconds_key] = current_seconds
+
+
+def _log_semantic_configuration_diff(before: Any, after: Any) -> None:
+    """Log only allowlisted effective configuration changes."""
+
+    changes = [
+        (field, before_value, after_value)
+        for field, value_fn in _SEMANTIC_LOG_FIELDS
+        if (before_value := value_fn(before)) != (after_value := value_fn(after))
+    ]
+    zone_name = _safe_log_value(after.zone_name)
+    if not changes:
+        LOGGER.debug("Configuration unchanged for zone %s", zone_name)
+        return
+    lines = [
+        f"{field}: {_safe_log_value(before_value)} -> {_safe_log_value(after_value)}"
+        for field, before_value, after_value in changes
+    ]
+    LOGGER.info(
+        "Configuration updated for zone %s:\n%s",
+        zone_name,
+        "\n".join(lines),
+    )
+
+
+def _safe_log_value(value: object) -> str:
+    return str(value).replace("\r", r"\r").replace("\n", r"\n")
 
 
 def _validate_basic(

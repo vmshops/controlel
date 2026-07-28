@@ -22,7 +22,7 @@ def test_manifest_has_required_custom_component_contract():
         "iot_class": "local_push",
         "requirements": ["controlel==0.1.0"],
         "single_config_entry": True,
-        "version": "0.3.0",
+        "version": "0.3.1",
     }
 
 
@@ -32,7 +32,7 @@ def test_core_and_integration_versions_are_intentionally_independent():
         core_version = tomllib.load(pyproject_file)["project"]["version"]
 
     assert core_version == "0.1.0"
-    assert manifest["version"] == INTEGRATION_VERSION == "0.3.0"
+    assert manifest["version"] == INTEGRATION_VERSION == "0.3.1"
     assert manifest["requirements"] == [f"controlel=={core_version}"]
     assert manifest["version"] != manifest["requirements"][0].partition("==")[2]
 
@@ -66,6 +66,29 @@ def test_required_integration_files_exist():
     assert required <= {
         str(path.relative_to(COMPONENT)).replace("\\", "/") for path in COMPONENT.rglob("*") if path.is_file()
     }
+
+
+def test_operational_translations_are_truthful_and_action_oriented():
+    strings = json.loads((COMPONENT / "strings.json").read_text(encoding="utf-8"))
+    sensors = strings["entity"]["sensor"]
+    binary_sensors = strings["entity"]["binary_sensor"]
+
+    assert binary_sensors == {
+        "heat_required": {"name": "Heating is requested"},
+        "measurement_valid": {"name": "Measurement is valid"},
+        "runtime_active": {"name": "Runtime is active"},
+        "recoverable_failure": {"name": "Recoverable failure is active"},
+        "fatal_failure": {"name": "Fatal failure is active"},
+    }
+    assert sensors["grace_remaining"]["name"] == ("Sensor failure grace time remaining")
+    assert sensors["grace_deadline"]["name"] == "Sensor failure grace deadline"
+    assert (
+        sensors["last_decision"]["state"]["indeterminate_preserve_previous"]
+        == "Previous demand preserved during sensor failure grace period"
+    )
+    assert sensors["last_decision"]["state"]["timeout_disable_heating"] == "Heating-off command requested"
+    assert sensors["last_decision_reason"]["state"]["measurement_stale"] == "Measurement became stale"
+    assert sensors["last_decision_reason"]["state"]["safety_grace_expired"] == "Sensor failure grace period expired"
 
 
 def test_config_flow_exposes_supported_options_flow_without_reconfigure_flow():

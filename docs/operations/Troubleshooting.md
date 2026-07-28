@@ -5,7 +5,7 @@
 Confirm that the exact custom-repository URL is
 `https://github.com/vmshops/controlel` and the selected category is
 **Integration**. The repository must be publicly accessible. Use the latest
-published release; `0.3.0` remains an unpublished candidate.
+published release; `0.3.1` remains an unpublished candidate.
 
 If HACS downloaded files but Home Assistant cannot find Controlel, confirm
 that `manifest.json` is at
@@ -80,7 +80,7 @@ second.
 
 ## Core dependency installation
 
-Integration `0.3.0` requires exactly `controlel==0.1.0`. Normal supported
+Integration `0.3.1` requires exactly `controlel==0.1.0`. Normal supported
 installation lets Home Assistant obtain that dependency automatically; users
 do not need to install it manually. If setup reports a missing core, confirm
 that the environment can reach PyPI and that `python -m pip show controlel`

@@ -126,10 +126,10 @@ Build and independently validate the fixed-name release candidate from the
 repository root:
 
 ```text
-python scripts/packaging/build_hacs_release.py --version 0.3.0
+python scripts/packaging/build_hacs_release.py --version 0.3.1
 python scripts/packaging/validate_hacs_release.py \
   dist/hacs/controlel.zip \
-  --version 0.3.0 \
+  --version 0.3.1 \
   --checksum dist/hacs/controlel.zip.sha256
 ```
 
@@ -144,7 +144,7 @@ rejection behavior. Generated files remain below ignored `dist/hacs/`.
 
 ## Configuration and options development
 
-The integration candidate version is `0.3.0`; the core remains `0.1.0`.
+The integration candidate version is `0.3.1`; the core remains `0.1.0`.
 New entries keep generated stable `sensor_id` and `zone_id` values in
 config-entry data and mutable settings in options. Effective configuration is
 legacy data merged with options, with options taking precedence except that

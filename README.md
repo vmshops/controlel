@@ -24,10 +24,10 @@ Project phase: Home Assistant one-zone host vertical slice
 
 Core version: 0.1.0
 
-Home Assistant integration candidate version: 0.3.0
+Home Assistant integration candidate version: 0.3.1
 
 Use the latest published release for HACS custom-repository installation.
-Version `0.3.0` is under development and has not been tagged or published.
+Version `0.3.1` is under development and has not been tagged or published.
 Controlel is not listed in the default HACS store.
 
 ## Home Assistant installation
@@ -86,7 +86,7 @@ The isolated, hashed environment is defined by `requirements/ha-test.in` and
 `requirements/ha-test.txt`; setup and suite commands are in the
 [development guide](docs/development/DevelopmentGuide.md). The compatibility
 harness is separate from HACS release validation. HACS metadata and
-deterministic release packaging are prepared for `0.3.0`, but that candidate
+deterministic release packaging are prepared for `0.3.1`, but that candidate
 has not been published and no default-store publication exists.
 
 ## Core package artifacts

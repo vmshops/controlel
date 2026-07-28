@@ -29,6 +29,7 @@ BINARY_SENSORS: tuple[ControlelBinarySensorDescription, ...] = (
     ControlelBinarySensorDescription(
         key="heat_required",
         translation_key="heat_required",
+        entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=lambda snapshot: snapshot.zone_heat_demand is HeatDemandState.HEAT_REQUIRED,
     ),
     ControlelBinarySensorDescription(

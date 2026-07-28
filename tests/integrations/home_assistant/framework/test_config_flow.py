@@ -1,4 +1,5 @@
 import json
+import logging
 
 import pytest
 from homeassistant import config_entries, data_entry_flow
@@ -471,6 +472,128 @@ async def test_options_prefill_legacy_entry_and_preserve_ids_after_rename(
     assert entry.options[CONF_ZONE_NAME] == "Upstairs"
     assert entry.options[CONF_PRIMARY_MEASUREMENT_MAX_AGE] == 7.0
     assert entry.options[CONF_INDETERMINATE_GRACE_PERIOD] == 11.0
+
+
+@pytest.mark.parametrize("seconds", [30, 60, 90, 900])
+@pytest.mark.parametrize("storage_layout", ["legacy_data", "options", "mixed"])
+@pytest.mark.asyncio
+async def test_options_unchanged_timing_round_trip_preserves_exact_seconds(
+    hass,
+    entry_data,
+    seconds,
+    storage_layout,
+) -> None:
+    effective = dict(entry_data)
+    effective[CONF_PRIMARY_MEASUREMENT_MAX_AGE] = seconds
+    effective[CONF_INDETERMINATE_GRACE_PERIOD] = seconds
+    if storage_layout == "legacy_data":
+        data = dict(effective)
+        options = {}
+    elif storage_layout == "options":
+        data = {
+            CONF_SENSOR_ID: effective[CONF_SENSOR_ID],
+            CONF_ZONE_ID: effective[CONF_ZONE_ID],
+        }
+        options = {key: value for key, value in effective.items() if key not in {CONF_SENSOR_ID, CONF_ZONE_ID}}
+    else:
+        data = dict(effective)
+        data[CONF_PRIMARY_MEASUREMENT_MAX_AGE] = seconds + 1
+        data[CONF_INDETERMINATE_GRACE_PERIOD] = seconds + 1
+        options = {
+            CONF_PRIMARY_MEASUREMENT_MAX_AGE: seconds,
+            CONF_INDETERMINATE_GRACE_PERIOD: seconds,
+        }
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Living room",
+        data=data,
+        options=options,
+    )
+    entry.add_to_hass(hass)
+    initial = await hass.config_entries.options.async_init(entry.entry_id)
+    advanced = await hass.config_entries.options.async_configure(
+        initial["flow_id"],
+        _options_basic_input(effective),
+    )
+    defaults = _schema_defaults(advanced)
+
+    assert defaults[CONF_PRIMARY_MEASUREMENT_MAX_AGE_MINUTES] == seconds / 60
+    assert defaults[CONF_INDETERMINATE_GRACE_PERIOD_MINUTES] == seconds / 60
+
+    result = await hass.config_entries.options.async_configure(
+        advanced["flow_id"],
+        {
+            CONF_PRIMARY_MEASUREMENT_MAX_AGE_MINUTES: defaults[CONF_PRIMARY_MEASUREMENT_MAX_AGE_MINUTES],
+            CONF_MAX_FUTURE_SKEW: defaults[CONF_MAX_FUTURE_SKEW],
+            CONF_INDETERMINATE_GRACE_PERIOD_MINUTES: defaults[CONF_INDETERMINATE_GRACE_PERIOD_MINUTES],
+            CONF_INDETERMINATE_TIMEOUT_ACTION: defaults[CONF_INDETERMINATE_TIMEOUT_ACTION],
+        },
+    )
+
+    assert result["type"] is data_entry_flow.FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_PRIMARY_MEASUREMENT_MAX_AGE] == seconds
+    assert entry.options[CONF_INDETERMINATE_GRACE_PERIOD] == seconds
+
+
+@pytest.mark.asyncio
+async def test_options_flow_logs_only_allowlisted_effective_changes(
+    hass,
+    entry_data,
+    caplog,
+) -> None:
+    entry_data["token"] = "must-not-appear"
+    entry = MockConfigEntry(domain=DOMAIN, data=entry_data, options={})
+    entry.add_to_hass(hass)
+    caplog.set_level(
+        logging.DEBUG,
+        logger="custom_components.controlel.config_flow",
+    )
+
+    initial = await hass.config_entries.options.async_init(entry.entry_id)
+    advanced = await hass.config_entries.options.async_configure(
+        initial["flow_id"],
+        _options_basic_input(entry_data),
+    )
+    unchanged = await hass.config_entries.options.async_configure(
+        advanced["flow_id"],
+        _advanced_input(entry_data),
+    )
+
+    assert unchanged["type"] is data_entry_flow.FlowResultType.CREATE_ENTRY
+    assert [
+        record.getMessage() for record in caplog.records if record.name == "custom_components.controlel.config_flow"
+    ] == ["Configuration unchanged for zone Living room"]
+
+    caplog.clear()
+    effective = dict(entry_data) | dict(entry.options)
+    initial = await hass.config_entries.options.async_init(entry.entry_id)
+    advanced = await hass.config_entries.options.async_configure(
+        initial["flow_id"],
+        _options_basic_input(
+            effective,
+            **{CONF_TARGET_TEMPERATURE: 23.0},
+        ),
+    )
+    changed = await hass.config_entries.options.async_configure(
+        advanced["flow_id"],
+        _advanced_input(
+            effective,
+            **{CONF_PRIMARY_MEASUREMENT_MAX_AGE_MINUTES: 1.0},
+        ),
+    )
+
+    assert changed["type"] is data_entry_flow.FlowResultType.CREATE_ENTRY
+    messages = [
+        record.getMessage() for record in caplog.records if record.name == "custom_components.controlel.config_flow"
+    ]
+    assert messages == [
+        "Configuration updated for zone Living room:\n"
+        "target_temperature: 21.0 -> 23.0\n"
+        "primary_measurement_max_age_seconds: 300.0 -> 60.0"
+    ]
+    assert "token" not in messages[0]
+    assert "must-not-appear" not in messages[0]
 
 
 @pytest.mark.asyncio

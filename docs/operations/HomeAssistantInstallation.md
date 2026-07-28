@@ -1,10 +1,10 @@
 # Home Assistant installation
 
-Controlel `0.3.0` is the current development candidate for one heating zone,
+Controlel `0.3.1` is the current development candidate for one heating zone,
 one primary temperature sensor, and one shared heat source. It requires the
 public core package `controlel==0.1.0`.
 
-Candidate `0.3.0` is not published; use the latest published release for HACS
+Candidate `0.3.1` is not published; use the latest published release for HACS
 custom-repository installation. Controlel is not listed in the default HACS
 store.
 

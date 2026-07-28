@@ -32,7 +32,7 @@ def source() -> OperationalSnapshotSource:
             temperature_entity_id="sensor.room_temperature",
             target_temperature=21.0,
             timeout_action="disable_heating",
-            integration_version="0.3.0",
+            integration_version="0.3.1",
             core_version="0.1.0",
         )
     )
@@ -95,6 +95,64 @@ def test_elapsed_values_advance_without_a_measurement_event() -> None:
 
     assert refreshed.measurement_age_seconds == 40
     assert refreshed.grace_remaining_seconds == 90
+
+
+def test_grace_visibility_is_truthful_across_lifecycle_and_stale_updates() -> None:
+    snapshots = source()
+    assert snapshots.snapshot_at(NOW).grace_remaining_seconds is None
+    assert snapshots.snapshot_at(NOW).grace_deadline is None
+
+    deadline = NOW + timedelta(seconds=60)
+    started = snapshots.update(
+        now=NOW,
+        safety_state=SafetyState.INDETERMINATE_GRACE,
+        grace_deadline=deadline,
+    )
+    assert started.grace_remaining_seconds == 60
+    assert snapshots.snapshot_at(NOW + timedelta(seconds=30)).grace_remaining_seconds == 30
+
+    recovered = snapshots.update(
+        now=NOW + timedelta(seconds=31),
+        safety_state=SafetyState.NORMAL,
+        grace_deadline=None,
+    )
+    assert recovered.grace_remaining_seconds is None
+    assert recovered.grace_deadline is None
+
+    second_deadline = NOW + timedelta(seconds=120)
+    snapshots.update(
+        now=NOW + timedelta(seconds=60),
+        safety_state=SafetyState.INDETERMINATE_GRACE,
+        grace_deadline=second_deadline,
+    )
+    timed_out = snapshots.update(
+        now=second_deadline,
+        safety_state=SafetyState.TIMEOUT_ACTION_APPLIED,
+        grace_deadline=None,
+    )
+    assert timed_out.grace_remaining_seconds is None
+    assert timed_out.grace_deadline is None
+
+    normal = snapshots.update(
+        now=second_deadline + timedelta(seconds=1),
+        safety_state=SafetyState.NORMAL,
+    )
+    assert normal.grace_remaining_seconds is None
+    assert normal.grace_deadline is None
+
+    reloaded = source()
+    assert reloaded.current.grace_remaining_seconds is None
+    assert reloaded.current.grace_deadline is None
+
+    snapshots.close()
+    stale_callback = snapshots.update(
+        now=second_deadline + timedelta(seconds=2),
+        safety_state=SafetyState.INDETERMINATE_GRACE,
+        grace_deadline=second_deadline + timedelta(minutes=1),
+    )
+    assert stale_callback.safety_state is SafetyState.NORMAL
+    assert stale_callback.grace_remaining_seconds is None
+    assert stale_callback.grace_deadline is None
 
 
 def test_trace_is_bounded_and_records_use_snapshot_revision_sequence() -> None:

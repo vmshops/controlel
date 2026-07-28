@@ -75,7 +75,13 @@ ID, so display-name changes and reloads do not duplicate entities. This
 milestone does not change core `0.1.0` heating behavior and does not claim
 physical output confirmation.
 
+Milestone 25B.1 prepares the focused `0.3.1` integration patch with
+configuration provenance, exact seconds/minutes Options Flow round trips,
+allowlisted configuration-change logging, clearer entity presentation, and
+truthful grace countdown and deadline visibility. Core behavior remains
+unchanged at `0.1.0`.
+
 Milestone 26 and later retain multiple zones or sensors, persistence,
 climate/number/select entities, physical output feedback, automatic retry,
 heating curves, modulation, DHW, learning, and dashboard work. Version `0.3.0`
-remains unpublished until a separate release milestone.
+and its `0.3.1` patch remain unpublished until a separate release milestone.

@@ -31,8 +31,8 @@ version is the static `project.version` in `pyproject.toml`. Runtime access uses
 `0.0.0+uninstalled`; it never pretends to be a release.
 
 The custom-component manifest version is a separate integration version. The
-current candidate is `0.3.0`; it is not a second source for the core package
-version and evolves independently. Candidate `0.3.0` is not published.
+current candidate is `0.3.1`; it is not a second source for the core package
+version and evolves independently. Candidate `0.3.1` is not published.
 
 ## Published core 0.1.0 record
 
@@ -169,7 +169,7 @@ the immutable public files.
 
 ## Home Assistant dependency contract
 
-Integration `0.3.0` pins exactly `controlel==0.1.0`. CI keeps local editable
+Integration `0.3.1` pins exactly `controlel==0.1.0`. CI keeps local editable
 compatibility and public-package framework jobs isolated. The public job never
 installs the repository as a distribution and proves the core resolves from
 `site-packages`. Normal supported integration installation can obtain the core
@@ -179,15 +179,15 @@ automatically.
 
 Integration releases use a separate version stream:
 
-- manifest and `INTEGRATION_VERSION`: `0.3.0`;
-- future integration tag: `v0.3.0`;
+- manifest and `INTEGRATION_VERSION`: `0.3.1`;
+- future integration tag: `v0.3.1`;
 - GitHub Release name:
-  `Controlel Home Assistant Integration v0.3.0`;
+  `Controlel Home Assistant Integration v0.3.1`;
 - HACS asset: `controlel.zip`;
 - checksum asset: `controlel.zip.sha256`;
 - exact core dependency: `controlel==0.1.0`.
 
-No `v0.3.0` tag or GitHub Release exists. Core provenance tags use
+No `v0.3.1` tag or GitHub Release exists. Core provenance tags use
 `core-vX.Y.Z`, but core GitHub Releases must
 not be created in this monorepo because HACS consumes the repository-wide
 release stream.
@@ -206,9 +206,9 @@ Every remote step requires explicit approval:
 3. Build the archive twice and require byte-identical output.
 4. Run the independent validator and manually inspect the member list.
 5. Record the ZIP SHA-256.
-6. Create annotated tag `v0.3.0` at the reviewed commit.
+6. Create annotated tag `v0.3.1` at the reviewed commit.
 7. Create GitHub Release
-   `Controlel Home Assistant Integration v0.3.0`.
+   `Controlel Home Assistant Integration v0.3.1`.
 8. Attach `controlel.zip` and `controlel.zip.sha256`; download them again and
    verify their hashes.
 9. Install through HACS in a clean supported Home Assistant instance.
