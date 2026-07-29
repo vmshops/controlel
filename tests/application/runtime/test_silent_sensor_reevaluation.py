@@ -134,6 +134,11 @@ def create_runtime(
     port: RecordingHeatSource | None = None,
     grace: timedelta = GRACE,
     timeout_action: HeatingAction = HeatingAction.DISABLE_HEATING,
+    turn_on_differential: float = 0.0,
+    turn_off_differential: float = 0.0,
+    minimum_on: timedelta = timedelta(0),
+    minimum_off: timedelta = timedelta(0),
+    demand_arbitrator=None,
 ) -> tuple[ControlRuntime, MutableClock, ManualScheduler, RecordingHeatSource]:
     configured_clock = clock or MutableClock()
     configured_scheduler = scheduler or ManualScheduler()
@@ -163,8 +168,22 @@ def create_runtime(
         max_future_skew=timedelta(0),
         indeterminate_grace_period=grace,
         indeterminate_timeout_action=timeout_action,
+        heating_turn_on_differential=turn_on_differential,
+        heating_turn_off_differential=turn_off_differential,
+        minimum_heating_on_time=minimum_on,
+        minimum_heating_off_time=minimum_off,
+        demand_arbitrator=demand_arbitrator,
     )
     return runtime, configured_clock, configured_scheduler, configured_port
+
+
+class ForceNoHeatArbitrator:
+    def __init__(self) -> None:
+        self.received = []
+
+    def resolve(self, aggregate_demand):
+        self.received.append(aggregate_demand)
+        return aggregate_demand.model_copy(update={"status": BuildingHeatDemandStatus.NO_HEAT_REQUIRED})
 
 
 def measurement(
@@ -517,6 +536,9 @@ def test_source_failure_keeps_demand_safety_and_installed_deadline():
     )
     assert len(scheduler.active) == 1
     assert runtime.heat_source_state_store.get() is None
+    assert runtime.source_control_state.last_dispatch_timestamp is None
+    assert runtime.source_control_state.minimum_on_deadline is None
+    assert runtime.source_control_state.minimum_off_deadline is None
 
 
 def test_no_decision_and_observe_only_do_not_reset_safety_state_or_timer():
@@ -544,3 +566,188 @@ def test_completed_evaluation_after_backward_clock_change_raises_regression():
 
     with pytest.raises(HeatDemandClockRegressionError):
         runtime.reevaluate_heat_demand()
+
+
+def test_runtime_distinguishes_raw_demand_from_hysteresis_deadband_hold():
+    runtime, clock, _, port = create_runtime(
+        turn_on_differential=0.3,
+        turn_off_differential=0.1,
+    )
+
+    enabled = runtime.process_temperature(measurement(21.5))
+    clock.current_time += timedelta(minutes=1)
+    held = runtime.process_temperature(measurement(22.0, timestamp=clock.current_time))
+    clock.current_time += timedelta(minutes=1)
+    disabled = runtime.process_temperature(measurement(22.1, timestamp=clock.current_time))
+
+    assert enabled.heat_demand_evaluation.hysteresis_assessment.state.demand.value == "heat_required"
+    assert held.decision_event.decision.action.value == "disable_heating"
+    assert held.heat_demand_evaluation.hysteresis_assessment.raw_requires_heat is False
+    assert held.heat_demand_evaluation.hysteresis_assessment.state.demand.value == "heat_required"
+    assert held.status is RuntimeProcessingStatus.COMMAND_SUPPRESSED
+    assert disabled.status is RuntimeProcessingStatus.COMMAND_EXECUTED
+    assert [command.action for command in port.commands] == [
+        HeatingAction.ENABLE_HEATING,
+        HeatingAction.DISABLE_HEATING,
+    ]
+
+
+def test_source_control_consumes_arbitrated_aggregate_not_zone_state():
+    arbitrator = ForceNoHeatArbitrator()
+    runtime, _, _, port = create_runtime(demand_arbitrator=arbitrator)
+
+    result = runtime.process_temperature(measurement(19))
+
+    assert len(arbitrator.received) == 1
+    assert arbitrator.received[0].status is BuildingHeatDemandStatus.HEAT_REQUIRED
+    assert result.heat_demand_evaluation.building_heat_demand.status is (BuildingHeatDemandStatus.NO_HEAT_REQUIRED)
+    assert [command.action for command in port.commands] == [HeatingAction.DISABLE_HEATING]
+
+
+def test_runtime_reevaluates_current_demand_at_minimum_on_deadline():
+    runtime, clock, scheduler, port = create_runtime(minimum_on=timedelta(minutes=2))
+    runtime.process_temperature(measurement(19))
+    clock.current_time += timedelta(minutes=1)
+
+    deferred = runtime.process_temperature(measurement(23, timestamp=clock.current_time))
+    deadline_task = scheduler.active[0]
+
+    assert deferred.status is RuntimeProcessingStatus.COMMAND_DEFERRED
+    assert deadline_task.when == NOW + timedelta(minutes=2)
+    assert len(port.commands) == 1
+
+    clock.current_time = deadline_task.when
+    deadline_task.invoke()
+
+    assert [command.action for command in port.commands] == [
+        HeatingAction.ENABLE_HEATING,
+        HeatingAction.DISABLE_HEATING,
+    ]
+    assert runtime.source_control_state.deferred_command is None
+
+
+def test_runtime_cancels_deferred_transition_and_rejects_stale_callback():
+    runtime, clock, scheduler, port = create_runtime(minimum_on=timedelta(minutes=2))
+    runtime.process_temperature(measurement(19))
+    clock.current_time += timedelta(minutes=1)
+    runtime.process_temperature(measurement(23, timestamp=clock.current_time))
+    stale_task = scheduler.active[0]
+    clock.current_time += timedelta(seconds=30)
+
+    cancelled = runtime.process_temperature(measurement(19, timestamp=clock.current_time))
+    commands_before = list(port.commands)
+    stale_task.invoke()
+
+    assert cancelled.status is RuntimeProcessingStatus.COMMAND_SUPPRESSED
+    assert stale_task.cancelled is True
+    assert runtime.source_control_state.deferred_command is None
+    assert port.commands == commands_before
+
+
+def test_runtime_safety_disable_bypasses_minimum_on_lockout():
+    runtime, clock, _, port = create_runtime(
+        grace=timedelta(0),
+        minimum_on=timedelta(minutes=10),
+    )
+    runtime.process_temperature(measurement(19))
+    clock.current_time = NOW + MAX_AGE + timedelta(seconds=1)
+
+    result = runtime.reevaluate_heat_demand()
+
+    assert result.status is HeatDemandEvaluationStatus.SAFETY_COMMAND_EXECUTED
+    assert result.source_control_assessment.safety_bypassed_lockout is True
+    assert [command.action for command in port.commands] == [
+        HeatingAction.ENABLE_HEATING,
+        HeatingAction.DISABLE_HEATING,
+    ]
+
+
+def test_fatal_shutdown_bypasses_minimum_on_and_invalidates_deferred_callback():
+    runtime, clock, scheduler, port = create_runtime(minimum_on=timedelta(minutes=2))
+    runtime.process_temperature(measurement(19))
+    clock.current_time += timedelta(minutes=1)
+    runtime.process_temperature(measurement(23, timestamp=clock.current_time))
+    stale_task = scheduler.active[0]
+
+    result = runtime.fatal_shutdown(None, clock.current_time)
+    commands_after_fatal = list(port.commands)
+    stale_task.invoke()
+
+    assert result.emergency_disable_attempted is True
+    assert result.emergency_disable_outcome.value == "fatal_shutdown_disable_dispatched"
+    assert [command.action for command in port.commands] == [
+        HeatingAction.ENABLE_HEATING,
+        HeatingAction.DISABLE_HEATING,
+    ]
+    assert port.commands == commands_after_fatal
+    assert runtime.source_control_state.phase.value == "fatal_error"
+    assert runtime.source_control_state.minimum_on_deadline is None
+    assert runtime.source_control_state.minimum_off_deadline is None
+    assert runtime.source_control_state.deferred_command is None
+    assert runtime.source_control_state.next_reevaluation_deadline is None
+
+
+def test_fatal_enable_failure_attempts_one_emergency_disable_without_history():
+    error = RuntimeError("enable failed")
+    port = RecordingHeatSource()
+    port.error = error
+    runtime, clock, _, _ = create_runtime(port=port)
+
+    with pytest.raises(RuntimeError, match="enable failed"):
+        runtime.process_temperature(measurement(19))
+    assert runtime.source_control_state.last_dispatch_timestamp is None
+
+    port.error = None
+    result = runtime.fatal_shutdown(
+        HeatingAction.ENABLE_HEATING,
+        clock.current_time,
+    )
+
+    assert result.emergency_disable_outcome.value == "fatal_shutdown_disable_dispatched"
+    assert [command.action for command in port.commands] == [
+        HeatingAction.ENABLE_HEATING,
+        HeatingAction.DISABLE_HEATING,
+    ]
+    assert runtime.source_control_state.last_dispatch_timestamp is None
+    assert runtime.source_control_state.minimum_off_deadline is None
+
+
+def test_fatal_disable_failure_does_not_recursively_dispatch_disable():
+    port = RecordingHeatSource()
+    runtime, clock, _, _ = create_runtime(port=port)
+    runtime.process_temperature(measurement(19))
+    clock.current_time += timedelta(minutes=1)
+    port.error = RuntimeError("disable failed")
+
+    with pytest.raises(RuntimeError, match="disable failed"):
+        runtime.process_temperature(measurement(23, timestamp=clock.current_time))
+
+    result = runtime.fatal_shutdown(
+        HeatingAction.DISABLE_HEATING,
+        clock.current_time,
+    )
+
+    assert result.emergency_disable_attempted is False
+    assert result.emergency_disable_outcome.value == "fatal_shutdown_disable_skipped_already_failed"
+    assert [command.action for command in port.commands] == [
+        HeatingAction.ENABLE_HEATING,
+        HeatingAction.DISABLE_HEATING,
+    ]
+
+
+def test_failed_emergency_disable_is_attempted_once_without_retry_or_lockout():
+    port = RecordingHeatSource()
+    port.error = RuntimeError("emergency disable failed")
+    runtime, clock, _, _ = create_runtime(port=port)
+
+    first = runtime.fatal_shutdown(None, clock.current_time)
+    second = runtime.fatal_shutdown(None, clock.current_time)
+
+    assert first is second
+    assert first.emergency_disable_attempted is True
+    assert first.emergency_disable_outcome.value == "fatal_shutdown_disable_failed"
+    assert first.emergency_failure_type == "RuntimeError"
+    assert [command.action for command in port.commands] == [
+        HeatingAction.DISABLE_HEATING,
+    ]
+    assert runtime.source_control_state.minimum_off_deadline is None

@@ -1,5 +1,34 @@
 # Runtime Execution Architecture
 
+## Hysteresis and source protection
+
+Temperature strategy output is raw zone demand. A pure, stateful
+`TemperatureHysteresisPolicy` converts it to logical demand with asymmetric
+enable/disable thresholds. Safety policy then resolves indeterminate demand.
+Finally, `SourceControlPolicy` arbitrates the requested heat-source command
+against command-dispatch-based minimum on/off deadlines. Home Assistant owns
+configuration, serialized execution, scheduling adapters, and observation, not
+these deterministic rules.
+
+The ownership boundary is explicit:
+
+- zone control owns target temperature, turn-on and turn-off differentials,
+  raw measurement state, hysteresis demand, and future valve/priority policy;
+- shared heat-source control owns minimum on/off time, dispatch history,
+  lockout deadlines, deferred source commands, anti-cycling state, safety
+  bypass, and future water/return-temperature, modulation, and source
+  diagnostics.
+
+`DemandArbitrator` separates those layers. The current
+`IdentityDemandArbitrator` maps the already-aggregated one-zone demand directly
+to shared-source demand. It deliberately contains no future multi-zone rules.
+`SourceControlPolicy` receives only the resolved source command and timing
+state; it has no zone ID, temperature, sensor, or Home Assistant dependency.
+
+One scheduler deadline represents the earliest demand-validity, safety-grace,
+or deferred-command reevaluation. Expiry always reevaluates current state.
+Generation checks reject stale callbacks after rescheduling, reload, or stop.
+
 ## Serialized host boundary
 
 The Home Assistant runtime host is the first authoritative owner of serialized
@@ -23,10 +52,18 @@ must not mutate runtime-owned state independently.
 ## Lifecycle and integration responsibilities
 
 Construction is side-effect free and begins in private `OPEN` state.
-`start()` remains a repeatable safety evaluation. `stop()` transitions
-terminally to `STOPPED`; restart requires a new runtime instance. Shutdown
-invalidates timer generation and clears timer ownership before best-effort
-cancellation. It issues no heat-source command.
+`start()` remains a repeatable safety evaluation. Normal `stop()` transitions
+terminally to `STOPPED`; restart requires a new runtime instance. Normal
+shutdown invalidates timer generation and clears timer ownership before
+best-effort cancellation. It issues no heat-source command.
+
+Fatal shutdown is a separate terminal path. It first invalidates callbacks and
+clears deferred/lockout state, then makes at most one best-effort emergency
+`disable_heating` request outside normal duplicate suppression and minimum-time
+policy. A fatal failure already caused by `disable_heating` skips that request
+to prevent recursion. Emergency dispatch is recorded only as a request
+outcome, never as confirmed physical source state, and never starts a normal
+minimum-off timer or automatic retry.
 
 The host must provide:
 

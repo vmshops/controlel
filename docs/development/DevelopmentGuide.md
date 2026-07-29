@@ -178,11 +178,18 @@ Twine to the core runtime dependencies.
 
 ```text
 python -m pip install -r requirements/package-test.txt
-python -m build
+python scripts/packaging/build_core_release.py
 python -m twine check dist/*
 python scripts/packaging/validate_artifacts.py dist
 python scripts/packaging/verify_clean_install.py dist
 ```
+
+The deterministic builder runs the configured PEP 517 backend with
+`SOURCE_DATE_EPOCH` set to the exact Git commit timestamp, then canonicalizes
+only the sdist container metadata that setuptools otherwise stamps with build
+time. Wheel and sdist file content remains the backend output. Run the builder
+from a clean reviewed commit and require identical hashes across repeated clean
+builds.
 
 The last command creates a clean temporary environment and runs outside the
 checkout. Detailed Windows commands, accepted archive contents, versioning,

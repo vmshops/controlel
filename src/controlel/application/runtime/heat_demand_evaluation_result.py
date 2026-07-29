@@ -6,6 +6,12 @@ from controlel.application.services.heat_demand_safety_policy import (
     HeatDemandSafetyAssessment,
     HeatDemandSafetyPhase,
 )
+from controlel.application.services.source_control_policy import (
+    SourceControlAssessment,
+)
+from controlel.application.services.temperature_hysteresis_policy import (
+    TemperatureHysteresisAssessment,
+)
 from controlel.domain.commands.heat_source_command import HeatSourceCommand
 from controlel.domain.commands.heating_action import HeatingAction
 from controlel.domain.demands.building_heat_demand import BuildingHeatDemand
@@ -27,6 +33,8 @@ class HeatDemandEvaluationStatus(StrEnum):
     DEMAND_COMMAND_SUPPRESSED = "demand_command_suppressed"
     SAFETY_COMMAND_EXECUTED = "safety_command_executed"
     SAFETY_COMMAND_SUPPRESSED = "safety_command_suppressed"
+    DEMAND_COMMAND_DEFERRED = "demand_command_deferred"
+    SAFETY_COMMAND_DEFERRED = "safety_command_deferred"
 
 
 @dataclass(frozen=True)
@@ -38,6 +46,8 @@ class HeatDemandEvaluationResult:
     command: HeatSourceCommand | None
     scheduled_for: datetime | None
     next_evaluation_at: datetime | None
+    hysteresis_assessment: TemperatureHysteresisAssessment | None = None
+    source_control_assessment: SourceControlAssessment | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.trigger, HeatDemandEvaluationTrigger):
@@ -50,6 +60,16 @@ class HeatDemandEvaluationResult:
             raise TypeError("safety_assessment must be a HeatDemandSafetyAssessment")
         if self.command is not None and not isinstance(self.command, HeatSourceCommand):
             raise TypeError("command must be a HeatSourceCommand or None")
+        if self.hysteresis_assessment is not None and not isinstance(
+            self.hysteresis_assessment,
+            TemperatureHysteresisAssessment,
+        ):
+            raise TypeError("hysteresis_assessment must be a TemperatureHysteresisAssessment or None")
+        if self.source_control_assessment is not None and not isinstance(
+            self.source_control_assessment,
+            SourceControlAssessment,
+        ):
+            raise TypeError("source_control_assessment must be a SourceControlAssessment or None")
 
         for field_name, value in (
             ("scheduled_for", self.scheduled_for),
@@ -85,6 +105,7 @@ class HeatDemandEvaluationResult:
         demand_statuses = {
             HeatDemandEvaluationStatus.DEMAND_COMMAND_EXECUTED,
             HeatDemandEvaluationStatus.DEMAND_COMMAND_SUPPRESSED,
+            HeatDemandEvaluationStatus.DEMAND_COMMAND_DEFERRED,
         }
         if self.status in demand_statuses:
             action_by_status = {
@@ -104,6 +125,7 @@ class HeatDemandEvaluationResult:
         safety_statuses = {
             HeatDemandEvaluationStatus.SAFETY_COMMAND_EXECUTED,
             HeatDemandEvaluationStatus.SAFETY_COMMAND_SUPPRESSED,
+            HeatDemandEvaluationStatus.SAFETY_COMMAND_DEFERRED,
         }
         if self.status in safety_statuses:
             if (

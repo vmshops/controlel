@@ -1,3 +1,4 @@
+import os
 from collections.abc import Iterator
 from pathlib import Path
 from shutil import copytree
@@ -24,11 +25,34 @@ from custom_components.controlel.const import (
 )
 
 ROOT = Path(__file__).parents[4]
+FRAMEWORK_COMPOSITION_ENV = "CONTROLEL_FRAMEWORK_COMPOSITION"
+FRAMEWORK_CORE_VERSION_BY_COMPOSITION = {
+    "local": "0.2.0",
+    "public": "0.1.0",
+}
 
 
 def pytest_configure(config: pytest.Config) -> None:
     """Use the mode required by Home Assistant's async fixtures in this suite."""
     config.option.asyncio_mode = "auto"
+
+
+@pytest.fixture(scope="session")
+def framework_composition() -> str:
+    """Return the explicitly selected framework package composition."""
+    composition = os.environ.get(FRAMEWORK_COMPOSITION_ENV, "local")
+    if composition not in FRAMEWORK_CORE_VERSION_BY_COMPOSITION:
+        pytest.fail(
+            f"{FRAMEWORK_COMPOSITION_ENV} must be one of "
+            f"{sorted(FRAMEWORK_CORE_VERSION_BY_COMPOSITION)}, got {composition!r}"
+        )
+    return composition
+
+
+@pytest.fixture(scope="session")
+def expected_framework_core_version(framework_composition: str) -> str:
+    """Return the exact core version selected by the framework composition."""
+    return FRAMEWORK_CORE_VERSION_BY_COMPOSITION[framework_composition]
 
 
 @pytest.fixture

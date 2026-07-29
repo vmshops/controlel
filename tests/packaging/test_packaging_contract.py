@@ -38,7 +38,7 @@ def test_project_metadata_and_runtime_dependencies_match_release_contract() -> N
     project = load_pyproject()["project"]
 
     assert project["name"] == "controlel"
-    assert project["version"] == "0.1.0"
+    assert project["version"] == "0.2.0"
     assert project["readme"] == "README.md"
     assert project["requires-python"] == ">=3.13"
     assert project["license"] == "MIT"
@@ -85,7 +85,7 @@ def test_project_version_is_the_only_release_version_source() -> None:
         path for path in (ROOT / "src" / "controlel").rglob("*.py") if "__version__" in path.read_text(encoding="utf-8")
     ]
 
-    assert project_version == "0.1.0"
+    assert project_version == "0.2.0"
     assert controlel.__version__ == project_version
     assert importlib.metadata.version("controlel") == project_version
     assert version_files == [ROOT / "src" / "controlel" / "__init__.py"]
@@ -98,8 +98,8 @@ def test_manifest_pins_published_core_and_keeps_version_independent() -> None:
     manifest = json.loads((ROOT / "custom_components" / "controlel" / "manifest.json").read_text(encoding="utf-8"))
     core_version = load_pyproject()["project"]["version"]
 
-    assert core_version == "0.1.0"
-    assert manifest["requirements"] == [f"controlel=={core_version}"]
+    assert core_version == "0.2.0"
+    assert manifest["requirements"] == ["controlel==0.1.0"]
     assert manifest["version"] == "0.3.1"
     assert manifest["version"] != core_version
     assert manifest["issue_tracker"] == "https://github.com/vmshops/controlel/issues"
@@ -127,7 +127,7 @@ def test_packaging_ci_builds_and_validates_without_publishing() -> None:
     workflow = (ROOT / ".github" / "workflows" / "packaging.yml").read_text(encoding="utf-8")
 
     required_commands = {
-        "python -m build",
+        "python scripts/packaging/build_core_release.py",
         "python -m twine check dist/*",
         "python scripts/packaging/validate_artifacts.py dist",
         "python scripts/packaging/verify_clean_install.py dist",
@@ -138,3 +138,13 @@ def test_packaging_ci_builds_and_validates_without_publishing() -> None:
     assert "publish" not in workflow.casefold()
     assert "upload" not in workflow.casefold()
     assert "token" not in workflow.casefold()
+
+
+def test_core_and_integration_tag_namespaces_are_explicit() -> None:
+    release_guide = (ROOT / "docs" / "development" / "ReleaseGuide.md").read_text(encoding="utf-8")
+    normalized_guide = " ".join(release_guide.split())
+
+    assert "`core-vX.Y.Z` is reserved for core/PyPI releases" in normalized_guide
+    assert "`vX.Y.Z` is reserved for Home Assistant integration releases" in normalized_guide
+    assert "core `0.2.0` tag is `core-v0.2.0`" in normalized_guide
+    assert "existing integration tag `v0.2.0` must remain unchanged" in normalized_guide

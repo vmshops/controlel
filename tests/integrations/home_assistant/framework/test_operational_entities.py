@@ -76,6 +76,7 @@ async def _setup_entry(hass, entry_data) -> MockConfigEntry:
 async def test_device_entities_states_unique_ids_and_unload(
     hass,
     entry_data,
+    expected_framework_core_version,
     service_calls,
 ) -> None:
     entry = await _setup_entry(hass, entry_data)
@@ -106,7 +107,7 @@ async def test_device_entities_states_unique_ids_and_unload(
     assert hass.states.get(by_key["heat_required"].entity_id).state == "on"
     assert hass.states.get(by_key["runtime_active"].entity_id).state == "on"
     assert hass.states.get(by_key["integration_version"].entity_id).state == "0.3.1"
-    assert hass.states.get(by_key["core_version"].entity_id).state == "0.1.0"
+    assert hass.states.get(by_key["core_version"].entity_id).state == expected_framework_core_version
     assert hass.states.get(by_key["grace_remaining"].entity_id).state == "unavailable"
     assert hass.states.get(by_key["grace_deadline"].entity_id).state == "unavailable"
 
@@ -292,6 +293,7 @@ async def test_exact_sixty_second_safety_sequence_is_visible_in_diagnostics(
 async def test_diagnostics_are_allowlisted_json_safe_and_redact_unknown_entry_data(
     hass,
     entry_data,
+    expected_framework_core_version,
     service_calls,
 ) -> None:
     entry_data["password"] = "must-not-appear"
@@ -303,7 +305,7 @@ async def test_diagnostics_are_allowlisted_json_safe_and_redact_unknown_entry_da
 
     assert diagnostics["versions"] == {
         "integration": "0.3.1",
-        "core": "0.1.0",
+        "core": expected_framework_core_version,
     }
     assert diagnostics["operational_snapshot"]["runtime_status"] == "active"
     assert diagnostics["operational_snapshot"]["safety_state"] == "normal"

@@ -26,3 +26,8 @@ class HeatSourceCommandDispatcher:
             )
         )
         return True
+
+    def dispatch_emergency(self, command: HeatSourceCommand) -> None:
+        """Request an emergency command without duplicate state or normal history."""
+
+        self.heat_source_port.execute(command)
