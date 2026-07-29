@@ -28,7 +28,7 @@ jobs:
           python -m pip install -r requirements/package-test.txt
 
       - name: Build wheel and source distribution
-        run: python -m build
+        run: python scripts/packaging/build_core_release.py
 
       - name: Validate package metadata
         run: python -m twine check dist/*

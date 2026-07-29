@@ -127,7 +127,7 @@ def test_packaging_ci_builds_and_validates_without_publishing() -> None:
     workflow = (ROOT / ".github" / "workflows" / "packaging.yml").read_text(encoding="utf-8")
 
     required_commands = {
-        "python -m build",
+        "python scripts/packaging/build_core_release.py",
         "python -m twine check dist/*",
         "python scripts/packaging/validate_artifacts.py dist",
         "python scripts/packaging/verify_clean_install.py dist",
@@ -138,3 +138,13 @@ def test_packaging_ci_builds_and_validates_without_publishing() -> None:
     assert "publish" not in workflow.casefold()
     assert "upload" not in workflow.casefold()
     assert "token" not in workflow.casefold()
+
+
+def test_core_and_integration_tag_namespaces_are_explicit() -> None:
+    release_guide = (ROOT / "docs" / "development" / "ReleaseGuide.md").read_text(encoding="utf-8")
+    normalized_guide = " ".join(release_guide.split())
+
+    assert "`core-vX.Y.Z` is reserved for core/PyPI releases" in normalized_guide
+    assert "`vX.Y.Z` is reserved for Home Assistant integration releases" in normalized_guide
+    assert "core `0.2.0` tag is `core-v0.2.0`" in normalized_guide
+    assert "existing integration tag `v0.2.0` must remain unchanged" in normalized_guide

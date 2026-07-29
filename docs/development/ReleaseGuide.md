@@ -34,6 +34,19 @@ The custom-component manifest version is a separate integration version. The
 current candidate is `0.3.1`; it is not a second source for the core package
 version and evolves independently. Candidate `0.3.1` is not published.
 
+## Permanent tag namespaces
+
+The tag namespaces are disjoint and permanent:
+
+- `core-vX.Y.Z` is reserved for core/PyPI releases. The intended candidate
+  core `0.2.0` tag is `core-v0.2.0`.
+- `vX.Y.Z` is reserved for Home Assistant integration releases. The existing
+  integration tag `v0.2.0` must remain unchanged and must never be reused for
+  the core package.
+
+Core tags record PyPI source provenance. They do not create GitHub Releases in
+this monorepo because HACS consumes the repository-wide GitHub Release stream.
+
 ## Published core 0.1.0 record
 
 - Distribution: `controlel`
@@ -104,11 +117,19 @@ py -3.14 -m venv .venv-package
 .\.venv-package\Scripts\python.exe -m pip install `
     -r requirements\package-test.txt
 
-.\.venv-package\Scripts\python.exe -m build
+.\.venv-package\Scripts\python.exe scripts\packaging\build_core_release.py
 .\.venv-package\Scripts\python.exe -m twine check dist\*
 .\.venv-package\Scripts\python.exe scripts\packaging\validate_artifacts.py dist
 .\.venv-package\Scripts\python.exe scripts\packaging\verify_clean_install.py dist
 ```
+
+The builder keeps setuptools as the configured PEP 517 backend. It derives
+`SOURCE_DATE_EPOCH` from the exact Git commit unless the environment explicitly
+provides it, then rewrites only sdist container metadata into a canonical
+PAX-format tar stream and gzip header. Every member has a fixed timestamp,
+owner, group, and portable mode; member order is sorted. File paths and file
+content are unchanged. A release candidate must produce identical wheel and
+sdist hashes across at least three clean builds.
 
 `verify_clean_install.py` creates a second temporary virtual environment,
 installs the wheel by absolute path, and runs from outside the checkout. It
@@ -151,7 +172,9 @@ Core `0.1.0` is immutable. Before any future core publication:
 - use a package-index account controlled by the project owner;
 - enable two-factor authentication;
 - build from a clean, reviewed commit;
+- use only the `core-vX.Y.Z` tag namespace for core/PyPI provenance;
 - rerun tests, build, Twine, archive-content, and clean-install checks;
+- require identical wheel and sdist hashes across three clean builds;
 - record wheel and sdist filenames and cryptographic hashes;
 - verify package name, version, metadata, and filenames before upload;
 - keep credentials, tokens, `.pypirc`, and release configuration out of the
@@ -187,10 +210,10 @@ Integration releases use a separate version stream:
 - checksum asset: `controlel.zip.sha256`;
 - exact core dependency: `controlel==0.1.0`.
 
-No `v0.3.1` tag or GitHub Release exists. Core provenance tags use
-`core-vX.Y.Z`, but core GitHub Releases must
-not be created in this monorepo because HACS consumes the repository-wide
-release stream.
+No `v0.3.1` tag or GitHub Release exists. Integration tags always use
+`vX.Y.Z`; core/PyPI provenance tags always use `core-vX.Y.Z`. Core GitHub
+Releases must not be created in this monorepo because HACS consumes the
+repository-wide release stream.
 
 The ZIP contains only files originating below
 `custom_components/controlel`, placed directly at archive root. GitHub's
