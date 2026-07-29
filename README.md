@@ -22,7 +22,7 @@ The goal is to create a reliable heating controller capable of optimizing comfor
 
 Project phase: Home Assistant one-zone host vertical slice
 
-Core version: 0.1.0
+Core candidate version: 0.2.0 (unpublished)
 
 Home Assistant integration candidate version: 0.3.1
 
@@ -92,12 +92,13 @@ has not been published and no default-store publication exists.
 ## Core package artifacts
 
 The reusable core is prepared as the `controlel` distribution and import
-package at version `0.1.0`. Its static version source and PEP 517 build
+package at candidate version `0.2.0`. Its static version source and PEP 517 build
 configuration live in `pyproject.toml`; normal installation depends only on
 Pydantic. Packaging validation builds one wheel and one sdist, inspects their
 contents, and installs the wheel into a clean environment outside the checkout.
 
-Core `0.1.0` is published on PyPI and is immutable. Future core corrections
+Core `0.1.0` is published on PyPI and is immutable; `0.2.0` remains an
+unpublished candidate. Future core corrections
 require a new version; rebuilt local `0.1.0` artifacts must never be uploaded.
 Repository packaging CI remains validation-only and contains no publication
 automation. See the [core release guide](docs/development/ReleaseGuide.md) for

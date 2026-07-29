@@ -105,6 +105,11 @@ def test_control_runtime_constructor_uses_shared_source_contract_only():
         "max_future_skew",
         "indeterminate_grace_period",
         "indeterminate_timeout_action",
+        "heating_turn_on_differential",
+        "heating_turn_off_differential",
+        "minimum_heating_on_time",
+        "minimum_heating_off_time",
+        "demand_arbitrator",
     ]
     assert "actuator_routes" not in parameters
     assert "actuator" not in parameters

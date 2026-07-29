@@ -1,5 +1,6 @@
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import replace
 from datetime import datetime, timedelta
 from threading import Lock
 
@@ -17,6 +18,10 @@ from controlel.application.ports.scheduled_runtime_failure_sink import (
     ScheduledRuntimeFailureSink,
 )
 from controlel.application.ports.scheduler import ScheduledTaskHandle, Scheduler
+from controlel.application.runtime.fatal_shutdown_result import (
+    FatalShutdownEmergencyOutcome,
+    FatalShutdownResult,
+)
 from controlel.application.runtime.heat_demand_evaluation_result import (
     HeatDemandEvaluationResult,
     HeatDemandEvaluationStatus,
@@ -29,6 +34,10 @@ from controlel.application.runtime.runtime_lifecycle import (
 from controlel.application.runtime.runtime_processing_result import (
     RuntimeProcessingResult,
     RuntimeProcessingStatus,
+)
+from controlel.application.services.demand_arbitrator import (
+    DemandArbitrator,
+    IdentityDemandArbitrator,
 )
 from controlel.application.services.heat_demand_deadline_calculator import (
     HeatDemandDeadlineCalculator,
@@ -43,12 +52,26 @@ from controlel.application.services.heat_source_command_dispatcher import (
 from controlel.application.services.measurement_timestamp_validator import (
     MeasurementTimestampValidator,
 )
+from controlel.application.services.source_control_policy import (
+    SourceControlAssessment,
+    SourceControlOutcome,
+    SourceControlPolicy,
+)
+from controlel.application.services.temperature_hysteresis_policy import (
+    TemperatureHysteresisAssessment,
+    TemperatureHysteresisPolicy,
+)
 from controlel.application.state.heat_demand_aggregator import HeatDemandAggregator
 from controlel.application.state.heat_demand_safety_state_store import (
     HeatDemandSafetyStateStore,
 )
 from controlel.application.state.heat_source_state_store import HeatSourceStateStore
 from controlel.application.state.runtime_state_store import RuntimeStateStore
+from controlel.application.state.source_control_state import SourceControlState
+from controlel.application.state.temperature_hysteresis_state import (
+    HysteresisDemandState,
+    TemperatureHysteresisState,
+)
 from controlel.application.state.zone_demand_store import ZoneDemandStore
 from controlel.application.state.zone_temperature_aggregator import (
     ZoneTemperatureAggregator,
@@ -60,6 +83,7 @@ from controlel.domain.commands.heating_action import HeatingAction
 from controlel.domain.demands.building_heat_demand_status import (
     BuildingHeatDemandStatus,
 )
+from controlel.domain.demands.zone_demand import ZoneDemand
 from controlel.domain.events.temperature_measured_event import (
     TemperatureMeasuredEvent,
 )
@@ -82,6 +106,11 @@ class ControlRuntime:
         max_future_skew: timedelta,
         indeterminate_grace_period: timedelta,
         indeterminate_timeout_action: HeatingAction,
+        heating_turn_on_differential: float = 0.0,
+        heating_turn_off_differential: float = 0.0,
+        minimum_heating_on_time: timedelta = timedelta(0),
+        minimum_heating_off_time: timedelta = timedelta(0),
+        demand_arbitrator: DemandArbitrator | None = None,
     ) -> None:
         self.clock = clock
         self.scheduler = scheduler
@@ -97,6 +126,7 @@ class ControlRuntime:
             zone_repository=zone_repository,
             clock=clock,
         )
+        self.demand_arbitrator = demand_arbitrator if demand_arbitrator is not None else IdentityDemandArbitrator()
         self.heat_demand_safety_policy = HeatDemandSafetyPolicy(
             grace_period=indeterminate_grace_period,
             timeout_action=indeterminate_timeout_action,
@@ -109,6 +139,18 @@ class ControlRuntime:
             heat_source_port=heat_source_port,
             state_store=self.heat_source_state_store,
         )
+        self.temperature_hysteresis_policy = TemperatureHysteresisPolicy(
+            turn_on_differential=heating_turn_on_differential,
+            turn_off_differential=heating_turn_off_differential,
+        )
+        self.source_control_policy = SourceControlPolicy(
+            minimum_on_time=minimum_heating_on_time,
+            minimum_off_time=minimum_heating_off_time,
+        )
+        self.temperature_hysteresis_state: TemperatureHysteresisState | None = None
+        self.temperature_hysteresis_assessment: TemperatureHysteresisAssessment | None = None
+        self.source_control_state: SourceControlState | None = None
+        self.source_control_assessment: SourceControlAssessment | None = None
         self.target_resolver = ZoneTargetResolver(
             sensor_repository=sensor_repository,
             zone_repository=zone_repository,
@@ -135,6 +177,7 @@ class ControlRuntime:
         self._execution_lock = Lock()
         self._active_operation: str | None = None
         self._stopped = False
+        self._fatal_shutdown_result: FatalShutdownResult | None = None
 
     def start(self) -> HeatDemandEvaluationResult:
         with self._runtime_operation("start"):
@@ -163,6 +206,78 @@ class ControlRuntime:
             self._scheduled_deadline = None
             if handle is not None:
                 handle.cancel()
+            if self.source_control_state is not None:
+                self.source_control_state = self.source_control_policy.stopped_state(
+                    self.source_control_state,
+                    now=self.source_control_state.last_evaluated_at,
+                )
+
+    def fatal_shutdown(
+        self,
+        original_failed_action: HeatingAction | None,
+        requested_at: datetime,
+    ) -> FatalShutdownResult:
+        """Enter terminal state and make at most one emergency disable request."""
+
+        if original_failed_action is not None and not isinstance(
+            original_failed_action,
+            HeatingAction,
+        ):
+            raise TypeError("original_failed_action must be a HeatingAction or None")
+        if requested_at.tzinfo is None or requested_at.utcoffset() is None:
+            raise ValueError("requested_at must be timezone-aware")
+
+        with self._runtime_operation("fatal_shutdown", allow_stopped=True):
+            if self._fatal_shutdown_result is not None:
+                return self._fatal_shutdown_result
+
+            self._stopped = True
+            self._schedule_generation += 1
+            handle = self._scheduled_handle
+            self._scheduled_handle = None
+            self._scheduled_deadline = None
+            if handle is not None:
+                try:
+                    handle.cancel()
+                except Exception:
+                    pass
+            self.source_control_state = self.source_control_policy.fatal_state(
+                self.source_control_state,
+                now=requested_at,
+            )
+
+            if original_failed_action is HeatingAction.DISABLE_HEATING:
+                result = FatalShutdownResult(
+                    emergency_disable_attempted=False,
+                    emergency_disable_outcome=(FatalShutdownEmergencyOutcome.DISABLE_SKIPPED_ALREADY_FAILED),
+                    timestamp=requested_at,
+                    original_failed_action=original_failed_action,
+                )
+            else:
+                command = HeatSourceCommand(
+                    command_type=CommandFamily.HEATING,
+                    action=HeatingAction.DISABLE_HEATING,
+                )
+                try:
+                    self.heat_source_command_dispatcher.dispatch_emergency(command)
+                except Exception as error:
+                    result = FatalShutdownResult(
+                        emergency_disable_attempted=True,
+                        emergency_disable_outcome=(FatalShutdownEmergencyOutcome.DISABLE_FAILED),
+                        timestamp=requested_at,
+                        original_failed_action=original_failed_action,
+                        emergency_failure_type=type(error).__name__,
+                    )
+                else:
+                    result = FatalShutdownResult(
+                        emergency_disable_attempted=True,
+                        emergency_disable_outcome=(FatalShutdownEmergencyOutcome.DISABLE_DISPATCHED),
+                        timestamp=requested_at,
+                        original_failed_action=original_failed_action,
+                    )
+
+            self._fatal_shutdown_result = result
+            return result
 
     @contextmanager
     def _runtime_operation(
@@ -217,7 +332,23 @@ class ControlRuntime:
                 decision_event=decision_event,
             )
 
-        self.zone_demand_store.record(zone_demand)
+        zone = self.target_resolver.resolve(measurement.sensor_id)
+        hysteresis = self.temperature_hysteresis_policy.evaluate(
+            current_temperature=measurement.value.value,
+            target_temperature=zone.target_temperature.value,
+            raw_requires_heat=zone_demand.requires_heat,
+            current_state=self.temperature_hysteresis_state,
+        )
+        self.temperature_hysteresis_state = hysteresis.state
+        self.temperature_hysteresis_assessment = hysteresis
+        self.zone_demand_store.record(
+            ZoneDemand(
+                zone_id=zone_demand.zone_id,
+                requires_heat=(hysteresis.state.demand is HysteresisDemandState.HEAT_REQUIRED),
+                source_sensor_id=zone_demand.source_sensor_id,
+                observed_at=zone_demand.observed_at,
+            )
+        )
         evaluation = self._evaluate_heat_demand(
             HeatDemandEvaluationTrigger.ACTIONABLE_DECISION,
         )
@@ -229,6 +360,8 @@ class ControlRuntime:
             HeatDemandEvaluationStatus.DEMAND_COMMAND_SUPPRESSED: RuntimeProcessingStatus.COMMAND_SUPPRESSED,
             HeatDemandEvaluationStatus.SAFETY_COMMAND_EXECUTED: RuntimeProcessingStatus.SAFETY_COMMAND_EXECUTED,
             HeatDemandEvaluationStatus.SAFETY_COMMAND_SUPPRESSED: RuntimeProcessingStatus.SAFETY_COMMAND_SUPPRESSED,
+            HeatDemandEvaluationStatus.DEMAND_COMMAND_DEFERRED: RuntimeProcessingStatus.COMMAND_DEFERRED,
+            HeatDemandEvaluationStatus.SAFETY_COMMAND_DEFERRED: RuntimeProcessingStatus.SAFETY_COMMAND_DEFERRED,
         }
         return RuntimeProcessingResult(
             status=runtime_status_by_evaluation[evaluation.status],
@@ -242,7 +375,8 @@ class ControlRuntime:
         scheduled_for: datetime | None = None,
         indeterminate_start_hint: datetime | None = None,
     ) -> HeatDemandEvaluationResult:
-        building_heat_demand = self.heat_demand_aggregator.evaluate()
+        aggregate_demand = self.heat_demand_aggregator.evaluate()
+        building_heat_demand = self.demand_arbitrator.resolve(aggregate_demand)
         safety_assessment = self.heat_demand_safety_policy.evaluate(
             demand=building_heat_demand,
             current_state=self.heat_demand_safety_state_store.get(),
@@ -256,13 +390,14 @@ class ControlRuntime:
             if safety_assessment.phase is HeatDemandSafetyPhase.INDETERMINATE_GRACE
             else None
         )
-        deadlines = [deadline for deadline in (eligibility_deadline, grace_deadline) if deadline is not None]
-        next_evaluation_at = min(deadlines) if deadlines else None
-        self._replace_scheduled_evaluation(next_evaluation_at)
 
         command: HeatSourceCommand | None = None
+        source_assessment: SourceControlAssessment | None = None
         if safety_assessment.phase is HeatDemandSafetyPhase.INDETERMINATE_GRACE:
             status = HeatDemandEvaluationStatus.INDETERMINATE_GRACE
+            deadlines = [deadline for deadline in (eligibility_deadline, grace_deadline) if deadline is not None]
+            next_evaluation_at = min(deadlines) if deadlines else None
+            self._replace_scheduled_evaluation(next_evaluation_at)
         else:
             if safety_assessment.phase is HeatDemandSafetyPhase.DETERMINATE:
                 action = {
@@ -271,19 +406,66 @@ class ControlRuntime:
                 }[building_heat_demand.status]
                 executed_status = HeatDemandEvaluationStatus.DEMAND_COMMAND_EXECUTED
                 suppressed_status = HeatDemandEvaluationStatus.DEMAND_COMMAND_SUPPRESSED
+                deferred_status = HeatDemandEvaluationStatus.DEMAND_COMMAND_DEFERRED
+                safety_command = False
             else:
                 action = safety_assessment.action
                 if action is None:
                     raise RuntimeError("Timed-out safety assessment must contain an action")
                 executed_status = HeatDemandEvaluationStatus.SAFETY_COMMAND_EXECUTED
                 suppressed_status = HeatDemandEvaluationStatus.SAFETY_COMMAND_SUPPRESSED
+                deferred_status = HeatDemandEvaluationStatus.SAFETY_COMMAND_DEFERRED
+                safety_command = True
 
             command = HeatSourceCommand(
                 command_type=CommandFamily.HEATING,
                 action=action,
             )
-            executed = self.heat_source_command_dispatcher.dispatch(command)
-            status = executed_status if executed else suppressed_status
+            source_assessment = self.source_control_policy.evaluate(
+                desired_command=action,
+                now=building_heat_demand.evaluated_at,
+                current_state=self.source_control_state,
+                safety_command=safety_command,
+                lockout_expiry_reevaluation=(
+                    trigger is HeatDemandEvaluationTrigger.SCHEDULED
+                    and self.source_control_state is not None
+                    and self.source_control_state.next_reevaluation_deadline == scheduled_for
+                ),
+            )
+            self.source_control_state = source_assessment.state
+            self.source_control_assessment = source_assessment
+            source_deadline = self.source_control_state.next_reevaluation_deadline
+            deadlines = [
+                deadline
+                for deadline in (
+                    eligibility_deadline,
+                    grace_deadline,
+                    source_deadline,
+                )
+                if deadline is not None
+            ]
+            next_evaluation_at = min(deadlines) if deadlines else None
+            self._replace_scheduled_evaluation(next_evaluation_at)
+            if source_assessment.outcome is SourceControlOutcome.DEFER:
+                status = deferred_status
+            elif source_assessment.outcome is SourceControlOutcome.SUPPRESS_DUPLICATE:
+                status = suppressed_status
+            else:
+                executed = self.heat_source_command_dispatcher.dispatch(command)
+                if executed:
+                    self.source_control_state = self.source_control_policy.record_dispatched(
+                        source_assessment,
+                        dispatched_at=building_heat_demand.evaluated_at,
+                        safety_command=safety_command,
+                    )
+                    source_assessment = replace(
+                        source_assessment,
+                        state=self.source_control_state,
+                    )
+                    self.source_control_assessment = source_assessment
+                    status = executed_status
+                else:
+                    status = suppressed_status
 
         return HeatDemandEvaluationResult(
             trigger=trigger,
@@ -293,6 +475,8 @@ class ControlRuntime:
             command=command,
             scheduled_for=scheduled_for,
             next_evaluation_at=next_evaluation_at,
+            hysteresis_assessment=self.temperature_hysteresis_assessment,
+            source_control_assessment=source_assessment,
         )
 
     def _replace_scheduled_evaluation(

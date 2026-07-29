@@ -108,6 +108,8 @@ def test_runtime_processing_status_has_stable_string_values():
         "COMMAND_SUPPRESSED": "command_suppressed",
         "SAFETY_COMMAND_EXECUTED": "safety_command_executed",
         "SAFETY_COMMAND_SUPPRESSED": "safety_command_suppressed",
+        "COMMAND_DEFERRED": "command_deferred",
+        "SAFETY_COMMAND_DEFERRED": "safety_command_deferred",
     }
 
 

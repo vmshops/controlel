@@ -17,6 +17,8 @@ class RuntimeProcessingStatus(StrEnum):
     COMMAND_SUPPRESSED = "command_suppressed"
     SAFETY_COMMAND_EXECUTED = "safety_command_executed"
     SAFETY_COMMAND_SUPPRESSED = "safety_command_suppressed"
+    COMMAND_DEFERRED = "command_deferred"
+    SAFETY_COMMAND_DEFERRED = "safety_command_deferred"
 
 
 class TemperatureNoDecisionReason(StrEnum):
@@ -66,6 +68,8 @@ class RuntimeProcessingResult:
             RuntimeProcessingStatus.COMMAND_SUPPRESSED: HeatDemandEvaluationStatus.DEMAND_COMMAND_SUPPRESSED,
             RuntimeProcessingStatus.SAFETY_COMMAND_EXECUTED: HeatDemandEvaluationStatus.SAFETY_COMMAND_EXECUTED,
             RuntimeProcessingStatus.SAFETY_COMMAND_SUPPRESSED: HeatDemandEvaluationStatus.SAFETY_COMMAND_SUPPRESSED,
+            RuntimeProcessingStatus.COMMAND_DEFERRED: HeatDemandEvaluationStatus.DEMAND_COMMAND_DEFERRED,
+            RuntimeProcessingStatus.SAFETY_COMMAND_DEFERRED: HeatDemandEvaluationStatus.SAFETY_COMMAND_DEFERRED,
         }.get(self.status)
         if expected_evaluation_status is None:
             raise ValueError(f"Unhandled RuntimeProcessingStatus: {self.status!r}")
