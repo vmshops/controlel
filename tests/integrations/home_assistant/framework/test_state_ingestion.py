@@ -108,9 +108,11 @@ def make_host(hass, runtime: RecordingRuntime) -> HomeAssistantControlelHost:
             sensor_id=SensorId("living_room_temperature"),
             temperature_entity_id=ENTITY_ID,
             target_temperature=Temperature(21),
+            heating_turn_on_differential=0.0,
+            heating_turn_off_differential=0.0,
             indeterminate_timeout_action=SimpleNamespace(value="disable_heating"),
         ),
-        core_version="0.1.0",
+        core_version="0.2.0",
         logger=logging.getLogger(__name__),
     )
     sink.bind_fatal_handler(host.request_fatal_shutdown)

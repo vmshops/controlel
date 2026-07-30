@@ -22,9 +22,13 @@ from .const import (
     CONF_ENABLE_SERVICE_NAME,
     CONF_ENABLE_TARGET_ENTITY_ID,
     CONF_HEAT_SOURCE_CONTROL_MODE,
+    CONF_HEATING_TURN_OFF_DIFFERENTIAL,
+    CONF_HEATING_TURN_ON_DIFFERENTIAL,
     CONF_INDETERMINATE_GRACE_PERIOD,
     CONF_INDETERMINATE_TIMEOUT_ACTION,
     CONF_MAX_FUTURE_SKEW,
+    CONF_MINIMUM_HEATING_OFF_TIME,
+    CONF_MINIMUM_HEATING_ON_TIME,
     CONF_PRIMARY_MEASUREMENT_MAX_AGE,
     CONF_SENSOR_ID,
     CONF_SENSOR_NAME,
@@ -35,6 +39,10 @@ from .const import (
     CONTROL_MODE_CUSTOM,
     CONTROL_MODE_SIMPLE,
     DOMAIN,
+    LEGACY_HEATING_TURN_OFF_DIFFERENTIAL,
+    LEGACY_HEATING_TURN_ON_DIFFERENTIAL,
+    LEGACY_MINIMUM_HEATING_OFF_TIME,
+    LEGACY_MINIMUM_HEATING_ON_TIME,
 )
 
 _IDENTIFIER_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -77,6 +85,28 @@ class HomeAssistantHeatSourceBinding:
 
 
 @dataclass(frozen=True)
+class ZoneControlConfiguration:
+    sensor_id: SensorId
+    sensor_name: str
+    temperature_entity_id: str
+    zone_id: ZoneId
+    zone_name: str
+    target_temperature: Temperature
+    heating_turn_on_differential: float
+    heating_turn_off_differential: float
+    primary_measurement_max_age: timedelta
+
+
+@dataclass(frozen=True)
+class HeatSourceConfiguration:
+    binding: HomeAssistantHeatSourceBinding
+    control_mode: str
+    controlled_entity_id: str | None
+    minimum_heating_on_time: timedelta
+    minimum_heating_off_time: timedelta
+
+
+@dataclass(frozen=True)
 class HomeAssistantIntegrationConfig:
     sensor_id: SensorId
     sensor_name: str
@@ -84,6 +114,10 @@ class HomeAssistantIntegrationConfig:
     zone_id: ZoneId
     zone_name: str
     target_temperature: Temperature
+    heating_turn_on_differential: float
+    heating_turn_off_differential: float
+    minimum_heating_on_time: timedelta
+    minimum_heating_off_time: timedelta
     primary_measurement_max_age: timedelta
     max_future_skew: timedelta
     indeterminate_grace_period: timedelta
@@ -102,6 +136,16 @@ class HomeAssistantIntegrationConfig:
             raise HomeAssistantConfigurationError("maximum future skew must not be negative")
         if self.indeterminate_grace_period < timedelta(0):
             raise HomeAssistantConfigurationError("indeterminate grace period must not be negative")
+        for value, label in (
+            (self.heating_turn_on_differential, "heating turn-on differential"),
+            (self.heating_turn_off_differential, "heating turn-off differential"),
+        ):
+            if not isfinite(value) or value < 0:
+                raise HomeAssistantConfigurationError(f"{label} must be a finite non-negative number")
+        if self.minimum_heating_on_time < timedelta(0):
+            raise HomeAssistantConfigurationError("minimum heating-on time must not be negative")
+        if self.minimum_heating_off_time < timedelta(0):
+            raise HomeAssistantConfigurationError("minimum heating-off time must not be negative")
         if self.heat_source_control_mode not in {
             CONTROL_MODE_SIMPLE,
             CONTROL_MODE_CUSTOM,
@@ -113,6 +157,30 @@ class HomeAssistantIntegrationConfig:
         return HomeAssistantSensorBinding(
             entity_id=self.temperature_entity_id,
             sensor_id=self.sensor_id,
+        )
+
+    @property
+    def zone_control(self) -> ZoneControlConfiguration:
+        return ZoneControlConfiguration(
+            sensor_id=self.sensor_id,
+            sensor_name=self.sensor_name,
+            temperature_entity_id=self.temperature_entity_id,
+            zone_id=self.zone_id,
+            zone_name=self.zone_name,
+            target_temperature=self.target_temperature,
+            heating_turn_on_differential=self.heating_turn_on_differential,
+            heating_turn_off_differential=self.heating_turn_off_differential,
+            primary_measurement_max_age=self.primary_measurement_max_age,
+        )
+
+    @property
+    def heat_source_configuration(self) -> HeatSourceConfiguration:
+        return HeatSourceConfiguration(
+            binding=self.heat_source,
+            control_mode=self.heat_source_control_mode,
+            controlled_entity_id=self.controlled_entity_id,
+            minimum_heating_on_time=self.minimum_heating_on_time,
+            minimum_heating_off_time=self.minimum_heating_off_time,
         )
 
 
@@ -128,6 +196,30 @@ def integration_config_from_entry_data(
         zone_id = ZoneId(zone_id_value)
         timeout_action = HeatingAction(_required_string(data, CONF_INDETERMINATE_TIMEOUT_ACTION))
         target_temperature = Temperature(_finite_number(data, CONF_TARGET_TEMPERATURE))
+        turn_on_differential = _finite_optional_number(
+            data,
+            CONF_HEATING_TURN_ON_DIFFERENTIAL,
+            LEGACY_HEATING_TURN_ON_DIFFERENTIAL,
+        )
+        turn_off_differential = _finite_optional_number(
+            data,
+            CONF_HEATING_TURN_OFF_DIFFERENTIAL,
+            LEGACY_HEATING_TURN_OFF_DIFFERENTIAL,
+        )
+        minimum_on_time = timedelta(
+            seconds=_finite_optional_duration(
+                data,
+                CONF_MINIMUM_HEATING_ON_TIME,
+                LEGACY_MINIMUM_HEATING_ON_TIME,
+            )
+        )
+        minimum_off_time = timedelta(
+            seconds=_finite_optional_duration(
+                data,
+                CONF_MINIMUM_HEATING_OFF_TIME,
+                LEGACY_MINIMUM_HEATING_OFF_TIME,
+            )
+        )
         primary_max_age = timedelta(seconds=_finite_duration(data, CONF_PRIMARY_MEASUREMENT_MAX_AGE, positive=True))
         max_future_skew = timedelta(seconds=_finite_duration(data, CONF_MAX_FUTURE_SKEW))
         grace_period = timedelta(seconds=_finite_duration(data, CONF_INDETERMINATE_GRACE_PERIOD))
@@ -162,6 +254,10 @@ def integration_config_from_entry_data(
             zone_id=zone_id,
             zone_name=_required_string(data, CONF_ZONE_NAME),
             target_temperature=target_temperature,
+            heating_turn_on_differential=turn_on_differential,
+            heating_turn_off_differential=turn_off_differential,
+            minimum_heating_on_time=minimum_on_time,
+            minimum_heating_off_time=minimum_off_time,
             primary_measurement_max_age=primary_max_age,
             max_future_skew=max_future_skew,
             indeterminate_grace_period=grace_period,
@@ -282,6 +378,25 @@ def _finite_number(data: Mapping[str, Any], key: str) -> float:
     if not isfinite(result):
         raise HomeAssistantConfigurationError(f"{key} must be a finite number")
     return result
+
+
+def _finite_optional_number(
+    data: Mapping[str, Any],
+    key: str,
+    default: float,
+) -> float:
+    return _finite_number({key: data.get(key, default)}, key)
+
+
+def _finite_optional_duration(
+    data: Mapping[str, Any],
+    key: str,
+    default: float,
+) -> float:
+    value = _finite_optional_number(data, key, default)
+    if value < 0:
+        raise HomeAssistantConfigurationError(f"{key} must be non-negative")
+    return value
 
 
 def _finite_duration(

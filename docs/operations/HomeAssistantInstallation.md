@@ -1,10 +1,27 @@
 # Home Assistant installation
 
-Controlel `0.3.1` is the current development candidate for one heating zone,
-one primary temperature sensor, and one shared heat source. It requires the
-public core package `controlel==0.1.0`.
+## Hysteresis and anti-cycling settings
 
-Candidate `0.3.1` is not published; use the latest published release for HACS
+New entries use a 0.3 Â°C turn-on differential, 0.1 Â°C turn-off differential,
+10-minute minimum on time, and 5-minute minimum off time. Existing entries keep
+legacy exact-threshold/immediate-switching behavior through zero values until
+changed in **Configure**. Minimum times start when a command is successfully
+dispatched; they do not confirm the physical heat source changed state.
+
+Inside the hysteresis deadband Controlel preserves its last accepted logical
+demand. A blocked transition is shown as deferred and reevaluated at its
+deadline. Safety timeout disable bypasses minimum-on protection, while safety
+timeout enable does not bypass minimum-off protection.
+
+Protection history is not persisted. After restart or reload, Controlel reads
+the current sensor value deterministically but does not infer prior command
+history or lockout state from the switch.
+
+Controlel `0.4.0` is the current development candidate for one heating zone,
+one primary temperature sensor, and one shared heat source. It requires the
+public core package `controlel==0.2.0`.
+
+Candidate `0.4.0` is not published; use the latest published release for HACS
 custom-repository installation. Controlel is not listed in the default HACS
 store.
 
@@ -34,7 +51,7 @@ custom integration.
 
 HACS downloads the release asset into
 `config/custom_components/controlel/`. During integration setup, Home
-Assistant reads the manifest and installs `controlel==0.1.0` from PyPI.
+Assistant reads the manifest and installs `controlel==0.2.0` from PyPI.
 Manual core installation is neither required nor supported for normal use.
 
 ## Manual installation fallback
@@ -151,7 +168,7 @@ structure must provide an explicit migration.
 3. Restart Home Assistant.
 
 HACS removes the integration directory but does not uninstall Python packages
-or related Home Assistant data automatically. The `controlel==0.1.0` package
+or related Home Assistant data automatically. The `controlel==0.2.0` package
 may remain in Home Assistant's managed Python environment and must not be
 manually removed.
 

@@ -53,21 +53,23 @@ async def async_setup_entry(
 ) -> bool:
     """Set up one Controlel runtime from a config entry."""
     config = integration_config_from_entry(entry.data, entry.options)
+    zone_control = config.zone_control
+    heat_source_configuration = config.heat_source_configuration
 
     sensor_repository = SensorRepository()
     zone_repository = ZoneRepository()
     sensor = Sensor(
-        sensor_id=config.sensor_id,
-        zone_id=config.zone_id,
-        name=config.sensor_name,
+        sensor_id=zone_control.sensor_id,
+        zone_id=zone_control.zone_id,
+        name=zone_control.sensor_name,
         capabilities=[TemperatureCapability()],
     )
     zone = Zone(
-        zone_id=config.zone_id,
-        primary_sensor_id=config.sensor_id,
-        primary_measurement_max_age=config.primary_measurement_max_age,
-        name=config.zone_name,
-        target_temperature=config.target_temperature,
+        zone_id=zone_control.zone_id,
+        primary_sensor_id=zone_control.sensor_id,
+        primary_measurement_max_age=zone_control.primary_measurement_max_age,
+        name=zone_control.zone_name,
+        target_temperature=zone_control.target_temperature,
     )
     if sensor.zone_id != zone.zone_id or zone.primary_sensor_id != sensor.sensor_id:
         raise ValueError("Controlel sensor and primary-zone configuration do not match")
@@ -98,7 +100,7 @@ async def async_setup_entry(
         heat_source_port = HomeAssistantHeatSourcePort(
             hass=hass,
             bridge=bridge,
-            binding=config.heat_source,
+            binding=heat_source_configuration.binding,
             on_success=failure_sink.clear_service_failure_issue,
         )
         runtime = ControlRuntime(
@@ -111,6 +113,10 @@ async def async_setup_entry(
             max_future_skew=config.max_future_skew,
             indeterminate_grace_period=config.indeterminate_grace_period,
             indeterminate_timeout_action=config.indeterminate_timeout_action,
+            heating_turn_on_differential=zone_control.heating_turn_on_differential,
+            heating_turn_off_differential=zone_control.heating_turn_off_differential,
+            minimum_heating_on_time=heat_source_configuration.minimum_heating_on_time,
+            minimum_heating_off_time=heat_source_configuration.minimum_heating_off_time,
         )
         host = HomeAssistantControlelHost(
             hass=hass,

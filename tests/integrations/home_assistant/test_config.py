@@ -24,9 +24,13 @@ from custom_components.controlel.const import (
     CONF_ENABLE_SERVICE_NAME,
     CONF_ENABLE_TARGET_ENTITY_ID,
     CONF_HEAT_SOURCE_CONTROL_MODE,
+    CONF_HEATING_TURN_OFF_DIFFERENTIAL,
+    CONF_HEATING_TURN_ON_DIFFERENTIAL,
     CONF_INDETERMINATE_GRACE_PERIOD,
     CONF_INDETERMINATE_TIMEOUT_ACTION,
     CONF_MAX_FUTURE_SKEW,
+    CONF_MINIMUM_HEATING_OFF_TIME,
+    CONF_MINIMUM_HEATING_ON_TIME,
     CONF_PRIMARY_MEASUREMENT_MAX_AGE,
     CONF_SENSOR_ID,
     CONF_SENSOR_NAME,
@@ -65,8 +69,14 @@ def entry_data() -> dict[str, object]:
     }
 
 
-def test_reconstructs_one_zone_typed_effective_configuration():
-    config = integration_config_from_entry_data(entry_data())
+def test_legacy_031_entry_missing_protection_settings_retains_zero_behavior():
+    data = entry_data()
+    assert CONF_HEATING_TURN_ON_DIFFERENTIAL not in data
+    assert CONF_HEATING_TURN_OFF_DIFFERENTIAL not in data
+    assert CONF_MINIMUM_HEATING_ON_TIME not in data
+    assert CONF_MINIMUM_HEATING_OFF_TIME not in data
+
+    config = integration_config_from_entry_data(data)
 
     assert config.sensor_id == SensorId("living_room_temperature")
     assert config.zone_id == ZoneId("living_room")
@@ -76,9 +86,32 @@ def test_reconstructs_one_zone_typed_effective_configuration():
     assert config.max_future_skew == timedelta(seconds=5)
     assert config.indeterminate_grace_period == timedelta(minutes=1)
     assert config.indeterminate_timeout_action is HeatingAction.DISABLE_HEATING
+    assert config.heating_turn_on_differential == 0.0
+    assert config.heating_turn_off_differential == 0.0
+    assert config.minimum_heating_on_time == timedelta(0)
+    assert config.minimum_heating_off_time == timedelta(0)
     assert config.heat_source.enable_heating.domain == "switch"
     assert config.heat_source_control_mode == CONTROL_MODE_SIMPLE
     assert config.controlled_entity_id == "switch.boiler"
+
+
+def test_reconstructs_explicit_hysteresis_and_anti_cycling_configuration():
+    data = entry_data()
+    data.update(
+        {
+            CONF_HEATING_TURN_ON_DIFFERENTIAL: 0.3,
+            CONF_HEATING_TURN_OFF_DIFFERENTIAL: 0.1,
+            CONF_MINIMUM_HEATING_ON_TIME: 600,
+            CONF_MINIMUM_HEATING_OFF_TIME: 300,
+        }
+    )
+
+    config = integration_config_from_entry_data(data)
+
+    assert config.heating_turn_on_differential == 0.3
+    assert config.heating_turn_off_differential == 0.1
+    assert config.minimum_heating_on_time == timedelta(minutes=10)
+    assert config.minimum_heating_off_time == timedelta(minutes=5)
 
 
 @pytest.mark.parametrize(
@@ -90,6 +123,10 @@ def test_reconstructs_one_zone_typed_effective_configuration():
         (CONF_INDETERMINATE_GRACE_PERIOD, -1),
         (CONF_TARGET_TEMPERATURE, nan),
         (CONF_MAX_FUTURE_SKEW, inf),
+        (CONF_HEATING_TURN_ON_DIFFERENTIAL, -0.1),
+        (CONF_HEATING_TURN_OFF_DIFFERENTIAL, nan),
+        (CONF_MINIMUM_HEATING_ON_TIME, -1),
+        (CONF_MINIMUM_HEATING_OFF_TIME, inf),
     ],
 )
 def test_rejects_invalid_durations_and_non_finite_values(field: str, value: object):
@@ -227,6 +264,28 @@ def test_empty_options_preserve_legacy_entry_exactly():
 
     assert merged_entry_configuration(legacy, {}) == legacy
     assert integration_config_from_entry(legacy, {}) == integration_config_from_entry_data(legacy)
+
+
+def test_normalized_zone_and_heat_source_groups_preserve_flat_entry_contract():
+    data = entry_data()
+    data[CONF_HEATING_TURN_ON_DIFFERENTIAL] = 0.3
+    data[CONF_HEATING_TURN_OFF_DIFFERENTIAL] = 0.1
+    data[CONF_MINIMUM_HEATING_ON_TIME] = 600.0
+    data[CONF_MINIMUM_HEATING_OFF_TIME] = 300.0
+
+    config = integration_config_from_entry_data(data)
+    zone = config.zone_control
+    source = config.heat_source_configuration
+
+    assert zone.zone_id is config.zone_id
+    assert zone.sensor_id is config.sensor_id
+    assert zone.target_temperature is config.target_temperature
+    assert zone.heating_turn_on_differential == 0.3
+    assert zone.heating_turn_off_differential == 0.1
+    assert source.binding is config.heat_source
+    assert source.minimum_heating_on_time == timedelta(minutes=10)
+    assert source.minimum_heating_off_time == timedelta(minutes=5)
+    assert merged_entry_configuration(data, {}) == data
 
 
 def test_simple_mode_derives_standard_switch_bindings():

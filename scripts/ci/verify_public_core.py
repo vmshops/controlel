@@ -11,7 +11,7 @@ from pathlib import Path
 import controlel
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-CORE_VERSION = "0.1.0"
+CORE_VERSION = "0.2.0"
 CORE_REQUIREMENT = f"controlel=={CORE_VERSION}"
 
 

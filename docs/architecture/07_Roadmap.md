@@ -1,5 +1,12 @@
 # Roadmap
 
+Milestone 26 uses published immutable core `0.2.0` and prepares integration
+`0.4.0` with
+asymmetric hysteresis, command-dispatch-based minimum on/off protection,
+deferred deadline reevaluation, and operational diagnostics. Persistence of
+hysteresis/source-control history is explicitly deferred; restart begins with
+unknown dispatch history and no fabricated lockout.
+
 ## Milestone 23: Home Assistant one-zone host vertical slice
 
 The first host integration proves:
@@ -83,5 +90,5 @@ unchanged at `0.1.0`.
 
 Milestone 26 and later retain multiple zones or sensors, persistence,
 climate/number/select entities, physical output feedback, automatic retry,
-heating curves, modulation, DHW, learning, and dashboard work. Version `0.3.0`
-and its `0.3.1` patch remain unpublished until a separate release milestone.
+heating curves, modulation, DHW, learning, and dashboard work. Versions `0.3.0`
+and `0.3.1` are the published integration line preceding Milestone 26.

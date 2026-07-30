@@ -1,5 +1,16 @@
 # Release guide
 
+## Milestone 26 sequencing
+
+Phase A prepared core `0.2.0` and integration `0.4.0` while retaining the
+published `controlel==0.1.0` manifest dependency. Phase B separately published
+and independently verified immutable core `0.2.0`.
+
+Phase C is the current integration-candidate boundary: integration `0.4.0`
+pins exactly `controlel==0.2.0`, and framework validation covers both local
+source and the public package. Integration tagging, release creation, and
+upload remain separate explicitly approved actions.
+
 ## Release states
 
 Controlel uses distinct release states:
@@ -11,18 +22,18 @@ Controlel uses distinct release states:
    backend under `dist/`.
 3. **Verified wheel** has passed metadata, archive-content, and clean
    out-of-checkout installation checks.
-4. **Published core package** is the verified `controlel==0.1.0` release on
+4. **Published core package** is the verified `controlel==0.2.0` release on
    PyPI.
 5. **Home Assistant exact dependency pin** is the integration contract
-   `"requirements": ["controlel==0.1.0"]`.
+   `"requirements": ["controlel==0.2.0"]`.
 6. **HACS readiness** additionally requires integration release packaging and
    HACS metadata. A verified or published core wheel alone does not provide
    HACS readiness.
 
 ## Distribution identity and version
 
-The distribution name and Python import package are both `controlel`. Version
-`0.1.0` is publicly available on PyPI.
+The distribution name and Python import package are both `controlel`. Versions
+`0.1.0` and `0.2.0` are publicly available on PyPI and immutable.
 
 The first core release is `0.1.0`. The single authoritative release
 version is the static `project.version` in `pyproject.toml`. Runtime access uses
@@ -31,15 +42,15 @@ version is the static `project.version` in `pyproject.toml`. Runtime access uses
 `0.0.0+uninstalled`; it never pretends to be a release.
 
 The custom-component manifest version is a separate integration version. The
-current candidate is `0.3.1`; it is not a second source for the core package
-version and evolves independently. Candidate `0.3.1` is not published.
+current candidate is `0.4.0`; it is not a second source for the core package
+version and evolves independently. Candidate `0.4.0` is not published.
 
 ## Permanent tag namespaces
 
 The tag namespaces are disjoint and permanent:
 
-- `core-vX.Y.Z` is reserved for core/PyPI releases. The intended candidate
-  core `0.2.0` tag is `core-v0.2.0`.
+- `core-vX.Y.Z` is reserved for core/PyPI releases; `core-v0.2.0` is the
+  namespace-correct tag name for core `0.2.0`.
 - `vX.Y.Z` is reserved for Home Assistant integration releases. The existing
   integration tag `v0.2.0` must remain unchanged and must never be reused for
   the core package.
@@ -164,7 +175,8 @@ installed test intentionally verifies a small representative package surface.
 
 ## Future core release checklist
 
-Core `0.1.0` is immutable. Before any future core publication:
+Published core versions `0.1.0` and `0.2.0` are immutable. Before any future
+core publication:
 
 - obtain explicit approval for the future core release;
 - confirm the `controlel` package-index project is controlled by the project
@@ -187,12 +199,11 @@ Core `0.1.0` is immutable. Before any future core publication:
 
 The repository still contains no publication credentials, upload workflow, or
 automatic GitHub release. Packaging CI validates current source builds; it
-must not upload rebuilt `0.1.0` artifacts or expect their hashes to reproduce
-the immutable public files.
+must not upload rebuilt artifacts for an already published version.
 
 ## Home Assistant dependency contract
 
-Integration `0.3.1` pins exactly `controlel==0.1.0`. CI keeps local editable
+Integration `0.4.0` pins exactly `controlel==0.2.0`. CI keeps local editable
 compatibility and public-package framework jobs isolated. The public job never
 installs the repository as a distribution and proves the core resolves from
 `site-packages`. Normal supported integration installation can obtain the core
@@ -202,15 +213,15 @@ automatically.
 
 Integration releases use a separate version stream:
 
-- manifest and `INTEGRATION_VERSION`: `0.3.1`;
-- future integration tag: `v0.3.1`;
+- manifest and `INTEGRATION_VERSION`: `0.4.0`;
+- future integration tag: `v0.4.0`;
 - GitHub Release name:
-  `Controlel Home Assistant Integration v0.3.1`;
+  `Controlel Home Assistant Integration v0.4.0`;
 - HACS asset: `controlel.zip`;
 - checksum asset: `controlel.zip.sha256`;
-- exact core dependency: `controlel==0.1.0`.
+- exact core dependency: `controlel==0.2.0`.
 
-No `v0.3.1` tag or GitHub Release exists. Integration tags always use
+No `v0.4.0` tag or GitHub Release exists. Integration tags always use
 `vX.Y.Z`; core/PyPI provenance tags always use `core-vX.Y.Z`. Core GitHub
 Releases must not be created in this monorepo because HACS consumes the
 repository-wide release stream.
@@ -229,15 +240,16 @@ Every remote step requires explicit approval:
 3. Build the archive twice and require byte-identical output.
 4. Run the independent validator and manually inspect the member list.
 5. Record the ZIP SHA-256.
-6. Create annotated tag `v0.3.1` at the reviewed commit.
+6. Create annotated tag `v0.4.0` at the reviewed commit.
 7. Create GitHub Release
-   `Controlel Home Assistant Integration v0.3.1`.
+   `Controlel Home Assistant Integration v0.4.0`.
 8. Attach `controlel.zip` and `controlel.zip.sha256`; download them again and
    verify their hashes.
 9. Install through HACS in a clean supported Home Assistant instance.
 10. Verify public core dependency installation, config flow, setup, unload,
     options updates, reload, restart, Repairs cleanup, rollback selection, and
-    removal. Confirm an existing `0.1.1` entry loads without migration.
+    removal. Confirm existing `0.1.1` and `0.3.1` entries load without
+    migration and retain legacy zero-value hysteresis/anti-cycling defaults.
 11. Record commit, tag, filenames, hashes, Home Assistant/HACS versions, and
     results.
 

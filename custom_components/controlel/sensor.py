@@ -22,6 +22,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from . import ControlelEntryRuntime
 from .entity import ControlelSnapshotEntity
 from .operational import (
+    ActiveLockoutType,
     CommandOutcome,
     DecisionCode,
     DecisionReason,
@@ -30,6 +31,7 @@ from .operational import (
     OperationalSnapshot,
     RuntimeStatus,
     SafetyState,
+    SourceControlState,
 )
 
 type SensorValue = str | int | float | datetime | None
@@ -65,6 +67,24 @@ SENSORS: tuple[ControlelSensorDescription, ...] = (
         value_fn=lambda snapshot: snapshot.target_temperature,
     ),
     ControlelSensorDescription(
+        key="heating_enable_threshold",
+        translation_key="heating_enable_threshold",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        suggested_display_precision=1,
+        always_available=True,
+        value_fn=lambda snapshot: snapshot.heating_enable_threshold,
+    ),
+    ControlelSensorDescription(
+        key="heating_disable_threshold",
+        translation_key="heating_disable_threshold",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        suggested_display_precision=1,
+        always_available=True,
+        value_fn=lambda snapshot: snapshot.heating_disable_threshold,
+    ),
+    ControlelSensorDescription(
         key="measurement_age",
         translation_key="measurement_age",
         entity_category=EntityCategory.DIAGNOSTIC,
@@ -88,6 +108,66 @@ SENSORS: tuple[ControlelSensorDescription, ...] = (
         device_class=SensorDeviceClass.ENUM,
         options=[item.value for item in HeatDemandState],
         value_fn=lambda snapshot: _enum_value(snapshot.zone_heat_demand),
+    ),
+    ControlelSensorDescription(
+        key="hysteresis_demand",
+        translation_key="hysteresis_demand",
+        device_class=SensorDeviceClass.ENUM,
+        options=[item.value for item in HeatDemandState],
+        value_fn=lambda snapshot: _enum_value(snapshot.hysteresis_demand),
+    ),
+    ControlelSensorDescription(
+        key="source_control_state",
+        translation_key="source_control_state",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        device_class=SensorDeviceClass.ENUM,
+        options=[item.value for item in SourceControlState],
+        always_available=True,
+        value_fn=lambda snapshot: _enum_value(snapshot.source_control_state),
+    ),
+    ControlelSensorDescription(
+        key="active_lockout_type",
+        translation_key="active_lockout_type",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        device_class=SensorDeviceClass.ENUM,
+        options=[item.value for item in ActiveLockoutType],
+        value_fn=lambda snapshot: _enum_value(snapshot.active_lockout_type),
+        available_fn=lambda snapshot: snapshot.active_lockout_type is not None,
+    ),
+    ControlelSensorDescription(
+        key="lockout_remaining",
+        translation_key="lockout_remaining",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        device_class=SensorDeviceClass.DURATION,
+        native_unit_of_measurement=UnitOfTime.SECONDS,
+        suggested_display_precision=0,
+        value_fn=lambda snapshot: snapshot.lockout_remaining_seconds,
+        available_fn=lambda snapshot: snapshot.lockout_remaining_seconds is not None,
+    ),
+    ControlelSensorDescription(
+        key="deferred_command",
+        translation_key="deferred_command",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        device_class=SensorDeviceClass.ENUM,
+        options=["enable_heating", "disable_heating"],
+        value_fn=lambda snapshot: snapshot.deferred_command,
+        available_fn=lambda snapshot: snapshot.deferred_command is not None,
+    ),
+    ControlelSensorDescription(
+        key="minimum_on_deadline",
+        translation_key="minimum_on_deadline",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        device_class=SensorDeviceClass.TIMESTAMP,
+        value_fn=lambda snapshot: snapshot.minimum_on_deadline,
+        available_fn=lambda snapshot: snapshot.minimum_on_deadline is not None,
+    ),
+    ControlelSensorDescription(
+        key="minimum_off_deadline",
+        translation_key="minimum_off_deadline",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        device_class=SensorDeviceClass.TIMESTAMP,
+        value_fn=lambda snapshot: snapshot.minimum_off_deadline,
+        available_fn=lambda snapshot: snapshot.minimum_off_deadline is not None,
     ),
     ControlelSensorDescription(
         key="safety_state",

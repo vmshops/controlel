@@ -1,11 +1,23 @@
 # Home Assistant integration troubleshooting
 
+## Heating does not switch immediately
+
+Check the heating enable/disable threshold, hysteresis demand,
+source-control state, active lockout, lockout remaining, and deferred command
+entities. A deferred command means the relevant minimum time has not elapsed.
+Controlel uses successfully dispatched commands as its timing reference and
+has no physical boiler feedback. It reevaluates current demand at expiry and
+does not automatically retry a failed command.
+
+Lockout history is intentionally unavailable after restart in this milestone.
+The current switch state is never used to fabricate it.
+
 ## HACS cannot find the repository
 
 Confirm that the exact custom-repository URL is
 `https://github.com/vmshops/controlel` and the selected category is
 **Integration**. The repository must be publicly accessible. Use the latest
-published release; `0.3.1` remains an unpublished candidate.
+published release; `0.4.0` remains an unpublished candidate.
 
 If HACS downloaded files but Home Assistant cannot find Controlel, confirm
 that `manifest.json` is at
@@ -60,13 +72,20 @@ create or update one stable ERROR Repairs issue. The host stops accepting new
 work and terminally shuts down behind already accepted runtime work. Reloading
 constructs a new runtime; the stopped instance is never reused.
 
+Before terminal cleanup, fatal shutdown makes at most one best-effort emergency
+heating-off request unless the original failure was already a failed heating-off
+operation. Diagnostics distinguish dispatched, failed, recursion-skipped, and
+no-command-path outcomes. This records only the request outcome; it does not
+claim the physical heat source is off.
+
 ## Reload and shutdown
 
 Unload first rejects new state and timer submissions, removes listeners, lets
 accepted serialized work finish, calls `ControlRuntime.stop()` on the
 dedicated worker, and closes the executor. A late timer callback is harmless
 because both the host acceptance gate and runtime generation checks reject it.
-Shutdown sends no heat-source command.
+Normal unload/shutdown sends no heat-source command; the fatal-only emergency
+behavior above is separate.
 
 When **Configure** saves new options, this same unload-before-rebuild lifecycle
 is used. If a renamed zone is not visible immediately, refresh the integration
@@ -80,15 +99,15 @@ second.
 
 ## Core dependency installation
 
-Integration `0.3.1` requires exactly `controlel==0.1.0`. Normal supported
+Integration `0.4.0` requires exactly `controlel==0.2.0`. Normal supported
 installation lets Home Assistant obtain that dependency automatically; users
 do not need to install it manually. If setup reports a missing core, confirm
 that the environment can reach PyPI and that `python -m pip show controlel`
-reports version `0.1.0`.
+reports version `0.2.0`.
 
 Local development may install the checkout with `python -m pip install
 --no-deps -e .`. Public-package framework validation must use a different
-environment, install `controlel==0.1.0` from PyPI, and resolve it from
+environment, install `controlel==0.2.0` from PyPI, and resolve it from
 `site-packages`.
 
 ## Framework test environment fails to start
@@ -104,7 +123,7 @@ The supported harness uses Python 3.14.2 or newer, Home Assistant `2026.7.3`,
 and `pytest-homeassistant-custom-component==0.13.347`. Install the hashed lock
 with `python -m pip install --require-hashes -r requirements/ha-test.txt`.
 Then either install the checkout editable for the local composition or install
-`controlel==0.1.0` from PyPI for the isolated public composition.
+`controlel==0.2.0` from PyPI for the isolated public composition.
 
 If native Windows reports `ModuleNotFoundError: No module named 'fcntl'` or
 `No module named 'resource'`, run the framework suite in Linux or WSL. These

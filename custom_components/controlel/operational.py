@@ -46,6 +46,21 @@ class SafetyState(StrEnum):
     FATAL_ERROR = "fatal_error"
 
 
+class SourceControlState(StrEnum):
+    IDLE = "idle"
+    HEATING_REQUESTED = "heating_requested"
+    HEATING_NOT_REQUESTED = "heating_not_requested"
+    DEFERRED_ENABLE = "deferred_enable"
+    DEFERRED_DISABLE = "deferred_disable"
+    STOPPED = "stopped"
+    FATAL_ERROR = "fatal_error"
+
+
+class ActiveLockoutType(StrEnum):
+    MINIMUM_ON = "minimum_on"
+    MINIMUM_OFF = "minimum_off"
+
+
 class DecisionCode(StrEnum):
     HEAT_REQUESTED = "heat_requested"
     HEAT_NOT_REQUIRED = "heat_not_required"
@@ -54,7 +69,12 @@ class DecisionCode(StrEnum):
     TIMEOUT_ENABLE_HEATING = "timeout_enable_heating"
     COMMAND_SUPPRESSED_DUPLICATE = "command_suppressed_duplicate"
     COMMAND_DISPATCHED = "command_dispatched"
+    COMMAND_DEFERRED = "command_deferred"
     COMMAND_FAILED = "command_failed"
+    FATAL_SHUTDOWN_DISABLE_DISPATCHED = "fatal_shutdown_disable_dispatched"
+    FATAL_SHUTDOWN_DISABLE_FAILED = "fatal_shutdown_disable_failed"
+    FATAL_SHUTDOWN_DISABLE_SKIPPED_ALREADY_FAILED = "fatal_shutdown_disable_skipped_already_failed"
+    FATAL_SHUTDOWN_NO_COMMAND_PATH_AVAILABLE = "fatal_shutdown_no_command_path_available"
     RUNTIME_STARTED = "runtime_started"
     RUNTIME_STOPPED = "runtime_stopped"
 
@@ -62,6 +82,17 @@ class DecisionCode(StrEnum):
 class DecisionReason(StrEnum):
     TEMPERATURE_BELOW_TARGET = "temperature_below_target"
     TEMPERATURE_AT_OR_ABOVE_TARGET = "temperature_at_or_above_target"
+    BELOW_ENABLE_THRESHOLD = "below_enable_threshold"
+    ABOVE_DISABLE_THRESHOLD = "above_disable_threshold"
+    INSIDE_HYSTERESIS_DEADBAND = "inside_hysteresis_deadband"
+    PRESERVED_PREVIOUS_DEMAND = "preserved_previous_demand"
+    LEGACY_EXACT_THRESHOLD = "legacy_exact_threshold"
+    STARTUP_FROM_RAW_DEMAND = "startup_from_raw_demand"
+    MINIMUM_ON_TIME_ACTIVE = "minimum_on_time_active"
+    MINIMUM_OFF_TIME_ACTIVE = "minimum_off_time_active"
+    DEFERRED_COMMAND_CANCELLED = "deferred_command_cancelled"
+    LOCKOUT_EXPIRED_REEVALUATION = "lockout_expired_reevaluation"
+    SAFETY_DISABLE_BYPASSED_LOCKOUT = "safety_disable_bypassed_lockout"
     MEASUREMENT_UNAVAILABLE = "measurement_unavailable"
     MEASUREMENT_UNKNOWN = "measurement_unknown"
     MEASUREMENT_STALE = "measurement_stale"
@@ -81,6 +112,16 @@ class CommandOutcome(StrEnum):
     SUPPRESSED_DUPLICATE = "suppressed_duplicate"
     FAILED_RECOVERABLE = "failed_recoverable"
     FAILED_FATAL = "failed_fatal"
+    DEFERRED = "deferred"
+
+
+class EmergencyDisableOutcome(StrEnum):
+    NONE = "none"
+    REQUESTED = "emergency_heating_off_requested"
+    DISPATCHED = "fatal_shutdown_disable_dispatched"
+    FAILED = "fatal_shutdown_disable_failed"
+    SKIPPED_ALREADY_FAILED = "fatal_shutdown_disable_skipped_already_failed"
+    NO_COMMAND_PATH_AVAILABLE = "fatal_shutdown_no_command_path_available"
 
 
 @dataclass(frozen=True)
@@ -94,6 +135,12 @@ class DecisionTraceRecord:
     requested_command: str | None
     command_outcome: CommandOutcome
     safety_state: SafetyState
+    raw_demand: HeatDemandState | None = None
+    hysteresis_demand: HeatDemandState | None = None
+    source_control_state: SourceControlState | None = None
+    deferred_reason: str | None = None
+    safety_bypassed_lockout: bool = False
+    emergency_disable_outcome: EmergencyDisableOutcome = EmergencyDisableOutcome.NONE
     sequence: int = 0
 
     def __post_init__(self) -> None:
@@ -112,14 +159,31 @@ class OperationalSnapshot:
     temperature_entity_id: str
     current_temperature: float | None
     target_temperature: float
+    heating_turn_on_differential: float
+    heating_turn_off_differential: float
+    heating_enable_threshold: float
+    heating_disable_threshold: float
     measurement_status: MeasurementStatus
+    latest_input_status: MeasurementStatus
     measurement_timestamp: datetime | None
     measurement_age_seconds: float | None
     zone_heat_demand: HeatDemandState
+    raw_zone_heat_demand: HeatDemandState
+    hysteresis_demand: HeatDemandState
     demand_reason: DecisionReason
+    active_demand_cause: DecisionReason
     safety_state: SafetyState
     grace_deadline: datetime | None
     grace_remaining_seconds: float | None
+    source_control_state: SourceControlState
+    minimum_on_deadline: datetime | None
+    minimum_off_deadline: datetime | None
+    active_lockout_type: ActiveLockoutType | None
+    lockout_remaining_seconds: float | None
+    deferred_command: str | None
+    deferred_reason: str | None
+    last_normal_command_dispatch: datetime | None
+    safety_bypassed_lockout: bool
     timeout_action: str
     last_decision: DecisionCode | None
     last_decision_reason: DecisionReason | None
@@ -131,6 +195,10 @@ class OperationalSnapshot:
     duplicate_commands_suppressed: int
     recoverable_failure_active: bool
     fatal_failure_active: bool
+    emergency_disable_attempted: bool
+    emergency_disable_outcome: EmergencyDisableOutcome
+    emergency_disable_timestamp: datetime | None
+    original_fatal_cause: str | None
     integration_version: str
     core_version: str
     last_meaningful_event_at: datetime | None
@@ -140,8 +208,12 @@ class OperationalSnapshot:
         for label, value in (
             ("measurement timestamp", self.measurement_timestamp),
             ("grace deadline", self.grace_deadline),
+            ("minimum-on deadline", self.minimum_on_deadline),
+            ("minimum-off deadline", self.minimum_off_deadline),
+            ("normal command dispatch", self.last_normal_command_dispatch),
             ("decision timestamp", self.last_decision_timestamp),
             ("command timestamp", self.last_command_timestamp),
+            ("emergency disable timestamp", self.emergency_disable_timestamp),
             ("meaningful event timestamp", self.last_meaningful_event_at),
         ):
             if value is not None:
@@ -270,6 +342,8 @@ def initial_snapshot(
     sensor_id: str,
     temperature_entity_id: str,
     target_temperature: float,
+    heating_turn_on_differential: float,
+    heating_turn_off_differential: float,
     timeout_action: str,
     integration_version: str,
     core_version: str,
@@ -286,14 +360,31 @@ def initial_snapshot(
         temperature_entity_id=temperature_entity_id,
         current_temperature=None,
         target_temperature=target_temperature,
+        heating_turn_on_differential=heating_turn_on_differential,
+        heating_turn_off_differential=heating_turn_off_differential,
+        heating_enable_threshold=target_temperature - heating_turn_on_differential,
+        heating_disable_threshold=target_temperature + heating_turn_off_differential,
         measurement_status=MeasurementStatus.NOT_RECEIVED,
+        latest_input_status=MeasurementStatus.NOT_RECEIVED,
         measurement_timestamp=None,
         measurement_age_seconds=None,
         zone_heat_demand=HeatDemandState.INDETERMINATE,
+        raw_zone_heat_demand=HeatDemandState.INDETERMINATE,
+        hysteresis_demand=HeatDemandState.INDETERMINATE,
         demand_reason=DecisionReason.WAITING_FOR_FIRST_MEASUREMENT,
+        active_demand_cause=DecisionReason.WAITING_FOR_FIRST_MEASUREMENT,
         safety_state=SafetyState.STOPPED,
         grace_deadline=None,
         grace_remaining_seconds=None,
+        source_control_state=SourceControlState.IDLE,
+        minimum_on_deadline=None,
+        minimum_off_deadline=None,
+        active_lockout_type=None,
+        lockout_remaining_seconds=None,
+        deferred_command=None,
+        deferred_reason=None,
+        last_normal_command_dispatch=None,
+        safety_bypassed_lockout=False,
         timeout_action=timeout_action,
         last_decision=None,
         last_decision_reason=None,
@@ -305,6 +396,10 @@ def initial_snapshot(
         duplicate_commands_suppressed=0,
         recoverable_failure_active=False,
         fatal_failure_active=False,
+        emergency_disable_attempted=False,
+        emergency_disable_outcome=EmergencyDisableOutcome.NONE,
+        emergency_disable_timestamp=None,
+        original_fatal_cause=None,
         integration_version=integration_version,
         core_version=core_version,
         last_meaningful_event_at=None,
@@ -335,10 +430,21 @@ def _with_elapsed(
         if snapshot.grace_deadline is not None and snapshot.safety_state is SafetyState.INDETERMINATE_GRACE
         else None
     )
+    lockout_deadline = {
+        ActiveLockoutType.MINIMUM_ON: snapshot.minimum_on_deadline,
+        ActiveLockoutType.MINIMUM_OFF: snapshot.minimum_off_deadline,
+        None: None,
+    }[snapshot.active_lockout_type]
+    lockout_remaining = (
+        max(0.0, (lockout_deadline - now).total_seconds())
+        if lockout_deadline is not None and lockout_deadline > now
+        else None
+    )
     return replace(
         snapshot,
         measurement_age_seconds=age,
         grace_remaining_seconds=remaining,
+        lockout_remaining_seconds=lockout_remaining,
     )
 
 

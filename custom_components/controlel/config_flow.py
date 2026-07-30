@@ -31,10 +31,16 @@ from .const import (
     CONF_ENABLE_SERVICE_NAME,
     CONF_ENABLE_TARGET_ENTITY_ID,
     CONF_HEAT_SOURCE_CONTROL_MODE,
+    CONF_HEATING_TURN_OFF_DIFFERENTIAL,
+    CONF_HEATING_TURN_ON_DIFFERENTIAL,
     CONF_INDETERMINATE_GRACE_PERIOD,
     CONF_INDETERMINATE_GRACE_PERIOD_MINUTES,
     CONF_INDETERMINATE_TIMEOUT_ACTION,
     CONF_MAX_FUTURE_SKEW,
+    CONF_MINIMUM_HEATING_OFF_TIME,
+    CONF_MINIMUM_HEATING_OFF_TIME_MINUTES,
+    CONF_MINIMUM_HEATING_ON_TIME,
+    CONF_MINIMUM_HEATING_ON_TIME_MINUTES,
     CONF_PRIMARY_MEASUREMENT_MAX_AGE,
     CONF_PRIMARY_MEASUREMENT_MAX_AGE_MINUTES,
     CONF_SENSOR_ID,
@@ -47,12 +53,20 @@ from .const import (
     CONFIG_ENTRY_VERSION,
     CONTROL_MODE_CUSTOM,
     CONTROL_MODE_SIMPLE,
+    DEFAULT_HEATING_TURN_OFF_DIFFERENTIAL,
+    DEFAULT_HEATING_TURN_ON_DIFFERENTIAL,
     DEFAULT_INDETERMINATE_GRACE_PERIOD,
     DEFAULT_INDETERMINATE_TIMEOUT_ACTION,
     DEFAULT_MAX_FUTURE_SKEW,
+    DEFAULT_MINIMUM_HEATING_OFF_TIME,
+    DEFAULT_MINIMUM_HEATING_ON_TIME,
     DEFAULT_PRIMARY_MEASUREMENT_MAX_AGE,
     DEFAULT_TARGET_TEMPERATURE,
     DOMAIN,
+    LEGACY_HEATING_TURN_OFF_DIFFERENTIAL,
+    LEGACY_HEATING_TURN_ON_DIFFERENTIAL,
+    LEGACY_MINIMUM_HEATING_OFF_TIME,
+    LEGACY_MINIMUM_HEATING_ON_TIME,
     STATE_UNAVAILABLE,
     STATE_UNKNOWN,
     UNIT_CELSIUS,
@@ -64,6 +78,10 @@ _MUTABLE_COMMON_KEYS = (
     CONF_TEMPERATURE_ENTITY_ID,
     CONF_ZONE_NAME,
     CONF_TARGET_TEMPERATURE,
+    CONF_HEATING_TURN_ON_DIFFERENTIAL,
+    CONF_HEATING_TURN_OFF_DIFFERENTIAL,
+    CONF_MINIMUM_HEATING_ON_TIME,
+    CONF_MINIMUM_HEATING_OFF_TIME,
     CONF_PRIMARY_MEASUREMENT_MAX_AGE,
     CONF_MAX_FUTURE_SKEW,
     CONF_INDETERMINATE_GRACE_PERIOD,
@@ -83,6 +101,22 @@ _SEMANTIC_LOG_FIELDS = (
     ("sensor_name", lambda config: config.sensor_name),
     ("temperature_entity_id", lambda config: config.temperature_entity_id),
     ("target_temperature", lambda config: config.target_temperature.value),
+    (
+        "heating_turn_on_differential",
+        lambda config: config.heating_turn_on_differential,
+    ),
+    (
+        "heating_turn_off_differential",
+        lambda config: config.heating_turn_off_differential,
+    ),
+    (
+        "minimum_heating_on_time_seconds",
+        lambda config: config.minimum_heating_on_time.total_seconds(),
+    ),
+    (
+        "minimum_heating_off_time_seconds",
+        lambda config: config.minimum_heating_off_time.total_seconds(),
+    ),
     (
         "primary_measurement_max_age_seconds",
         lambda config: config.primary_measurement_max_age.total_seconds(),
@@ -229,6 +263,7 @@ class ControlelOptionsFlow(OptionsFlow):
             self.config_entry.data,
             self.config_entry.options,
         )
+        _apply_legacy_protection_defaults(current)
         current[CONF_HEAT_SOURCE_CONTROL_MODE] = infer_control_mode(current)
         if current[CONF_HEAT_SOURCE_CONTROL_MODE] == CONTROL_MODE_SIMPLE:
             current.setdefault(
@@ -246,7 +281,7 @@ class ControlelOptionsFlow(OptionsFlow):
                 )
             )
             if not errors:
-                self._pending_basic = dict(user_input)
+                self._pending_basic = {**current, **user_input}
                 return await self.async_step_advanced()
 
         return self.async_show_form(
@@ -263,15 +298,20 @@ class ControlelOptionsFlow(OptionsFlow):
             self.config_entry.data,
             self.config_entry.options,
         )
+        _apply_legacy_protection_defaults(current)
         errors: dict[str, str] = {}
         if user_input is not None:
             configuration = _configuration_from_steps(
                 self._pending_basic,
-                user_input,
+                {**current, **user_input},
                 sensor_id=str(self.config_entry.data[CONF_SENSOR_ID]),
                 zone_id=str(self.config_entry.data[CONF_ZONE_ID]),
             )
-            _preserve_unchanged_seconds(configuration, user_input, current)
+            _preserve_unchanged_seconds(
+                configuration,
+                {**current, **user_input},
+                current,
+            )
             errors.update(_configuration_errors(configuration))
             if not errors:
                 _log_semantic_configuration_diff(
@@ -329,6 +369,32 @@ def _basic_schema(
             ),
         ): selector.NumberSelector(
             selector.NumberSelectorConfig(
+                mode=selector.NumberSelectorMode.BOX,
+                unit_of_measurement=UNIT_CELSIUS,
+            )
+        ),
+        vol.Required(
+            CONF_HEATING_TURN_ON_DIFFERENTIAL,
+            default=values.get(
+                CONF_HEATING_TURN_ON_DIFFERENTIAL,
+                DEFAULT_HEATING_TURN_ON_DIFFERENTIAL,
+            ),
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=0,
+                mode=selector.NumberSelectorMode.BOX,
+                unit_of_measurement=UNIT_CELSIUS,
+            )
+        ),
+        vol.Required(
+            CONF_HEATING_TURN_OFF_DIFFERENTIAL,
+            default=values.get(
+                CONF_HEATING_TURN_OFF_DIFFERENTIAL,
+                DEFAULT_HEATING_TURN_OFF_DIFFERENTIAL,
+            ),
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=0,
                 mode=selector.NumberSelectorMode.BOX,
                 unit_of_measurement=UNIT_CELSIUS,
             )
@@ -429,6 +495,26 @@ def _advanced_schema(
                     mode=selector.SelectSelectorMode.DROPDOWN,
                 )
             ),
+            vol.Required(
+                CONF_MINIMUM_HEATING_ON_TIME_MINUTES,
+                default=float(
+                    defaults.get(
+                        CONF_MINIMUM_HEATING_ON_TIME,
+                        DEFAULT_MINIMUM_HEATING_ON_TIME,
+                    )
+                )
+                / 60,
+            ): _minutes_selector(),
+            vol.Required(
+                CONF_MINIMUM_HEATING_OFF_TIME_MINUTES,
+                default=float(
+                    defaults.get(
+                        CONF_MINIMUM_HEATING_OFF_TIME,
+                        DEFAULT_MINIMUM_HEATING_OFF_TIME,
+                    )
+                )
+                / 60,
+            ): _minutes_selector(),
         }
     )
     if control_mode == CONTROL_MODE_CUSTOM:
@@ -529,6 +615,28 @@ def _configuration_from_steps(
         CONF_ZONE_ID: zone_id,
         CONF_ZONE_NAME: str(basic[CONF_ZONE_NAME]).strip(),
         CONF_TARGET_TEMPERATURE: basic[CONF_TARGET_TEMPERATURE],
+        CONF_HEATING_TURN_ON_DIFFERENTIAL: basic.get(
+            CONF_HEATING_TURN_ON_DIFFERENTIAL,
+            DEFAULT_HEATING_TURN_ON_DIFFERENTIAL,
+        ),
+        CONF_HEATING_TURN_OFF_DIFFERENTIAL: basic.get(
+            CONF_HEATING_TURN_OFF_DIFFERENTIAL,
+            DEFAULT_HEATING_TURN_OFF_DIFFERENTIAL,
+        ),
+        CONF_MINIMUM_HEATING_ON_TIME: float(
+            advanced.get(
+                CONF_MINIMUM_HEATING_ON_TIME_MINUTES,
+                DEFAULT_MINIMUM_HEATING_ON_TIME / 60,
+            )
+        )
+        * 60,
+        CONF_MINIMUM_HEATING_OFF_TIME: float(
+            advanced.get(
+                CONF_MINIMUM_HEATING_OFF_TIME_MINUTES,
+                DEFAULT_MINIMUM_HEATING_OFF_TIME / 60,
+            )
+        )
+        * 60,
         CONF_PRIMARY_MEASUREMENT_MAX_AGE: float(
             advanced.get(
                 CONF_PRIMARY_MEASUREMENT_MAX_AGE_MINUTES,
@@ -588,10 +696,39 @@ def _preserve_unchanged_seconds(
             CONF_INDETERMINATE_GRACE_PERIOD_MINUTES,
             CONF_INDETERMINATE_GRACE_PERIOD,
         ),
+        (
+            CONF_MINIMUM_HEATING_ON_TIME_MINUTES,
+            CONF_MINIMUM_HEATING_ON_TIME,
+        ),
+        (
+            CONF_MINIMUM_HEATING_OFF_TIME_MINUTES,
+            CONF_MINIMUM_HEATING_OFF_TIME,
+        ),
     ):
         current_seconds = current[seconds_key]
         if float(advanced_input[minutes_key]) == float(current_seconds) / 60:
             configuration[seconds_key] = current_seconds
+
+
+def _apply_legacy_protection_defaults(configuration: dict[str, Any]) -> None:
+    """Expose legacy entries without silently changing regulation behavior."""
+
+    configuration.setdefault(
+        CONF_HEATING_TURN_ON_DIFFERENTIAL,
+        LEGACY_HEATING_TURN_ON_DIFFERENTIAL,
+    )
+    configuration.setdefault(
+        CONF_HEATING_TURN_OFF_DIFFERENTIAL,
+        LEGACY_HEATING_TURN_OFF_DIFFERENTIAL,
+    )
+    configuration.setdefault(
+        CONF_MINIMUM_HEATING_ON_TIME,
+        LEGACY_MINIMUM_HEATING_ON_TIME,
+    )
+    configuration.setdefault(
+        CONF_MINIMUM_HEATING_OFF_TIME,
+        LEGACY_MINIMUM_HEATING_OFF_TIME,
+    )
 
 
 def _log_semantic_configuration_diff(before: Any, after: Any) -> None:
@@ -673,6 +810,10 @@ def _configuration_errors(
             CONF_MAX_FUTURE_SKEW,
             CONF_INDETERMINATE_GRACE_PERIOD,
             CONF_INDETERMINATE_TIMEOUT_ACTION,
+            CONF_HEATING_TURN_ON_DIFFERENTIAL,
+            CONF_HEATING_TURN_OFF_DIFFERENTIAL,
+            CONF_MINIMUM_HEATING_ON_TIME,
+            CONF_MINIMUM_HEATING_OFF_TIME,
             CONF_CONTROLLED_ENTITY_ID,
             *_ADVANCED_BINDING_KEYS,
         ):

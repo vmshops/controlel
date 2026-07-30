@@ -21,10 +21,16 @@ from custom_components.controlel.const import (
     CONF_ENABLE_SERVICE_NAME,
     CONF_ENABLE_TARGET_ENTITY_ID,
     CONF_HEAT_SOURCE_CONTROL_MODE,
+    CONF_HEATING_TURN_OFF_DIFFERENTIAL,
+    CONF_HEATING_TURN_ON_DIFFERENTIAL,
     CONF_INDETERMINATE_GRACE_PERIOD,
     CONF_INDETERMINATE_GRACE_PERIOD_MINUTES,
     CONF_INDETERMINATE_TIMEOUT_ACTION,
     CONF_MAX_FUTURE_SKEW,
+    CONF_MINIMUM_HEATING_OFF_TIME,
+    CONF_MINIMUM_HEATING_OFF_TIME_MINUTES,
+    CONF_MINIMUM_HEATING_ON_TIME,
+    CONF_MINIMUM_HEATING_ON_TIME_MINUTES,
     CONF_PRIMARY_MEASUREMENT_MAX_AGE,
     CONF_PRIMARY_MEASUREMENT_MAX_AGE_MINUTES,
     CONF_SENSOR_ID,
@@ -111,6 +117,8 @@ async def test_user_step_has_basic_defaults_and_filtered_selectors(hass) -> None
         CONF_SENSOR_NAME,
         CONF_TEMPERATURE_ENTITY_ID,
         CONF_TARGET_TEMPERATURE,
+        CONF_HEATING_TURN_ON_DIFFERENTIAL,
+        CONF_HEATING_TURN_OFF_DIFFERENTIAL,
         CONF_HEAT_SOURCE_CONTROL_MODE,
         CONF_CONTROLLED_ENTITY_ID,
         CONF_SHOW_ADVANCED,
@@ -123,6 +131,8 @@ async def test_user_step_has_basic_defaults_and_filtered_selectors(hass) -> None
     assert switch_selector.config["domain"] == ["switch"]
     defaults = _schema_defaults(result)
     assert defaults[CONF_TARGET_TEMPERATURE] == 21.0
+    assert defaults[CONF_HEATING_TURN_ON_DIFFERENTIAL] == 0.3
+    assert defaults[CONF_HEATING_TURN_OFF_DIFFERENTIAL] == 0.1
     assert defaults[CONF_HEAT_SOURCE_CONTROL_MODE] == CONTROL_MODE_SIMPLE
     assert defaults[CONF_SHOW_ADVANCED] is False
 
@@ -152,6 +162,10 @@ async def test_basic_input_generates_ids_and_stores_mutable_options(hass, entry_
     assert result["options"][CONF_MAX_FUTURE_SKEW] == 30.0
     assert result["options"][CONF_INDETERMINATE_GRACE_PERIOD] == 120.0
     assert result["options"][CONF_INDETERMINATE_TIMEOUT_ACTION] == "disable_heating"
+    assert result["options"][CONF_HEATING_TURN_ON_DIFFERENTIAL] == 0.3
+    assert result["options"][CONF_HEATING_TURN_OFF_DIFFERENTIAL] == 0.1
+    assert result["options"][CONF_MINIMUM_HEATING_ON_TIME] == 600.0
+    assert result["options"][CONF_MINIMUM_HEATING_OFF_TIME] == 300.0
     assert result["options"][CONF_CONTROLLED_ENTITY_ID] == entry_data[CONF_ENABLE_TARGET_ENTITY_ID]
     json.dumps(result["data"])
     json.dumps(result["options"])
@@ -449,6 +463,8 @@ async def test_options_prefill_legacy_entry_and_preserve_ids_after_rename(
     assert defaults[CONF_SENSOR_NAME] == "Living room temperature"
     assert defaults[CONF_HEAT_SOURCE_CONTROL_MODE] == CONTROL_MODE_SIMPLE
     assert defaults[CONF_CONTROLLED_ENTITY_ID] == "switch.boiler"
+    assert defaults[CONF_HEATING_TURN_ON_DIFFERENTIAL] == 0.0
+    assert defaults[CONF_HEATING_TURN_OFF_DIFFERENTIAL] == 0.0
 
     advanced = await hass.config_entries.options.async_configure(
         initial["flow_id"],
@@ -472,6 +488,8 @@ async def test_options_prefill_legacy_entry_and_preserve_ids_after_rename(
     assert entry.options[CONF_ZONE_NAME] == "Upstairs"
     assert entry.options[CONF_PRIMARY_MEASUREMENT_MAX_AGE] == 7.0
     assert entry.options[CONF_INDETERMINATE_GRACE_PERIOD] == 11.0
+    assert entry.options[CONF_MINIMUM_HEATING_ON_TIME] == 0.0
+    assert entry.options[CONF_MINIMUM_HEATING_OFF_TIME] == 0.0
 
 
 @pytest.mark.parametrize("seconds", [30, 60, 90, 900])
@@ -520,6 +538,8 @@ async def test_options_unchanged_timing_round_trip_preserves_exact_seconds(
 
     assert defaults[CONF_PRIMARY_MEASUREMENT_MAX_AGE_MINUTES] == seconds / 60
     assert defaults[CONF_INDETERMINATE_GRACE_PERIOD_MINUTES] == seconds / 60
+    assert defaults[CONF_MINIMUM_HEATING_ON_TIME_MINUTES] == 0.0
+    assert defaults[CONF_MINIMUM_HEATING_OFF_TIME_MINUTES] == 0.0
 
     result = await hass.config_entries.options.async_configure(
         advanced["flow_id"],
