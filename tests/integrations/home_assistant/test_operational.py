@@ -10,9 +10,11 @@ from custom_components.controlel.operational import (
     DecisionCode,
     DecisionReason,
     DecisionTraceRecord,
+    EmergencyDisableOutcome,
     HeatDemandState,
     MeasurementStatus,
     OperationalSnapshotSource,
+    OperationalSummaryCode,
     RuntimeStatus,
     SafetyState,
     initial_snapshot,
@@ -35,8 +37,17 @@ def source() -> OperationalSnapshotSource:
             target_temperature=21.0,
             heating_turn_on_differential=0.3,
             heating_turn_off_differential=0.1,
+            primary_measurement_max_age_seconds=300.0,
+            sensor_failure_grace_period_seconds=60.0,
+            minimum_heating_on_time_seconds=600.0,
+            minimum_heating_off_time_seconds=300.0,
             timeout_action="disable_heating",
-            integration_version="0.4.0",
+            diagnostic_profile="basic",
+            diagnostic_refresh_cadence_seconds=None,
+            debug_expiry_deadline=None,
+            debug_profile_duration_seconds=3600.0,
+            trace_capacity=20,
+            integration_version="0.5.0",
             core_version="0.2.0",
         )
     )
@@ -246,3 +257,72 @@ def test_latest_input_status_and_active_demand_cause_remove_ambiguous_snapshot_m
 
     assert snapshot.latest_input_status is MeasurementStatus.INVALID_VALUE
     assert snapshot.active_demand_cause is DecisionReason.MEASUREMENT_STALE
+
+
+@pytest.mark.parametrize(
+    ("changes", "expected"),
+    [
+        (
+            {
+                "runtime_status": RuntimeStatus.ACTIVE,
+                "zone_heat_demand": HeatDemandState.NO_HEAT_REQUIRED,
+            },
+            OperationalSummaryCode.NO_HEAT_REQUESTED,
+        ),
+        (
+            {
+                "runtime_status": RuntimeStatus.ACTIVE,
+                "zone_heat_demand": HeatDemandState.HEAT_REQUIRED,
+            },
+            OperationalSummaryCode.HEAT_REQUESTED,
+        ),
+        (
+            {
+                "runtime_status": RuntimeStatus.ACTIVE,
+                "zone_heat_demand": HeatDemandState.HEAT_REQUIRED,
+                "active_lockout_type": ActiveLockoutType.MINIMUM_OFF,
+                "minimum_off_deadline": NOW + timedelta(seconds=48),
+            },
+            OperationalSummaryCode.HEAT_DEFERRED_MINIMUM_OFF,
+        ),
+        (
+            {
+                "runtime_status": RuntimeStatus.ACTIVE,
+                "safety_state": SafetyState.INDETERMINATE_GRACE,
+                "grace_deadline": NOW + timedelta(seconds=60),
+            },
+            OperationalSummaryCode.SENSOR_FAILURE_GRACE,
+        ),
+        (
+            {
+                "runtime_status": RuntimeStatus.FATAL_ERROR,
+                "emergency_disable_outcome": EmergencyDisableOutcome.FAILED,
+            },
+            OperationalSummaryCode.FATAL_EMERGENCY_DISABLE_FAILED,
+        ),
+    ],
+)
+def test_human_summary_selects_stable_non_physical_machine_code(
+    changes: dict[str, object],
+    expected: OperationalSummaryCode,
+) -> None:
+    snapshots = source()
+
+    snapshot = snapshots.update(now=NOW, **changes)
+
+    assert snapshot.operational_summary_code is expected
+    assert "boiler" not in snapshot.operational_summary_translation_key
+    assert "physically" not in snapshot.operational_summary_translation_key
+
+
+def test_elapsed_refresh_only_notifies_countdown_subscribers() -> None:
+    snapshots = source()
+    static: list[object] = []
+    countdown: list[object] = []
+    snapshots.subscribe(static.append)
+    snapshots.subscribe(countdown.append, elapsed_refresh=True)
+
+    snapshots.refresh_elapsed(NOW + timedelta(seconds=1))
+
+    assert len(static) == 1
+    assert len(countdown) == 2

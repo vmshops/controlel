@@ -1,11 +1,17 @@
 # Roadmap
 
-Milestone 26 uses published immutable core `0.2.0` and prepares integration
+Milestone 26 uses published immutable core `0.2.0` and released integration
 `0.4.0` with
 asymmetric hysteresis, command-dispatch-based minimum on/off protection,
 deferred deadline reevaluation, and operational diagnostics. Persistence of
 hysteresis/source-control history is explicitly deferred; restart begins with
 unknown dispatch history and no fabricated lockout.
+
+Milestone 26.1 prepares integration `0.5.0` with Basic, Detailed, and Debug
+diagnostic profiles; stable timing entities; a translated operational summary;
+allowlisted observability diagnostics; and one lifecycle-owned active-countdown
+refresh scheduler. It does not change core decisions or claim physical
+heat-source feedback.
 
 ## Milestone 23: Home Assistant one-zone host vertical slice
 

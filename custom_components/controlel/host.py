@@ -45,7 +45,12 @@ from .measurement_ingestion import (
     StateLike,
     StateVersion,
 )
+from .observability import (
+    PROFILE_REFRESH_CADENCE_SECONDS,
+    ObservabilityController,
+)
 from .operational import (
+    TRACE_LIMITS,
     ActiveLockoutType,
     CommandOutcome,
     DecisionCode,
@@ -115,6 +120,7 @@ class HomeAssistantControlelHost:
         self._state_getter = state_getter or self._default_state_getter
         self._shutdown_subscriber = shutdown_subscriber or _default_shutdown_subscriber
         self._interval_subscriber = interval_subscriber or _default_interval_subscriber
+        diagnostic = config.diagnostic_configuration
         self.snapshot_source = OperationalSnapshotSource(
             initial_snapshot(
                 zone_name=config.zone_name,
@@ -125,10 +131,29 @@ class HomeAssistantControlelHost:
                 target_temperature=config.target_temperature.value,
                 heating_turn_on_differential=config.heating_turn_on_differential,
                 heating_turn_off_differential=config.heating_turn_off_differential,
+                primary_measurement_max_age_seconds=config.primary_measurement_max_age.total_seconds(),
+                sensor_failure_grace_period_seconds=config.indeterminate_grace_period.total_seconds(),
+                minimum_heating_on_time_seconds=config.minimum_heating_on_time.total_seconds(),
+                minimum_heating_off_time_seconds=config.minimum_heating_off_time.total_seconds(),
                 timeout_action=config.indeterminate_timeout_action.value,
+                diagnostic_profile=diagnostic.profile,
+                diagnostic_refresh_cadence_seconds=PROFILE_REFRESH_CADENCE_SECONDS[diagnostic.profile],
+                debug_expiry_deadline=None,
+                debug_profile_duration_seconds=(diagnostic.configured_debug_duration.total_seconds()),
+                trace_capacity=TRACE_LIMITS[diagnostic.profile],
                 integration_version=INTEGRATION_VERSION,
                 core_version=core_version,
-            )
+            ),
+            trace_limit=TRACE_LIMITS[diagnostic.profile],
+        )
+        self.observability = ObservabilityController(
+            hass=hass,
+            source=self.snapshot_source,
+            configured_profile=diagnostic.profile,
+            profile_before_debug=diagnostic.profile_before_debug,
+            debug_duration=diagnostic.debug_duration,
+            interval_subscriber=self._interval_subscriber,
+            logger=logger,
         )
         self._failure_sink.bind_state_handlers(
             recoverable=self._on_recoverable_failure_state,
@@ -140,7 +165,6 @@ class HomeAssistantControlelHost:
         self._live_queue: deque[StateLike | None] = deque()
         self._unsubscribe: Unsubscribe | None = None
         self._unsubscribe_shutdown: Unsubscribe | None = None
-        self._unsubscribe_interval: Unsubscribe | None = None
         self._live_drain_task: asyncio.Task[Any] | None = None
         self._accepted_callback_tasks: set[asyncio.Task[Any]] = set()
         self._fatal_shutdown_task: asyncio.Task[Any] | None = None
@@ -209,11 +233,7 @@ class HomeAssistantControlelHost:
             self._buffering = False
             self._initialized = True
             self._failure_sink.clear_fatal_issue_after_successful_reload()
-            self._unsubscribe_interval = self._interval_subscriber(
-                self._hass,
-                self._on_interval,
-                timedelta(seconds=30),
-            )
+            self.observability.start()
             self._logger.info("Controlel runtime started")
 
     async def async_process_state(
@@ -263,6 +283,7 @@ class HomeAssistantControlelHost:
         )
         self._accepting = False
         self._fatal_error = error
+        self.observability.stop()
         now = datetime.now(UTC)
         self.snapshot_source.update(
             now=now,
@@ -425,6 +446,7 @@ class HomeAssistantControlelHost:
                 return
             self._stopping = True
             self._accepting = False
+            self.observability.stop()
 
             unsubscribe = self._unsubscribe
             self._unsubscribe = None
@@ -441,14 +463,6 @@ class HomeAssistantControlelHost:
                     unsubscribe_shutdown()
                 except Exception:
                     self._logger.exception("Failed to unsubscribe Controlel shutdown listener")
-
-            unsubscribe_interval = self._unsubscribe_interval
-            self._unsubscribe_interval = None
-            if unsubscribe_interval is not None:
-                try:
-                    unsubscribe_interval()
-                except Exception:
-                    self._logger.exception("Failed to unsubscribe Controlel observation interval")
 
             drain_task = self._live_drain_task
             if drain_task is not None and drain_task is not asyncio.current_task():
@@ -1095,10 +1109,6 @@ class HomeAssistantControlelHost:
             now=datetime.now(UTC),
             fatal_failure_active=active,
         )
-
-    def _on_interval(self, now: datetime) -> None:
-        if self._accepting:
-            self.snapshot_source.refresh_elapsed(now)
 
     def _trace_record(
         self,

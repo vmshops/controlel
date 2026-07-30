@@ -60,6 +60,20 @@ BINARY_SENSORS: tuple[ControlelBinarySensorDescription, ...] = (
         always_available=True,
         value_fn=lambda snapshot: snapshot.fatal_failure_active,
     ),
+    ControlelBinarySensorDescription(
+        key="safety_bypassed_lockout",
+        translation_key="safety_bypassed_lockout",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        always_available=True,
+        value_fn=lambda snapshot: snapshot.safety_bypassed_lockout,
+    ),
+    ControlelBinarySensorDescription(
+        key="emergency_disable_attempted",
+        translation_key="emergency_disable_attempted",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        always_available=True,
+        value_fn=lambda snapshot: snapshot.emergency_disable_attempted,
+    ),
 )
 
 

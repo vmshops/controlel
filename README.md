@@ -24,10 +24,10 @@ Project phase: Home Assistant one-zone host vertical slice
 
 Core package version: 0.2.0 (published and immutable)
 
-Home Assistant integration candidate version: 0.4.0
+Home Assistant integration candidate version: 0.5.0
 
 Use the latest published release for HACS custom-repository installation.
-Version `0.4.0` is under development and has not been tagged or published.
+Version `0.5.0` is under development and has not been tagged or published.
 Controlel is not listed in the default HACS store.
 
 ## Home Assistant installation
@@ -71,14 +71,23 @@ reevaluates current demand at a lockout deadline instead of replaying a stored
 command. Safety-disable commands bypass minimum-on protection; safety-enable
 commands remain subject to minimum-off protection.
 
-Each entry creates one `Controlel — <Zone name>` device with operational and
-diagnostic sensors. They expose the normalized temperature and target,
-measurement validity and age, demand, safety grace/timeout state, the latest
-decision and reason, requested command and dispatch outcome, failure flags,
-and runtime/core versions. Demand and a dispatched service call are not proof
-that the physical heat source changed state. The target remains writable only
-through **Configure**. Diagnostics include the immutable current snapshot and
-a maximum 20-record in-memory decision trace; neither survives reconstruction.
+Each entry creates one `Controlel — <Zone name>` device with a translated
+operational summary and stable operational/diagnostic entities. The summary
+describes logical demand, safety, deferred commands, requested commands, and
+command outcomes; it never claims physical heat-source state. Configured
+durations remain visible, while deadline and remaining entities are unavailable
+when their countdown is inactive.
+
+The Options Flow offers Basic, Detailed, and Debug diagnostic profiles. New
+0.5.0 entries default to Basic. Existing entries without a stored profile
+resolve to Detailed, preserving periodic operational timing visibility without
+a setup-time migration write. Basic refreshes presentation on meaningful
+runtime events and retains 20 trace records; Detailed refreshes active
+countdowns every 10 seconds and retains 100; Debug refreshes only active
+countdown entities every second and retains 500. Debug expires after
+60 minutes by default and returns to the previous Basic/Detailed profile, or can
+be kept active until manually changed. Profiles affect presentation, logging,
+and in-memory evidence only—not regulation.
 
 The integration manifest requires the exact public core release
 `controlel==0.2.0`. A supported custom-component deployment can therefore let
@@ -94,7 +103,7 @@ The isolated, hashed environment is defined by `requirements/ha-test.in` and
 `requirements/ha-test.txt`; setup and suite commands are in the
 [development guide](docs/development/DevelopmentGuide.md). The compatibility
 harness is separate from HACS release validation. HACS metadata and
-deterministic release packaging are prepared for `0.4.0`, but that candidate
+deterministic release packaging are prepared for `0.5.0`, but that candidate
 has not been published and no default-store publication exists.
 
 ## Core package artifacts

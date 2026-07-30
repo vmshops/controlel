@@ -14,6 +14,10 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.controlel.const import (
     CONF_CONTROLLED_ENTITY_ID,
+    CONF_DEBUG_DURATION,
+    CONF_DEBUG_DURATION_MINUTES,
+    CONF_DEBUG_UNTIL_CHANGED,
+    CONF_DIAGNOSTIC_PROFILE,
     CONF_DISABLE_SERVICE_DOMAIN,
     CONF_DISABLE_SERVICE_NAME,
     CONF_DISABLE_TARGET_ENTITY_ID,
@@ -42,6 +46,8 @@ from custom_components.controlel.const import (
     CONF_ZONE_NAME,
     CONTROL_MODE_CUSTOM,
     CONTROL_MODE_SIMPLE,
+    DIAGNOSTIC_PROFILE_BASIC,
+    DIAGNOSTIC_PROFILE_DETAILED,
     DOMAIN,
 )
 
@@ -166,6 +172,9 @@ async def test_basic_input_generates_ids_and_stores_mutable_options(hass, entry_
     assert result["options"][CONF_HEATING_TURN_OFF_DIFFERENTIAL] == 0.1
     assert result["options"][CONF_MINIMUM_HEATING_ON_TIME] == 600.0
     assert result["options"][CONF_MINIMUM_HEATING_OFF_TIME] == 300.0
+    assert result["options"][CONF_DIAGNOSTIC_PROFILE] == DIAGNOSTIC_PROFILE_BASIC
+    assert result["options"][CONF_DEBUG_DURATION] == 3600.0
+    assert result["options"][CONF_DEBUG_UNTIL_CHANGED] is False
     assert result["options"][CONF_CONTROLLED_ENTITY_ID] == entry_data[CONF_ENABLE_TARGET_ENTITY_ID]
     json.dumps(result["data"])
     json.dumps(result["options"])
@@ -476,6 +485,7 @@ async def test_options_prefill_legacy_entry_and_preserve_ids_after_rename(
             },
         ),
     )
+    assert _schema_defaults(advanced)[CONF_DIAGNOSTIC_PROFILE] == (DIAGNOSTIC_PROFILE_DETAILED)
     result = await hass.config_entries.options.async_configure(
         advanced["flow_id"],
         _advanced_input(entry_data),
@@ -490,6 +500,7 @@ async def test_options_prefill_legacy_entry_and_preserve_ids_after_rename(
     assert entry.options[CONF_INDETERMINATE_GRACE_PERIOD] == 11.0
     assert entry.options[CONF_MINIMUM_HEATING_ON_TIME] == 0.0
     assert entry.options[CONF_MINIMUM_HEATING_OFF_TIME] == 0.0
+    assert entry.options[CONF_DIAGNOSTIC_PROFILE] == DIAGNOSTIC_PROFILE_DETAILED
 
 
 @pytest.mark.parametrize("seconds", [30, 60, 90, 900])
@@ -557,6 +568,44 @@ async def test_options_unchanged_timing_round_trip_preserves_exact_seconds(
 
 
 @pytest.mark.asyncio
+async def test_options_unchanged_debug_profile_preserves_exact_duration(
+    hass,
+    entry_data,
+) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Living room",
+        data=entry_data,
+        options={
+            CONF_DIAGNOSTIC_PROFILE: "debug",
+            CONF_DEBUG_DURATION: 1871.0,
+            CONF_DEBUG_UNTIL_CHANGED: False,
+        },
+    )
+    entry.add_to_hass(hass)
+    effective = dict(entry_data) | dict(entry.options)
+
+    initial = await hass.config_entries.options.async_init(entry.entry_id)
+    advanced = await hass.config_entries.options.async_configure(
+        initial["flow_id"],
+        _options_basic_input(effective),
+    )
+    defaults = _schema_defaults(advanced)
+    assert defaults[CONF_DIAGNOSTIC_PROFILE] == "debug"
+    assert defaults[CONF_DEBUG_DURATION_MINUTES] == 1871.0 / 60
+
+    result = await hass.config_entries.options.async_configure(
+        advanced["flow_id"],
+        _advanced_input(effective),
+    )
+
+    assert result["type"] is data_entry_flow.FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_DIAGNOSTIC_PROFILE] == "debug"
+    assert entry.options[CONF_DEBUG_DURATION] == 1871.0
+    assert entry.options[CONF_DEBUG_UNTIL_CHANGED] is False
+
+
+@pytest.mark.asyncio
 async def test_options_flow_logs_only_allowlisted_effective_changes(
     hass,
     entry_data,
@@ -599,7 +648,12 @@ async def test_options_flow_logs_only_allowlisted_effective_changes(
         advanced["flow_id"],
         _advanced_input(
             effective,
-            **{CONF_PRIMARY_MEASUREMENT_MAX_AGE_MINUTES: 1.0},
+            **{
+                CONF_PRIMARY_MEASUREMENT_MAX_AGE_MINUTES: 1.0,
+                CONF_DIAGNOSTIC_PROFILE: DIAGNOSTIC_PROFILE_BASIC,
+                CONF_DEBUG_DURATION_MINUTES: 60.0,
+                CONF_DEBUG_UNTIL_CHANGED: False,
+            },
         ),
     )
 
@@ -610,6 +664,7 @@ async def test_options_flow_logs_only_allowlisted_effective_changes(
     assert messages == [
         "Configuration updated for zone Living room:\n"
         "target_temperature: 21.0 -> 23.0\n"
+        "diagnostic_profile: detailed -> basic\n"
         "primary_measurement_max_age_seconds: 300.0 -> 60.0"
     ]
     assert "token" not in messages[0]

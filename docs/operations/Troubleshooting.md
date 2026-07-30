@@ -17,7 +17,7 @@ The current switch state is never used to fabricate it.
 Confirm that the exact custom-repository URL is
 `https://github.com/vmshops/controlel` and the selected category is
 **Integration**. The repository must be publicly accessible. Use the latest
-published release; `0.4.0` remains an unpublished candidate.
+published release; `0.5.0` remains an unpublished candidate.
 
 If HACS downloaded files but Home Assistant cannot find Controlel, confirm
 that `manifest.json` is at
@@ -64,6 +64,13 @@ the obsolete grace deadline and resumes normal demand evaluation. Diagnostics
 can provide the current snapshot and bounded decision trace if the latest
 reason needs more context.
 
+If remaining-time entities change too often, select Basic or Detailed under
+**Configure**. Basic is event-driven, Detailed updates active countdowns every
+10 seconds, and Debug updates only active countdowns every second. An unavailable
+deadline or remaining entity means its countdown is inactive. Debug shows an
+Options Flow warning because active countdown history can increase Recorder
+database volume; Controlel does not alter Recorder configuration.
+
 ## Fatal runtime failures
 
 Scheduler installation/cancellation failure, clock regression, re-entrancy,
@@ -99,7 +106,7 @@ second.
 
 ## Core dependency installation
 
-Integration `0.4.0` requires exactly `controlel==0.2.0`. Normal supported
+Integration `0.5.0` requires exactly `controlel==0.2.0`. Normal supported
 installation lets Home Assistant obtain that dependency automatically; users
 do not need to install it manually. If setup reports a missing core, confirm
 that the environment can reach PyPI and that `python -m pip show controlel`
