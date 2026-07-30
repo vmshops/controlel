@@ -25,10 +25,12 @@ class ControlelSnapshotEntity(Entity):
         key: str,
         *,
         always_available: bool = False,
+        refresh_elapsed: bool = False,
     ) -> None:
         self._source = source
         self._snapshot = source.current
         self._always_available = always_available
+        self._refresh_elapsed = refresh_elapsed
         self._unsubscribe_snapshot: Callable[[], None] | None = None
         self._attr_unique_id = f"{entry.entry_id}_{key}"
         self._attr_device_info = DeviceInfo(
@@ -50,7 +52,10 @@ class ControlelSnapshotEntity(Entity):
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
-        self._unsubscribe_snapshot = self._source.subscribe(self._handle_snapshot)
+        self._unsubscribe_snapshot = self._source.subscribe(
+            self._handle_snapshot,
+            elapsed_refresh=self._refresh_elapsed,
+        )
 
     async def async_will_remove_from_hass(self) -> None:
         if self._unsubscribe_snapshot is not None:

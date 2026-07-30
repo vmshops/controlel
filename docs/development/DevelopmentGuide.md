@@ -126,10 +126,10 @@ Build and independently validate the fixed-name release candidate from the
 repository root:
 
 ```text
-python scripts/packaging/build_hacs_release.py --version 0.4.0
+python scripts/packaging/build_hacs_release.py --version 0.5.0
 python scripts/packaging/validate_hacs_release.py \
   dist/hacs/controlel.zip \
-  --version 0.4.0 \
+  --version 0.5.0 \
   --checksum dist/hacs/controlel.zip.sha256
 ```
 
@@ -144,7 +144,7 @@ rejection behavior. Generated files remain below ignored `dist/hacs/`.
 
 ## Configuration and options development
 
-The integration candidate version is `0.4.0`; its manifest pins the published,
+The integration candidate version is `0.5.0`; its manifest pins the published,
 immutable core `controlel==0.2.0`.
 
 New-entry configuration defaults are 0.3/0.1 Â°C hysteresis and 10/5-minute
@@ -156,23 +156,29 @@ stable IDs can never be overridden.
 
 The first-run basic form uses temperature and switch entity selectors and safe
 defaults. Its optional advanced step exposes explicit IDs, normalized safety
-times, and custom service bindings. Existing entries use a two-step Options
-Flow. Tests must cover both an empty-options `0.1.1` entry and repeated options
-updates that unload the old runtime before constructing the replacement.
+times, a Basic/Detailed/Debug diagnostic profile, optional Debug expiry, and
+custom service bindings. Existing entries use a two-step Options Flow. New
+entries store Basic; legacy entries missing the profile resolve to Detailed
+with a 60-minute Debug duration, without a setup-time migration write. Tests
+cover legacy entries and repeated options updates that unload the old runtime
+before constructing the replacement.
 
 ## Operational snapshot development
 
 `operational.py` is the integration-side observation contract. It is immutable
 and read-only to entities: it mirrors existing runtime/host results and never
-decides demand or dispatches commands. Updates increment a revision and
-immediately deliver one consistent snapshot to subscribers. The host refreshes
-elapsed age and grace values every 30 seconds, while scheduler callbacks still
-provide exact safety-deadline behavior. The trace is an in-memory deque capped
-at 20 records and is cleared on runtime reconstruction.
+decides demand or dispatches commands. Meaningful updates increment a revision
+and immediately deliver one consistent snapshot to subscribers. A separate
+integration-owned observability controller refreshes active countdown
+subscribers only: never periodically in Basic, every 10 seconds in Detailed,
+and every second in Debug. Core scheduler callbacks still provide exact
+control-deadline behavior. The trace is an in-memory deque capped at
+20/100/500 records by profile and is cleared on reconstruction.
 
-Framework tests assert one device, 22 deterministic unique IDs using
-`<config_entry_id>_<entity_key>`, entity categories, rename/reload stability,
-truthful states, diagnostics allowlisting, and normal unload behavior.
+Framework tests assert one stable deterministic entity set using
+`<config_entry_id>_<entity_key>`, entity categories, profile/rename/reload
+stability, truthful inactive countdown availability, diagnostics allowlisting,
+and normal unload behavior.
 
 ## Core artifact validation
 

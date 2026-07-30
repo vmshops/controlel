@@ -24,6 +24,11 @@ from .const import (
     ATTR_DEVICE_CLASS,
     ATTR_UNIT_OF_MEASUREMENT,
     CONF_CONTROLLED_ENTITY_ID,
+    CONF_DEBUG_DURATION,
+    CONF_DEBUG_DURATION_MINUTES,
+    CONF_DEBUG_UNTIL_CHANGED,
+    CONF_DIAGNOSTIC_PROFILE,
+    CONF_DIAGNOSTIC_PROFILE_BEFORE_DEBUG,
     CONF_DISABLE_SERVICE_DOMAIN,
     CONF_DISABLE_SERVICE_NAME,
     CONF_DISABLE_TARGET_ENTITY_ID,
@@ -53,6 +58,10 @@ from .const import (
     CONFIG_ENTRY_VERSION,
     CONTROL_MODE_CUSTOM,
     CONTROL_MODE_SIMPLE,
+    DEFAULT_DEBUG_DURATION,
+    DEFAULT_DEBUG_UNTIL_CHANGED,
+    DEFAULT_DIAGNOSTIC_PROFILE,
+    DEFAULT_DIAGNOSTIC_PROFILE_BEFORE_DEBUG,
     DEFAULT_HEATING_TURN_OFF_DIFFERENTIAL,
     DEFAULT_HEATING_TURN_ON_DIFFERENTIAL,
     DEFAULT_INDETERMINATE_GRACE_PERIOD,
@@ -62,7 +71,11 @@ from .const import (
     DEFAULT_MINIMUM_HEATING_ON_TIME,
     DEFAULT_PRIMARY_MEASUREMENT_MAX_AGE,
     DEFAULT_TARGET_TEMPERATURE,
+    DIAGNOSTIC_PROFILE_BASIC,
+    DIAGNOSTIC_PROFILE_DEBUG,
+    DIAGNOSTIC_PROFILE_DETAILED,
     DOMAIN,
+    LEGACY_DIAGNOSTIC_PROFILE,
     LEGACY_HEATING_TURN_OFF_DIFFERENTIAL,
     LEGACY_HEATING_TURN_ON_DIFFERENTIAL,
     LEGACY_MINIMUM_HEATING_OFF_TIME,
@@ -87,6 +100,10 @@ _MUTABLE_COMMON_KEYS = (
     CONF_INDETERMINATE_GRACE_PERIOD,
     CONF_INDETERMINATE_TIMEOUT_ACTION,
     CONF_HEAT_SOURCE_CONTROL_MODE,
+    CONF_DIAGNOSTIC_PROFILE,
+    CONF_DEBUG_DURATION,
+    CONF_DEBUG_UNTIL_CHANGED,
+    CONF_DIAGNOSTIC_PROFILE_BEFORE_DEBUG,
 )
 _ADVANCED_BINDING_KEYS = (
     CONF_ENABLE_SERVICE_DOMAIN,
@@ -116,6 +133,11 @@ _SEMANTIC_LOG_FIELDS = (
     (
         "minimum_heating_off_time_seconds",
         lambda config: config.minimum_heating_off_time.total_seconds(),
+    ),
+    ("diagnostic_profile", lambda config: config.diagnostic_profile),
+    (
+        "debug_duration_seconds",
+        lambda config: config.debug_duration.total_seconds() if config.debug_duration is not None else None,
     ),
     (
         "primary_measurement_max_age_seconds",
@@ -263,7 +285,7 @@ class ControlelOptionsFlow(OptionsFlow):
             self.config_entry.data,
             self.config_entry.options,
         )
-        _apply_legacy_protection_defaults(current)
+        _apply_legacy_defaults(current)
         current[CONF_HEAT_SOURCE_CONTROL_MODE] = infer_control_mode(current)
         if current[CONF_HEAT_SOURCE_CONTROL_MODE] == CONTROL_MODE_SIMPLE:
             current.setdefault(
@@ -298,18 +320,35 @@ class ControlelOptionsFlow(OptionsFlow):
             self.config_entry.data,
             self.config_entry.options,
         )
-        _apply_legacy_protection_defaults(current)
+        _apply_legacy_defaults(current)
         errors: dict[str, str] = {}
         if user_input is not None:
+            advanced_values = {**current, **user_input}
+            selected_profile = str(
+                advanced_values.get(
+                    CONF_DIAGNOSTIC_PROFILE,
+                    DEFAULT_DIAGNOSTIC_PROFILE,
+                )
+            )
+            current_profile = str(
+                current.get(
+                    CONF_DIAGNOSTIC_PROFILE,
+                    DEFAULT_DIAGNOSTIC_PROFILE,
+                )
+            )
+            if selected_profile == DIAGNOSTIC_PROFILE_DEBUG and current_profile != DIAGNOSTIC_PROFILE_DEBUG:
+                advanced_values[CONF_DIAGNOSTIC_PROFILE_BEFORE_DEBUG] = current_profile
+            elif selected_profile != DIAGNOSTIC_PROFILE_DEBUG:
+                advanced_values[CONF_DIAGNOSTIC_PROFILE_BEFORE_DEBUG] = selected_profile
             configuration = _configuration_from_steps(
                 self._pending_basic,
-                {**current, **user_input},
+                advanced_values,
                 sensor_id=str(self.config_entry.data[CONF_SENSOR_ID]),
                 zone_id=str(self.config_entry.data[CONF_ZONE_ID]),
             )
             _preserve_unchanged_seconds(
                 configuration,
-                {**current, **user_input},
+                advanced_values,
                 current,
             )
             errors.update(_configuration_errors(configuration))
@@ -515,6 +554,48 @@ def _advanced_schema(
                 )
                 / 60,
             ): _minutes_selector(),
+            vol.Required(
+                CONF_DIAGNOSTIC_PROFILE,
+                default=defaults.get(
+                    CONF_DIAGNOSTIC_PROFILE,
+                    DEFAULT_DIAGNOSTIC_PROFILE,
+                ),
+            ): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=[
+                        {
+                            "value": DIAGNOSTIC_PROFILE_BASIC,
+                            "label": "Basic",
+                        },
+                        {
+                            "value": DIAGNOSTIC_PROFILE_DETAILED,
+                            "label": "Detailed",
+                        },
+                        {
+                            "value": DIAGNOSTIC_PROFILE_DEBUG,
+                            "label": "Debug",
+                        },
+                    ],
+                    mode=selector.SelectSelectorMode.DROPDOWN,
+                )
+            ),
+            vol.Required(
+                CONF_DEBUG_DURATION_MINUTES,
+                default=float(
+                    defaults.get(
+                        CONF_DEBUG_DURATION,
+                        DEFAULT_DEBUG_DURATION,
+                    )
+                )
+                / 60,
+            ): _minutes_selector(positive=True),
+            vol.Required(
+                CONF_DEBUG_UNTIL_CHANGED,
+                default=defaults.get(
+                    CONF_DEBUG_UNTIL_CHANGED,
+                    DEFAULT_DEBUG_UNTIL_CHANGED,
+                ),
+            ): selector.BooleanSelector(),
         }
     )
     if control_mode == CONTROL_MODE_CUSTOM:
@@ -637,6 +718,25 @@ def _configuration_from_steps(
             )
         )
         * 60,
+        CONF_DIAGNOSTIC_PROFILE: advanced.get(
+            CONF_DIAGNOSTIC_PROFILE,
+            DEFAULT_DIAGNOSTIC_PROFILE,
+        ),
+        CONF_DEBUG_DURATION: float(
+            advanced.get(
+                CONF_DEBUG_DURATION_MINUTES,
+                DEFAULT_DEBUG_DURATION / 60,
+            )
+        )
+        * 60,
+        CONF_DEBUG_UNTIL_CHANGED: advanced.get(
+            CONF_DEBUG_UNTIL_CHANGED,
+            DEFAULT_DEBUG_UNTIL_CHANGED,
+        ),
+        CONF_DIAGNOSTIC_PROFILE_BEFORE_DEBUG: advanced.get(
+            CONF_DIAGNOSTIC_PROFILE_BEFORE_DEBUG,
+            DEFAULT_DIAGNOSTIC_PROFILE_BEFORE_DEBUG,
+        ),
         CONF_PRIMARY_MEASUREMENT_MAX_AGE: float(
             advanced.get(
                 CONF_PRIMARY_MEASUREMENT_MAX_AGE_MINUTES,
@@ -704,14 +804,18 @@ def _preserve_unchanged_seconds(
             CONF_MINIMUM_HEATING_OFF_TIME_MINUTES,
             CONF_MINIMUM_HEATING_OFF_TIME,
         ),
+        (
+            CONF_DEBUG_DURATION_MINUTES,
+            CONF_DEBUG_DURATION,
+        ),
     ):
         current_seconds = current[seconds_key]
         if float(advanced_input[minutes_key]) == float(current_seconds) / 60:
             configuration[seconds_key] = current_seconds
 
 
-def _apply_legacy_protection_defaults(configuration: dict[str, Any]) -> None:
-    """Expose legacy entries without silently changing regulation behavior."""
+def _apply_legacy_defaults(configuration: dict[str, Any]) -> None:
+    """Expose legacy entries without silently changing behavior or visibility."""
 
     configuration.setdefault(
         CONF_HEATING_TURN_ON_DIFFERENTIAL,
@@ -728,6 +832,22 @@ def _apply_legacy_protection_defaults(configuration: dict[str, Any]) -> None:
     configuration.setdefault(
         CONF_MINIMUM_HEATING_OFF_TIME,
         LEGACY_MINIMUM_HEATING_OFF_TIME,
+    )
+    configuration.setdefault(
+        CONF_DIAGNOSTIC_PROFILE,
+        LEGACY_DIAGNOSTIC_PROFILE,
+    )
+    configuration.setdefault(
+        CONF_DEBUG_DURATION,
+        DEFAULT_DEBUG_DURATION,
+    )
+    configuration.setdefault(
+        CONF_DEBUG_UNTIL_CHANGED,
+        DEFAULT_DEBUG_UNTIL_CHANGED,
+    )
+    configuration.setdefault(
+        CONF_DIAGNOSTIC_PROFILE_BEFORE_DEBUG,
+        DEFAULT_DIAGNOSTIC_PROFILE_BEFORE_DEBUG,
     )
 
 
@@ -814,6 +934,9 @@ def _configuration_errors(
             CONF_HEATING_TURN_OFF_DIFFERENTIAL,
             CONF_MINIMUM_HEATING_ON_TIME,
             CONF_MINIMUM_HEATING_OFF_TIME,
+            CONF_DIAGNOSTIC_PROFILE,
+            CONF_DEBUG_DURATION,
+            CONF_DEBUG_UNTIL_CHANGED,
             CONF_CONTROLLED_ENTITY_ID,
             *_ADVANCED_BINDING_KEYS,
         ):

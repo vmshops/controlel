@@ -40,6 +40,9 @@
           "indeterminate_timeout_action": "Timeout action",
           "minimum_heating_on_time_minutes": "Minimum heating-on time",
           "minimum_heating_off_time_minutes": "Minimum heating-off time",
+          "diagnostic_profile": "Diagnostic profile",
+          "debug_duration_minutes": "Debug duration",
+          "debug_until_changed": "Keep Debug active until manually changed",
           "enable_service_domain": "Enable service domain",
           "enable_service_name": "Enable service name",
           "enable_target_entity_id": "Enable target entity",
@@ -56,6 +59,9 @@
           "indeterminate_timeout_action": "What Controlel does if valid measurement data does not return before the grace period expires.",
           "minimum_heating_on_time_minutes": "Shortest permitted run after an enable command is dispatched; this does not confirm physical boiler state.",
           "minimum_heating_off_time_minutes": "Shortest permitted idle period after a disable command is dispatched; this does not confirm physical boiler state.",
+          "diagnostic_profile": "Controls presentation cadence, trace capacity, and logging detail only. Debug can update active countdown entities once per second and may increase Recorder database activity.",
+          "debug_duration_minutes": "How long Debug remains active before returning to the previous profile, or Detailed when no previous profile is available.",
+          "debug_until_changed": "Disable automatic Debug expiry. Debug then remains active until this option is changed manually.",
           "enable_service_domain": "Home Assistant service domain used when heating is required.",
           "enable_service_name": "Home Assistant service called when heating is required.",
           "enable_target_entity_id": "Entity targeted by the enable command.",
@@ -114,6 +120,9 @@
           "indeterminate_timeout_action": "Timeout action",
           "minimum_heating_on_time_minutes": "Minimum heating-on time",
           "minimum_heating_off_time_minutes": "Minimum heating-off time",
+          "diagnostic_profile": "Diagnostic profile",
+          "debug_duration_minutes": "Debug duration",
+          "debug_until_changed": "Keep Debug active until manually changed",
           "enable_service_domain": "Enable service domain",
           "enable_service_name": "Enable service name",
           "enable_target_entity_id": "Enable target entity",
@@ -128,6 +137,9 @@
           "indeterminate_timeout_action": "What Controlel does if valid measurement data does not return before the grace period expires.",
           "minimum_heating_on_time_minutes": "Shortest permitted run after an enable command is dispatched; this does not confirm physical boiler state.",
           "minimum_heating_off_time_minutes": "Shortest permitted idle period after a disable command is dispatched; this does not confirm physical boiler state.",
+          "diagnostic_profile": "Controls presentation cadence, trace capacity, and logging detail only. Warning: Debug can update active countdown entities once per second and may increase Recorder database activity.",
+          "debug_duration_minutes": "How long Debug remains active before returning to the profile active before Debug, or Detailed when unavailable.",
+          "debug_until_changed": "Disable automatic Debug expiry. Debug then remains active until this option is changed manually.",
           "enable_service_domain": "Home Assistant service domain used when heating is required.",
           "enable_service_name": "Home Assistant service called when heating is required.",
           "enable_target_entity_id": "Entity targeted by the enable command.",
@@ -149,6 +161,124 @@
   },
   "entity": {
     "sensor": {
+      "operational_summary": {
+        "name": "Operating summary",
+        "state": {
+          "starting": "Controlel is starting.",
+          "stopped": "Controlel is stopped.",
+          "fatal_emergency_disable_failed": "The runtime entered a fatal state and the emergency heating-off command failed.",
+          "fatal": "The runtime entered a fatal state.",
+          "sensor_failure_grace": "The temperature measurement is unavailable; sensor failure grace is active.",
+          "safety_timeout_disable_requested": "Sensor failure grace expired and a heating-off command was requested.",
+          "safety_timeout_enable_requested": "Sensor failure grace expired and a heating-on command was requested.",
+          "heat_deferred_minimum_off": "The zone requests heating, but minimum off time is active.",
+          "no_heat_deferred_minimum_on": "The zone no longer requests heating, but minimum on time is active.",
+          "heat_command_failed": "The zone requests heating, but the requested command failed.",
+          "no_heat_command_failed": "Heating is not requested, but the requested command failed.",
+          "heat_requested": "The zone requests heating and the heat source may start.",
+          "no_heat_requested": "Heating is not currently requested.",
+          "demand_indeterminate": "Heating demand is indeterminate."
+        }
+      },
+      "heating_turn_on_differential": {"name": "Configured heating turn-on differential"},
+      "heating_turn_off_differential": {"name": "Configured heating turn-off differential"},
+      "measurement_maximum_age": {"name": "Configured maximum measurement age"},
+      "measurement_stale_deadline": {"name": "Measurement validity deadline"},
+      "measurement_stale_remaining": {"name": "Measurement validity time remaining"},
+      "latest_input_status": {
+        "name": "Latest input status",
+        "state": {
+          "valid": "Valid",
+          "unavailable": "Unavailable",
+          "unknown": "Unknown",
+          "invalid_value": "Invalid value",
+          "stale": "Stale",
+          "future_timestamp": "Future timestamp",
+          "not_received": "Waiting for first measurement"
+        }
+      },
+      "active_demand_cause": {
+        "name": "Active demand cause",
+        "state": {
+          "temperature_below_target": "Temperature below target",
+          "temperature_at_or_above_target": "Temperature at or above target",
+          "below_enable_threshold": "Temperature at or below the heating enable threshold",
+          "above_disable_threshold": "Temperature at or above the heating disable threshold",
+          "inside_hysteresis_deadband": "Temperature inside the hysteresis deadband",
+          "preserved_previous_demand": "Previous logical demand preserved inside the deadband",
+          "legacy_exact_threshold": "Legacy exact-threshold behavior",
+          "startup_from_raw_demand": "Startup demand initialized from the current measurement",
+          "minimum_on_time_active": "Minimum heating-on time is active",
+          "minimum_off_time_active": "Minimum heating-off time is active",
+          "deferred_command_cancelled": "Deferred command cancelled after demand changed",
+          "lockout_expired_reevaluation": "Current demand reevaluated after lockout expiry",
+          "safety_disable_bypassed_lockout": "Safety disable bypassed minimum-on protection",
+          "measurement_unavailable": "Measurement unavailable",
+          "measurement_unknown": "Measurement unknown",
+          "measurement_stale": "Measurement became stale",
+          "measurement_invalid": "Measurement invalid",
+          "measurement_future_timestamp": "Measurement timestamp is in the future",
+          "waiting_for_first_measurement": "Waiting for first measurement",
+          "safety_grace_expired": "Sensor failure grace period expired",
+          "duplicate_command": "Command suppressed because it was already requested",
+          "service_call_failed": "Home Assistant service call failed",
+          "fatal_runtime_failure": "Fatal runtime failure",
+          "runtime_lifecycle": "Runtime lifecycle"
+        }
+      },
+      "raw_heat_demand": {
+        "name": "Raw zone heat demand",
+        "state": {
+          "heat_required": "Heating requested",
+          "no_heat_required": "No heat required",
+          "indeterminate": "Indeterminate"
+        }
+      },
+      "deferred_reason": {
+        "name": "Deferred command reason",
+        "state": {
+          "normal_demand": "Normal demand",
+          "duplicate_command": "Duplicate command",
+          "minimum_on_time_active": "Minimum heating-on time is active",
+          "minimum_off_time_active": "Minimum heating-off time is active",
+          "deferred_command_cancelled": "Deferred command cancelled",
+          "lockout_expired_reevaluation": "Lockout expired and demand will be reevaluated",
+          "safety_disable_bypassed_lockout": "Safety disable bypassed minimum-on protection"
+        }
+      },
+      "minimum_heating_on_time": {"name": "Configured minimum heating-on time"},
+      "minimum_heating_off_time": {"name": "Configured minimum heating-off time"},
+      "sensor_failure_grace_period": {"name": "Configured sensor failure grace period"},
+      "timeout_action": {
+        "name": "Sensor failure timeout action",
+        "state": {
+          "enable_heating": "Request heating on",
+          "disable_heating": "Request heating off"
+        }
+      },
+      "emergency_disable_outcome": {
+        "name": "Emergency heating-off result",
+        "state": {
+          "none": "No emergency command requested",
+          "emergency_heating_off_requested": "Emergency heating-off command requested",
+          "fatal_shutdown_disable_dispatched": "Emergency heating-off command dispatched",
+          "fatal_shutdown_disable_failed": "Emergency heating-off command failed",
+          "fatal_shutdown_disable_skipped_already_failed": "Recursive emergency command skipped after failure",
+          "fatal_shutdown_no_command_path_available": "No emergency command path available"
+        }
+      },
+      "diagnostic_profile": {
+        "name": "Diagnostic profile",
+        "state": {
+          "basic": "Basic",
+          "detailed": "Detailed",
+          "debug": "Debug"
+        }
+      },
+      "debug_expiry_deadline": {"name": "Debug profile expiry deadline"},
+      "debug_expiry_remaining": {"name": "Debug profile time remaining"},
+      "debug_profile_duration": {"name": "Configured Debug profile duration"},
+      "decision_trace_capacity": {"name": "Decision trace capacity"},
       "current_temperature": {"name": "Current temperature"},
       "target_temperature": {"name": "Target temperature"},
       "heating_enable_threshold": {"name": "Heating enable threshold"},
@@ -306,7 +436,9 @@
       "measurement_valid": {"name": "Measurement is valid"},
       "runtime_active": {"name": "Runtime is active"},
       "recoverable_failure": {"name": "Recoverable failure is active"},
-      "fatal_failure": {"name": "Fatal failure is active"}
+      "fatal_failure": {"name": "Fatal failure is active"},
+      "safety_bypassed_lockout": {"name": "Safety command bypassed source lockout"},
+      "emergency_disable_attempted": {"name": "Emergency heating-off command was attempted"}
     }
   },
   "issues": {

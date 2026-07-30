@@ -6,12 +6,17 @@ import logging
 from collections import deque
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from threading import Lock
 from typing import Any
 
 TRACE_LIMIT = 20
+TRACE_LIMITS = {
+    "basic": 20,
+    "detailed": 100,
+    "debug": 500,
+}
 LOGGER = logging.getLogger(__name__)
 
 
@@ -124,6 +129,23 @@ class EmergencyDisableOutcome(StrEnum):
     NO_COMMAND_PATH_AVAILABLE = "fatal_shutdown_no_command_path_available"
 
 
+class OperationalSummaryCode(StrEnum):
+    STARTING = "starting"
+    STOPPED = "stopped"
+    FATAL_EMERGENCY_DISABLE_FAILED = "fatal_emergency_disable_failed"
+    FATAL = "fatal"
+    SENSOR_FAILURE_GRACE = "sensor_failure_grace"
+    SAFETY_TIMEOUT_DISABLE_REQUESTED = "safety_timeout_disable_requested"
+    SAFETY_TIMEOUT_ENABLE_REQUESTED = "safety_timeout_enable_requested"
+    HEAT_DEFERRED_MINIMUM_OFF = "heat_deferred_minimum_off"
+    NO_HEAT_DEFERRED_MINIMUM_ON = "no_heat_deferred_minimum_on"
+    HEAT_COMMAND_FAILED = "heat_command_failed"
+    NO_HEAT_COMMAND_FAILED = "no_heat_command_failed"
+    HEAT_REQUESTED = "heat_requested"
+    NO_HEAT_REQUESTED = "no_heat_requested"
+    DEMAND_INDETERMINATE = "demand_indeterminate"
+
+
 @dataclass(frozen=True)
 class DecisionTraceRecord:
     decision_code: DecisionCode
@@ -163,10 +185,16 @@ class OperationalSnapshot:
     heating_turn_off_differential: float
     heating_enable_threshold: float
     heating_disable_threshold: float
+    primary_measurement_max_age_seconds: float
+    sensor_failure_grace_period_seconds: float
+    minimum_heating_on_time_seconds: float
+    minimum_heating_off_time_seconds: float
     measurement_status: MeasurementStatus
     latest_input_status: MeasurementStatus
     measurement_timestamp: datetime | None
     measurement_age_seconds: float | None
+    measurement_stale_deadline: datetime | None
+    measurement_stale_remaining_seconds: float | None
     zone_heat_demand: HeatDemandState
     raw_zone_heat_demand: HeatDemandState
     hysteresis_demand: HeatDemandState
@@ -199,6 +227,14 @@ class OperationalSnapshot:
     emergency_disable_outcome: EmergencyDisableOutcome
     emergency_disable_timestamp: datetime | None
     original_fatal_cause: str | None
+    diagnostic_profile: str
+    diagnostic_refresh_cadence_seconds: float | None
+    debug_expiry_deadline: datetime | None
+    debug_expiry_remaining_seconds: float | None
+    debug_profile_duration_seconds: float
+    trace_capacity: int
+    operational_summary_code: OperationalSummaryCode
+    operational_summary_translation_key: str
     integration_version: str
     core_version: str
     last_meaningful_event_at: datetime | None
@@ -207,6 +243,7 @@ class OperationalSnapshot:
         _validate_aware(self.updated_at, "snapshot update timestamp")
         for label, value in (
             ("measurement timestamp", self.measurement_timestamp),
+            ("measurement stale deadline", self.measurement_stale_deadline),
             ("grace deadline", self.grace_deadline),
             ("minimum-on deadline", self.minimum_on_deadline),
             ("minimum-off deadline", self.minimum_off_deadline),
@@ -214,6 +251,7 @@ class OperationalSnapshot:
             ("decision timestamp", self.last_decision_timestamp),
             ("command timestamp", self.last_command_timestamp),
             ("emergency disable timestamp", self.emergency_disable_timestamp),
+            ("Debug expiry deadline", self.debug_expiry_deadline),
             ("meaningful event timestamp", self.last_meaningful_event_at),
         ):
             if value is not None:
@@ -222,6 +260,10 @@ class OperationalSnapshot:
             raise ValueError("snapshot revision must not be negative")
         if self.duplicate_commands_suppressed < 0:
             raise ValueError("duplicate suppression count must not be negative")
+        if self.trace_capacity <= 0:
+            raise ValueError("trace capacity must be positive")
+        if self.debug_profile_duration_seconds <= 0:
+            raise ValueError("Debug profile duration must be positive")
 
 
 type SnapshotSubscriber = Callable[[OperationalSnapshot], None]
@@ -230,10 +272,15 @@ type SnapshotSubscriber = Callable[[OperationalSnapshot], None]
 class OperationalSnapshotSource:
     """Own one current snapshot, bounded trace, and read-only subscribers."""
 
-    def __init__(self, initial: OperationalSnapshot) -> None:
+    def __init__(
+        self,
+        initial: OperationalSnapshot,
+        *,
+        trace_limit: int = TRACE_LIMIT,
+    ) -> None:
         self._snapshot = initial
-        self._trace: deque[DecisionTraceRecord] = deque(maxlen=TRACE_LIMIT)
-        self._subscribers: dict[int, SnapshotSubscriber] = {}
+        self._trace: deque[DecisionTraceRecord] = deque(maxlen=trace_limit)
+        self._subscribers: dict[int, tuple[SnapshotSubscriber, bool]] = {}
         self._next_subscriber = 0
         self._closed = False
         self._lock = Lock()
@@ -248,7 +295,27 @@ class OperationalSnapshotSource:
         with self._lock:
             return tuple(self._trace)
 
-    def subscribe(self, subscriber: SnapshotSubscriber) -> Callable[[], None]:
+    @property
+    def trace_capacity(self) -> int:
+        with self._lock:
+            return self._trace.maxlen or TRACE_LIMIT
+
+    def set_trace_capacity(self, capacity: int) -> None:
+        """Resize bounded future retention while preserving newest records."""
+
+        if capacity <= 0:
+            raise ValueError("trace capacity must be positive")
+        with self._lock:
+            if self._closed or self._trace.maxlen == capacity:
+                return
+            self._trace = deque(self._trace, maxlen=capacity)
+
+    def subscribe(
+        self,
+        subscriber: SnapshotSubscriber,
+        *,
+        elapsed_refresh: bool = False,
+    ) -> Callable[[], None]:
         """Subscribe and immediately receive the latest consistent snapshot."""
 
         with self._lock:
@@ -258,7 +325,7 @@ class OperationalSnapshotSource:
             else:
                 token = self._next_subscriber
                 self._next_subscriber += 1
-                self._subscribers[token] = subscriber
+                self._subscribers[token] = (subscriber, elapsed_refresh)
                 snapshot = self._snapshot
         subscriber(snapshot)
         unsubscribed = False
@@ -303,7 +370,7 @@ class OperationalSnapshotSource:
             )
             snapshot = _with_elapsed(snapshot, now)
             self._snapshot = snapshot
-            subscribers = tuple(self._subscribers.values())
+            subscribers = tuple(item[0] for item in self._subscribers.values())
         for subscriber in subscribers:
             subscriber(snapshot)
         LOGGER.debug(
@@ -314,9 +381,20 @@ class OperationalSnapshotSource:
         return snapshot
 
     def refresh_elapsed(self, now: datetime) -> OperationalSnapshot:
-        """Refresh only derived age/countdown values at a modest cadence."""
+        """Refresh derived countdowns without rewriting static entity states."""
 
-        return self.update(now=now)
+        _validate_aware(now, "snapshot refresh timestamp")
+        with self._lock:
+            if self._closed:
+                return self._snapshot
+            snapshot = _with_elapsed(self._snapshot, now)
+            self._snapshot = snapshot
+            subscribers = tuple(
+                subscriber for subscriber, elapsed_refresh in self._subscribers.values() if elapsed_refresh
+            )
+        for subscriber in subscribers:
+            subscriber(snapshot)
+        return snapshot
 
     def close(self) -> None:
         """Prevent all future updates and detach every subscriber."""
@@ -344,7 +422,16 @@ def initial_snapshot(
     target_temperature: float,
     heating_turn_on_differential: float,
     heating_turn_off_differential: float,
+    primary_measurement_max_age_seconds: float,
+    sensor_failure_grace_period_seconds: float,
+    minimum_heating_on_time_seconds: float,
+    minimum_heating_off_time_seconds: float,
     timeout_action: str,
+    diagnostic_profile: str,
+    diagnostic_refresh_cadence_seconds: float | None,
+    debug_expiry_deadline: datetime | None,
+    debug_profile_duration_seconds: float,
+    trace_capacity: int,
     integration_version: str,
     core_version: str,
 ) -> OperationalSnapshot:
@@ -364,10 +451,16 @@ def initial_snapshot(
         heating_turn_off_differential=heating_turn_off_differential,
         heating_enable_threshold=target_temperature - heating_turn_on_differential,
         heating_disable_threshold=target_temperature + heating_turn_off_differential,
+        primary_measurement_max_age_seconds=primary_measurement_max_age_seconds,
+        sensor_failure_grace_period_seconds=sensor_failure_grace_period_seconds,
+        minimum_heating_on_time_seconds=minimum_heating_on_time_seconds,
+        minimum_heating_off_time_seconds=minimum_heating_off_time_seconds,
         measurement_status=MeasurementStatus.NOT_RECEIVED,
         latest_input_status=MeasurementStatus.NOT_RECEIVED,
         measurement_timestamp=None,
         measurement_age_seconds=None,
+        measurement_stale_deadline=None,
+        measurement_stale_remaining_seconds=None,
         zone_heat_demand=HeatDemandState.INDETERMINATE,
         raw_zone_heat_demand=HeatDemandState.INDETERMINATE,
         hysteresis_demand=HeatDemandState.INDETERMINATE,
@@ -400,6 +493,14 @@ def initial_snapshot(
         emergency_disable_outcome=EmergencyDisableOutcome.NONE,
         emergency_disable_timestamp=None,
         original_fatal_cause=None,
+        diagnostic_profile=diagnostic_profile,
+        diagnostic_refresh_cadence_seconds=diagnostic_refresh_cadence_seconds,
+        debug_expiry_deadline=debug_expiry_deadline,
+        debug_expiry_remaining_seconds=None,
+        debug_profile_duration_seconds=debug_profile_duration_seconds,
+        trace_capacity=trace_capacity,
+        operational_summary_code=OperationalSummaryCode.STARTING,
+        operational_summary_translation_key="operational_summary_starting",
         integration_version=integration_version,
         core_version=core_version,
         last_meaningful_event_at=None,
@@ -425,6 +526,16 @@ def _with_elapsed(
         if snapshot.measurement_timestamp is not None
         else None
     )
+    measurement_stale_deadline = (
+        snapshot.measurement_timestamp + timedelta(seconds=snapshot.primary_measurement_max_age_seconds)
+        if snapshot.measurement_timestamp is not None and snapshot.measurement_status is MeasurementStatus.VALID
+        else None
+    )
+    measurement_stale_remaining = (
+        max(0.0, (measurement_stale_deadline - now).total_seconds())
+        if measurement_stale_deadline is not None and measurement_stale_deadline > now
+        else None
+    )
     remaining = (
         max(0.0, (snapshot.grace_deadline - now).total_seconds())
         if snapshot.grace_deadline is not None and snapshot.safety_state is SafetyState.INDETERMINATE_GRACE
@@ -440,12 +551,80 @@ def _with_elapsed(
         if lockout_deadline is not None and lockout_deadline > now
         else None
     )
-    return replace(
+    debug_remaining = (
+        max(0.0, (snapshot.debug_expiry_deadline - now).total_seconds())
+        if snapshot.debug_expiry_deadline is not None and snapshot.debug_expiry_deadline > now
+        else None
+    )
+    updated = replace(
         snapshot,
         measurement_age_seconds=age,
+        measurement_stale_deadline=measurement_stale_deadline,
+        measurement_stale_remaining_seconds=measurement_stale_remaining,
         grace_remaining_seconds=remaining,
         lockout_remaining_seconds=lockout_remaining,
+        debug_expiry_remaining_seconds=debug_remaining,
     )
+    summary_code = operational_summary_code(updated)
+    return replace(
+        updated,
+        operational_summary_code=summary_code,
+        operational_summary_translation_key=f"operational_summary_{summary_code.value}",
+    )
+
+
+def active_countdown_names(snapshot: OperationalSnapshot) -> tuple[str, ...]:
+    """Return stable names for presentation countdowns that are active."""
+
+    names: list[str] = []
+    if snapshot.measurement_stale_remaining_seconds is not None:
+        names.append("measurement_maximum_age")
+    if snapshot.grace_remaining_seconds is not None:
+        names.append("sensor_failure_grace")
+    if snapshot.active_lockout_type is ActiveLockoutType.MINIMUM_ON and snapshot.lockout_remaining_seconds is not None:
+        names.append("minimum_heating_on")
+        names.append("deferred_source_command")
+    if snapshot.active_lockout_type is ActiveLockoutType.MINIMUM_OFF and snapshot.lockout_remaining_seconds is not None:
+        names.append("minimum_heating_off")
+        names.append("deferred_source_command")
+    if snapshot.debug_expiry_remaining_seconds is not None:
+        names.append("debug_profile_expiry")
+    return tuple(names)
+
+
+def operational_summary_code(snapshot: OperationalSnapshot) -> OperationalSummaryCode:
+    """Select stable human-presentation state without claiming physical output."""
+
+    if snapshot.runtime_status is RuntimeStatus.STARTING:
+        return OperationalSummaryCode.STARTING
+    if snapshot.runtime_status is RuntimeStatus.STOPPED:
+        return OperationalSummaryCode.STOPPED
+    if snapshot.runtime_status is RuntimeStatus.FATAL_ERROR:
+        if snapshot.emergency_disable_outcome is EmergencyDisableOutcome.FAILED:
+            return OperationalSummaryCode.FATAL_EMERGENCY_DISABLE_FAILED
+        return OperationalSummaryCode.FATAL
+    if snapshot.safety_state is SafetyState.INDETERMINATE_GRACE:
+        return OperationalSummaryCode.SENSOR_FAILURE_GRACE
+    if snapshot.safety_state is SafetyState.TIMEOUT_ACTION_APPLIED:
+        if snapshot.last_requested_command == "enable_heating":
+            return OperationalSummaryCode.SAFETY_TIMEOUT_ENABLE_REQUESTED
+        return OperationalSummaryCode.SAFETY_TIMEOUT_DISABLE_REQUESTED
+    if snapshot.active_lockout_type is ActiveLockoutType.MINIMUM_OFF:
+        return OperationalSummaryCode.HEAT_DEFERRED_MINIMUM_OFF
+    if snapshot.active_lockout_type is ActiveLockoutType.MINIMUM_ON:
+        return OperationalSummaryCode.NO_HEAT_DEFERRED_MINIMUM_ON
+    if snapshot.last_command_outcome in {
+        CommandOutcome.FAILED_RECOVERABLE,
+        CommandOutcome.FAILED_FATAL,
+    }:
+        if snapshot.zone_heat_demand is HeatDemandState.HEAT_REQUIRED:
+            return OperationalSummaryCode.HEAT_COMMAND_FAILED
+        return OperationalSummaryCode.NO_HEAT_COMMAND_FAILED
+    if snapshot.zone_heat_demand is HeatDemandState.HEAT_REQUIRED:
+        return OperationalSummaryCode.HEAT_REQUESTED
+    if snapshot.zone_heat_demand is HeatDemandState.NO_HEAT_REQUIRED:
+        return OperationalSummaryCode.NO_HEAT_REQUESTED
+    return OperationalSummaryCode.DEMAND_INDETERMINATE
 
 
 def _serialize(value: Any) -> Any:

@@ -14,6 +14,10 @@ from . import ControlelEntryRuntime
 from .config import HomeAssistantIntegrationConfig
 from .const import (
     CONF_CONTROLLED_ENTITY_ID,
+    CONF_DEBUG_DURATION,
+    CONF_DEBUG_UNTIL_CHANGED,
+    CONF_DIAGNOSTIC_PROFILE,
+    CONF_DIAGNOSTIC_PROFILE_BEFORE_DEBUG,
     CONF_DISABLE_SERVICE_DOMAIN,
     CONF_DISABLE_SERVICE_NAME,
     CONF_DISABLE_TARGET_ENTITY_ID,
@@ -53,6 +57,10 @@ _COMMON_MUTABLE_KEYS = (
     CONF_INDETERMINATE_GRACE_PERIOD,
     CONF_INDETERMINATE_TIMEOUT_ACTION,
     CONF_HEAT_SOURCE_CONTROL_MODE,
+    CONF_DIAGNOSTIC_PROFILE,
+    CONF_DEBUG_DURATION,
+    CONF_DEBUG_UNTIL_CHANGED,
+    CONF_DIAGNOSTIC_PROFILE_BEFORE_DEBUG,
 )
 _CUSTOM_BINDING_KEYS = (
     CONF_ENABLE_SERVICE_DOMAIN,
@@ -98,6 +106,12 @@ def _normalized_config(config: HomeAssistantIntegrationConfig) -> dict[str, Any]
         "heating_disable_threshold": (config.target_temperature.value + config.heating_turn_off_differential),
         "minimum_heating_on_time_seconds": config.minimum_heating_on_time.total_seconds(),
         "minimum_heating_off_time_seconds": config.minimum_heating_off_time.total_seconds(),
+        "diagnostic_profile": config.diagnostic_profile,
+        "debug_duration_seconds": (
+            config.debug_duration.total_seconds() if config.debug_duration is not None else None
+        ),
+        "configured_debug_duration_seconds": (config.configured_debug_duration.total_seconds()),
+        "diagnostic_profile_before_debug": config.diagnostic_profile_before_debug,
         "primary_measurement_max_age_seconds": config.primary_measurement_max_age.total_seconds(),
         "max_future_skew_seconds": config.max_future_skew.total_seconds(),
         "indeterminate_grace_period_seconds": config.indeterminate_grace_period.total_seconds(),
@@ -144,6 +158,10 @@ def _configuration_provenance(
                 "value": config.minimum_heating_off_time.total_seconds() / 60,
                 "unit": "minutes",
             },
+            "debug_duration_minutes": {
+                "value": config.configured_debug_duration.total_seconds() / 60,
+                "unit": "minutes",
+            },
         },
         "precedence_source": {key: _precedence_source(key, data, options) for key in mutable_keys},
     }
@@ -181,9 +199,13 @@ def _precedence_source(
         CONF_HEATING_TURN_OFF_DIFFERENTIAL,
         CONF_MINIMUM_HEATING_ON_TIME,
         CONF_MINIMUM_HEATING_OFF_TIME,
+        CONF_DIAGNOSTIC_PROFILE,
+        CONF_DEBUG_DURATION,
+        CONF_DEBUG_UNTIL_CHANGED,
+        CONF_DIAGNOSTIC_PROFILE_BEFORE_DEBUG,
     }:
         return "legacy_compatibility_default"
-    return "generated_new_entry_default"
+    return "new_entry_default"
 
 
 async def async_get_config_entry_diagnostics(
@@ -219,6 +241,7 @@ async def async_get_config_entry_diagnostics(
         },
         "operational_snapshot": snapshot_to_dict(snapshot),
         "decision_trace": trace_to_dict(host.snapshot_source.trace),
+        "observability": host.observability.diagnostics(datetime.now(UTC)),
         "counters": {
             "snapshot_revision": snapshot.revision,
             "decision_trace_records": len(host.snapshot_source.trace),

@@ -11,6 +11,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 import custom_components.controlel as component
 from custom_components.controlel.const import (
+    CONF_DIAGNOSTIC_PROFILE,
     CONF_HEATING_TURN_OFF_DIFFERENTIAL,
     CONF_HEATING_TURN_ON_DIFFERENTIAL,
     CONF_INDETERMINATE_GRACE_PERIOD,
@@ -20,20 +21,35 @@ from custom_components.controlel.const import (
     CONF_TARGET_TEMPERATURE,
     CONF_TEMPERATURE_ENTITY_ID,
     CONF_ZONE_NAME,
+    DIAGNOSTIC_PROFILE_BASIC,
+    DIAGNOSTIC_PROFILE_DEBUG,
+    DIAGNOSTIC_PROFILE_DETAILED,
     DOMAIN,
 )
 from custom_components.controlel.diagnostics import async_get_config_entry_diagnostics
 from custom_components.controlel.operational import SafetyState
 
 EXPECTED_SENSOR_KEYS = {
+    "active_demand_cause",
+    "active_lockout_type",
     "core_version",
     "current_temperature",
+    "debug_expiry_deadline",
+    "debug_expiry_remaining",
+    "debug_profile_duration",
+    "decision_trace_capacity",
+    "deferred_command",
+    "deferred_reason",
+    "diagnostic_profile",
     "duplicate_commands_suppressed",
+    "emergency_disable_outcome",
     "grace_deadline",
     "grace_remaining",
+    "heat_demand",
     "heating_disable_threshold",
     "heating_enable_threshold",
-    "heat_demand",
+    "heating_turn_off_differential",
+    "heating_turn_on_differential",
     "hysteresis_demand",
     "integration_version",
     "last_command_outcome",
@@ -43,16 +59,24 @@ EXPECTED_SENSOR_KEYS = {
     "last_meaningful_event",
     "last_requested_command",
     "measurement_age",
+    "measurement_maximum_age",
+    "measurement_stale_deadline",
+    "measurement_stale_remaining",
     "measurement_status",
+    "latest_input_status",
+    "minimum_heating_off_time",
+    "minimum_heating_on_time",
     "minimum_off_deadline",
     "minimum_on_deadline",
-    "active_lockout_type",
+    "operational_summary",
+    "raw_heat_demand",
     "lockout_remaining",
-    "deferred_command",
     "runtime_status",
     "safety_state",
+    "sensor_failure_grace_period",
     "source_control_state",
     "target_temperature",
+    "timeout_action",
 }
 EXPECTED_BINARY_SENSOR_KEYS = {
     "fatal_failure",
@@ -60,13 +84,19 @@ EXPECTED_BINARY_SENSOR_KEYS = {
     "measurement_valid",
     "recoverable_failure",
     "runtime_active",
+    "safety_bypassed_lockout",
+    "emergency_disable_attempted",
 }
 PRIMARY_KEYS = {
     "current_temperature",
     "heat_demand",
     "heating_disable_threshold",
     "heating_enable_threshold",
+    "heating_turn_off_differential",
+    "heating_turn_on_differential",
     "hysteresis_demand",
+    "operational_summary",
+    "raw_heat_demand",
     "safety_state",
     "target_temperature",
 }
@@ -122,8 +152,9 @@ async def test_device_entities_states_unique_ids_and_unload(
     assert hass.states.get(by_key["heat_demand"].entity_id).state == "heat_required"
     assert hass.states.get(by_key["heat_required"].entity_id).state == "on"
     assert hass.states.get(by_key["runtime_active"].entity_id).state == "on"
-    assert hass.states.get(by_key["integration_version"].entity_id).state == "0.4.0"
+    assert hass.states.get(by_key["integration_version"].entity_id).state == "0.5.0"
     assert hass.states.get(by_key["core_version"].entity_id).state == expected_framework_core_version
+    assert hass.states.get(by_key["diagnostic_profile"].entity_id).state == (DIAGNOSTIC_PROFILE_DETAILED)
     assert hass.states.get(by_key["grace_remaining"].entity_id).state == "unavailable"
     assert hass.states.get(by_key["grace_deadline"].entity_id).state == "unavailable"
 
@@ -145,23 +176,57 @@ async def test_reload_rename_and_target_change_keep_one_stable_entity_set(
     expected_unique_ids = {f"{entry.entry_id}_{key}" for key in EXPECTED_SENSOR_KEYS | EXPECTED_BINARY_SENSOR_KEYS}
     assert set(original) == expected_unique_ids
 
-    hass.config_entries.async_update_entry(
-        entry,
-        options={
-            CONF_ZONE_NAME: "Upstairs",
-            CONF_TARGET_TEMPERATURE: 22.5,
-        },
-    )
-    await hass.async_block_till_done()
+    for profile in (
+        DIAGNOSTIC_PROFILE_DETAILED,
+        DIAGNOSTIC_PROFILE_DEBUG,
+        DIAGNOSTIC_PROFILE_BASIC,
+    ):
+        hass.config_entries.async_update_entry(
+            entry,
+            options={
+                CONF_DIAGNOSTIC_PROFILE: profile,
+                CONF_ZONE_NAME: "Upstairs",
+                CONF_TARGET_TEMPERATURE: 22.5,
+            },
+        )
+        await hass.async_block_till_done()
+        current_entries = er.async_entries_for_config_entry(registry, entry.entry_id)
+        assert {item.unique_id: item.entity_id for item in current_entries} == original
+        assert len(current_entries) == len(expected_unique_ids)
 
     current_entries = er.async_entries_for_config_entry(registry, entry.entry_id)
-    assert {item.unique_id: item.entity_id for item in current_entries} == original
-    assert len(current_entries) == len(expected_unique_ids)
     target = next(item for item in current_entries if item.unique_id.endswith("_target_temperature"))
     assert hass.states.get(target.entity_id).state == "22.5"
     devices = dr.async_entries_for_config_entry(dr.async_get(hass), entry.entry_id)
     assert len(devices) == 1
     assert devices[0].name == "Controlel — Upstairs"
+    assert [service for service, _ in service_calls] == ["turn_on"] * 4
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_legacy_effective_profile_survives_unload_and_restart(
+    hass,
+    entry_data,
+    service_calls,
+) -> None:
+    entry = await _setup_entry(hass, entry_data)
+    assert CONF_DIAGNOSTIC_PROFILE not in entry.data
+    assert CONF_DIAGNOSTIC_PROFILE not in entry.options
+    registry = er.async_get(hass)
+    profile = next(
+        item
+        for item in er.async_entries_for_config_entry(registry, entry.entry_id)
+        if item.unique_id.endswith("_diagnostic_profile")
+    )
+    assert hass.states.get(profile.entity_id).state == DIAGNOSTIC_PROFILE_DETAILED
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert hass.states.get(profile.entity_id).state == DIAGNOSTIC_PROFILE_DETAILED
+    assert CONF_DIAGNOSTIC_PROFILE not in entry.data
+    assert CONF_DIAGNOSTIC_PROFILE not in entry.options
     assert await hass.config_entries.async_unload(entry.entry_id)
 
 
@@ -386,7 +451,7 @@ async def test_diagnostics_are_allowlisted_json_safe_and_redact_unknown_entry_da
     serialized = repr(diagnostics)
 
     assert diagnostics["versions"] == {
-        "integration": "0.4.0",
+        "integration": "0.5.0",
         "core": expected_framework_core_version,
     }
     assert diagnostics["operational_snapshot"]["runtime_status"] == "active"
@@ -395,6 +460,7 @@ async def test_diagnostics_are_allowlisted_json_safe_and_redact_unknown_entry_da
     assert diagnostics["decision_trace"]
     assert diagnostics["active_issue_ids"] == []
     provenance = diagnostics["configuration_provenance"]
+    assert diagnostics["configuration"]["diagnostic_profile"] == (DIAGNOSTIC_PROFILE_DETAILED)
     assert provenance["legacy_data_values"][CONF_TARGET_TEMPERATURE] == 21.0
     assert provenance["mutable_options_values"] == {}
     assert provenance["effective_normalized_values"] == diagnostics["configuration"]
@@ -419,11 +485,16 @@ async def test_diagnostics_are_allowlisted_json_safe_and_redact_unknown_entry_da
             "value": 0.0,
             "unit": "minutes",
         },
+        "debug_duration_minutes": {
+            "value": 60.0,
+            "unit": "minutes",
+        },
     }
     assert set(provenance["precedence_source"].values()) == {
         "config_entry.data",
         "legacy_compatibility_default",
     }
+    assert provenance["precedence_source"][CONF_DIAGNOSTIC_PROFILE] == ("legacy_compatibility_default")
     assert "must-not-appear" not in serialized
     assert "password" not in serialized
     assert "token" not in serialized
@@ -440,6 +511,7 @@ async def test_diagnostics_report_mixed_data_options_precedence(
         title="Living room",
         data=entry_data,
         options={
+            CONF_DIAGNOSTIC_PROFILE: DIAGNOSTIC_PROFILE_BASIC,
             CONF_TARGET_TEMPERATURE: 22.5,
             CONF_PRIMARY_MEASUREMENT_MAX_AGE: 90.0,
         },
@@ -458,12 +530,15 @@ async def test_diagnostics_report_mixed_data_options_precedence(
 
     assert provenance["legacy_data_values"][CONF_TARGET_TEMPERATURE] == 21.0
     assert provenance["mutable_options_values"] == {
+        CONF_DIAGNOSTIC_PROFILE: DIAGNOSTIC_PROFILE_BASIC,
         CONF_TARGET_TEMPERATURE: 22.5,
         CONF_PRIMARY_MEASUREMENT_MAX_AGE: 90.0,
     }
     assert provenance["effective_normalized_values"]["target_temperature"] == 22.5
     assert provenance["effective_normalized_values"]["primary_measurement_max_age_seconds"] == 90.0
+    assert provenance["effective_normalized_values"]["diagnostic_profile"] == (DIAGNOSTIC_PROFILE_BASIC)
     assert provenance["precedence_source"][CONF_TARGET_TEMPERATURE] == ("config_entry.options")
     assert provenance["precedence_source"][CONF_PRIMARY_MEASUREMENT_MAX_AGE] == ("config_entry.options")
+    assert provenance["precedence_source"][CONF_DIAGNOSTIC_PROFILE] == ("config_entry.options")
     assert provenance["precedence_source"][CONF_INDETERMINATE_GRACE_PERIOD] == ("config_entry.data")
     assert await hass.config_entries.async_unload(entry.entry_id)

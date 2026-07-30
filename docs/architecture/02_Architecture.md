@@ -29,6 +29,22 @@ One scheduler deadline represents the earliest demand-validity, safety-grace,
 or deferred-command reevaluation. Expiry always reevaluates current state.
 Generation checks reject stale callbacks after rescheduling, reload, or stop.
 
+## Integration observability controller
+
+The integration owns presentation policy separately from the core runtime.
+One `ObservabilityController` per config entry selects Basic event-driven,
+Detailed 10-second, or Debug one-second cadence and 20/100/500-record trace
+capacity. It schedules only while at least one supported countdown is active,
+updates only elapsed/countdown subscribers on ticks, and uses cancellation plus
+generation checks to reject callbacks after reschedule, reload, unload, stop,
+replacement, fatal transition, or Debug expiry.
+
+Profiles never feed back into measurement admission, hysteresis, safety,
+demand arbitration, source-control policy, or command dispatch. The operational
+summary is selected from stable machine states and describes only demand,
+safety, lockout/deferred action, requested command, and dispatch outcome. It
+never represents an unobserved physical heat-source state.
+
 ## Serialized host boundary
 
 The Home Assistant runtime host is the first authoritative owner of serialized

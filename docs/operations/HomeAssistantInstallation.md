@@ -17,11 +17,11 @@ Protection history is not persisted. After restart or reload, Controlel reads
 the current sensor value deterministically but does not infer prior command
 history or lockout state from the switch.
 
-Controlel `0.4.0` is the current development candidate for one heating zone,
+Controlel `0.5.0` is the current development candidate for one heating zone,
 one primary temperature sensor, and one shared heat source. It requires the
 public core package `controlel==0.2.0`.
 
-Candidate `0.4.0` is not published; use the latest published release for HACS
+Candidate `0.5.0` is not published; use the latest published release for HACS
 custom-repository installation. Controlel is not listed in the default HACS
 store.
 
@@ -101,10 +101,23 @@ and target entities for enabling and disabling heat.
 ## Edit an existing entry
 
 Open **Settings > Devices & services > Controlel > Configure**. The first
-options step edits basic settings; the second edits safety values and custom
-bindings. Saving options preserves the stable IDs, atomically stores mutable
-settings, updates the entry title from the zone name, and reloads the entry.
-Existing `0.1.1` entries need no migration and no delete/recreate cycle.
+options step edits basic settings; the second edits safety, diagnostic profile,
+and custom bindings. Saving options preserves the stable IDs, atomically stores
+mutable settings, updates the entry title from the zone name, and reloads the
+entry. Existing entries need no migration and no delete/recreate cycle.
+
+Diagnostic profiles have stable stored values `basic`, `detailed`, and `debug`.
+New 0.5.0 entries default to Basic. Entries upgraded from 0.4.0 or older that
+have no stored profile resolve to Detailed so their periodic timing visibility
+continues. This fallback is read-time compatibility behavior and does not write
+migration data during setup. Saving the unchanged Options Flow stores the
+resolved Detailed selection normally; an explicitly stored profile always wins.
+Detailed updates active countdowns every 10 seconds. Debug updates only active
+countdown entities every second and displays a Recorder-impact warning. Debug
+expires after 60 minutes by default and returns to the profile that was active
+before Debug; select
+**Keep Debug active until manually changed** to disable expiry. Profile changes
+never change control decisions or entity unique IDs.
 
 ## Operational device and diagnostics
 
@@ -115,8 +128,10 @@ required, and the safety state. Diagnostic entities show measurement validity
 `future_timestamp`, or `not_received`), measurement age, grace remaining,
 latest decision and reason, requested command and service-call outcome,
 meaningful-event and command times, runtime state, failure flags, suppression
-count, and integration/core versions. Age and grace countdowns refresh every
-30 seconds as well as on runtime events.
+count, configured timings, active deadlines and remaining durations, diagnostic
+profile, Debug expiry, trace capacity, and integration/core versions. Configured
+durations remain available when inactive. An unavailable deadline or remaining
+entity means that countdown is inactive, not that the integration failed.
 
 These entities report Controlel's demand and requests. “Service call
 dispatched” means Home Assistant accepted the blocking service call; it does
@@ -125,10 +140,23 @@ through **Configure**, not through a writable dashboard entity.
 
 Home Assistant's config-entry diagnostics download contains only normalized
 configuration, version data, the immutable current operational snapshot,
-entity and owned Repairs IDs, counters, and at most 20 recent in-memory
-decision records. Unknown config-entry fields and unrelated Home Assistant
-state or attributes are excluded. The snapshot and trace are reconstructed on
-reload/restart and are not persistent.
+entity and owned Repairs IDs, counters, and an allowlisted observability section.
+The bounded in-memory trace capacity is 20/100/500 records in
+Basic/Detailed/Debug. Unknown config-entry fields, credentials, arbitrary
+payloads, and unrelated Home Assistant state or attributes are excluded. The
+snapshot and trace are reconstructed on reload/restart and are not persistent.
+
+## Recorder guidance
+
+Controlel cannot rewrite the user's Recorder configuration. Detailed and Debug
+can increase state-change and database volume while a countdown is active,
+especially the one-second Debug remaining-duration entities. If this evidence
+is not needed in history, exclude Controlel's technical `*_remaining` diagnostic
+entities—particularly lockout, grace, measurement-staleness, and Debug-expiry
+remaining—from Recorder using Home Assistant's supported Recorder configuration.
+Configured durations, deadlines, and the operational summary can remain
+recorded. This is a recommendation only; Controlel does not apply exclusions
+automatically.
 
 ## Expected first setup behavior
 

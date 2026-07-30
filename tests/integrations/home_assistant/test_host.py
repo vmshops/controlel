@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from threading import Event, get_ident
 from types import SimpleNamespace
 
@@ -16,7 +16,10 @@ from controlel.application.runtime.runtime_processing_result import (
 from controlel.domain.value_objects.sensor_id import SensorId
 from controlel.domain.value_objects.temperature import Temperature
 from controlel.domain.value_objects.zone_id import ZoneId
-from custom_components.controlel.config import HomeAssistantSensorBinding
+from custom_components.controlel.config import (
+    DiagnosticConfiguration,
+    HomeAssistantSensorBinding,
+)
 from custom_components.controlel.event_loop_bridge import HomeAssistantEventLoopBridge
 from custom_components.controlel.failure_sink import HomeAssistantScheduledFailureSink
 from custom_components.controlel.host import HomeAssistantControlelHost
@@ -38,7 +41,17 @@ def host_config():
         target_temperature=Temperature(21),
         heating_turn_on_differential=0.3,
         heating_turn_off_differential=0.1,
+        primary_measurement_max_age=timedelta(minutes=5),
+        indeterminate_grace_period=timedelta(minutes=1),
+        minimum_heating_on_time=timedelta(minutes=10),
+        minimum_heating_off_time=timedelta(minutes=5),
         indeterminate_timeout_action=SimpleNamespace(value="disable_heating"),
+        diagnostic_configuration=DiagnosticConfiguration(
+            profile="basic",
+            debug_duration=timedelta(hours=1),
+            configured_debug_duration=timedelta(hours=1),
+            profile_before_debug="detailed",
+        ),
     )
 
 

@@ -15,6 +15,10 @@ from controlel.domain.value_objects.zone_id import ZoneId
 
 from .const import (
     CONF_CONTROLLED_ENTITY_ID,
+    CONF_DEBUG_DURATION,
+    CONF_DEBUG_UNTIL_CHANGED,
+    CONF_DIAGNOSTIC_PROFILE,
+    CONF_DIAGNOSTIC_PROFILE_BEFORE_DEBUG,
     CONF_DISABLE_SERVICE_DOMAIN,
     CONF_DISABLE_SERVICE_NAME,
     CONF_DISABLE_TARGET_ENTITY_ID,
@@ -38,7 +42,14 @@ from .const import (
     CONF_ZONE_NAME,
     CONTROL_MODE_CUSTOM,
     CONTROL_MODE_SIMPLE,
+    DEFAULT_DEBUG_DURATION,
+    DEFAULT_DEBUG_UNTIL_CHANGED,
+    DEFAULT_DIAGNOSTIC_PROFILE_BEFORE_DEBUG,
+    DIAGNOSTIC_PROFILE_BASIC,
+    DIAGNOSTIC_PROFILE_DEBUG,
+    DIAGNOSTIC_PROFILE_DETAILED,
     DOMAIN,
+    LEGACY_DIAGNOSTIC_PROFILE,
     LEGACY_HEATING_TURN_OFF_DIFFERENTIAL,
     LEGACY_HEATING_TURN_ON_DIFFERENTIAL,
     LEGACY_MINIMUM_HEATING_OFF_TIME,
@@ -107,6 +118,14 @@ class HeatSourceConfiguration:
 
 
 @dataclass(frozen=True)
+class DiagnosticConfiguration:
+    profile: str
+    debug_duration: timedelta | None
+    configured_debug_duration: timedelta
+    profile_before_debug: str
+
+
+@dataclass(frozen=True)
 class HomeAssistantIntegrationConfig:
     sensor_id: SensorId
     sensor_name: str
@@ -125,6 +144,10 @@ class HomeAssistantIntegrationConfig:
     heat_source: HomeAssistantHeatSourceBinding
     heat_source_control_mode: str
     controlled_entity_id: str | None
+    diagnostic_profile: str
+    debug_duration: timedelta | None
+    configured_debug_duration: timedelta
+    diagnostic_profile_before_debug: str
 
     def __post_init__(self) -> None:
         _validate_nonempty(self.sensor_name, "sensor name")
@@ -151,6 +174,21 @@ class HomeAssistantIntegrationConfig:
             CONTROL_MODE_CUSTOM,
         }:
             raise HomeAssistantConfigurationError("heat source control mode is invalid")
+        if self.diagnostic_profile not in {
+            DIAGNOSTIC_PROFILE_BASIC,
+            DIAGNOSTIC_PROFILE_DETAILED,
+            DIAGNOSTIC_PROFILE_DEBUG,
+        }:
+            raise HomeAssistantConfigurationError("diagnostic profile is invalid")
+        if self.debug_duration is not None and self.debug_duration <= timedelta(0):
+            raise HomeAssistantConfigurationError("Debug duration must be positive")
+        if self.configured_debug_duration <= timedelta(0):
+            raise HomeAssistantConfigurationError("configured Debug duration must be positive")
+        if self.diagnostic_profile_before_debug not in {
+            DIAGNOSTIC_PROFILE_BASIC,
+            DIAGNOSTIC_PROFILE_DETAILED,
+        }:
+            raise HomeAssistantConfigurationError("profile before Debug is invalid")
 
     @property
     def sensor_binding(self) -> HomeAssistantSensorBinding:
@@ -181,6 +219,15 @@ class HomeAssistantIntegrationConfig:
             controlled_entity_id=self.controlled_entity_id,
             minimum_heating_on_time=self.minimum_heating_on_time,
             minimum_heating_off_time=self.minimum_heating_off_time,
+        )
+
+    @property
+    def diagnostic_configuration(self) -> DiagnosticConfiguration:
+        return DiagnosticConfiguration(
+            profile=self.diagnostic_profile,
+            debug_duration=self.debug_duration,
+            configured_debug_duration=self.configured_debug_duration,
+            profile_before_debug=self.diagnostic_profile_before_debug,
         )
 
 
@@ -223,6 +270,27 @@ def integration_config_from_entry_data(
         primary_max_age = timedelta(seconds=_finite_duration(data, CONF_PRIMARY_MEASUREMENT_MAX_AGE, positive=True))
         max_future_skew = timedelta(seconds=_finite_duration(data, CONF_MAX_FUTURE_SKEW))
         grace_period = timedelta(seconds=_finite_duration(data, CONF_INDETERMINATE_GRACE_PERIOD))
+        diagnostic_profile = str(data.get(CONF_DIAGNOSTIC_PROFILE, LEGACY_DIAGNOSTIC_PROFILE))
+        debug_until_changed = data.get(
+            CONF_DEBUG_UNTIL_CHANGED,
+            DEFAULT_DEBUG_UNTIL_CHANGED,
+        )
+        if not isinstance(debug_until_changed, bool):
+            raise HomeAssistantConfigurationError("Debug until changed must be a boolean")
+        configured_debug_duration = timedelta(
+            seconds=_finite_optional_duration(
+                data,
+                CONF_DEBUG_DURATION,
+                DEFAULT_DEBUG_DURATION,
+            )
+        )
+        debug_duration = None if debug_until_changed else configured_debug_duration
+        profile_before_debug = str(
+            data.get(
+                CONF_DIAGNOSTIC_PROFILE_BEFORE_DEBUG,
+                DEFAULT_DIAGNOSTIC_PROFILE_BEFORE_DEBUG,
+            )
+        )
         control_mode = infer_control_mode(data)
         controlled_entity_id: str | None = None
         if control_mode == CONTROL_MODE_SIMPLE:
@@ -265,6 +333,10 @@ def integration_config_from_entry_data(
             heat_source=heat_source,
             heat_source_control_mode=control_mode,
             controlled_entity_id=controlled_entity_id,
+            diagnostic_profile=diagnostic_profile,
+            debug_duration=debug_duration,
+            configured_debug_duration=configured_debug_duration,
+            diagnostic_profile_before_debug=profile_before_debug,
         )
     except (KeyError, TypeError, ValueError) as error:
         if isinstance(error, HomeAssistantConfigurationError):

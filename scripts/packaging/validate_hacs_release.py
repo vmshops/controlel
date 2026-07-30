@@ -37,6 +37,7 @@ EXPECTED_ARCHIVE_FILES = frozenset(
         "host.py",
         "manifest.json",
         "measurement_ingestion.py",
+        "observability.py",
         "operational.py",
         "runtime_executor.py",
         "scheduler.py",

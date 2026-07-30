@@ -22,7 +22,7 @@ def test_manifest_has_required_custom_component_contract():
         "iot_class": "local_push",
         "requirements": ["controlel==0.2.0"],
         "single_config_entry": True,
-        "version": "0.4.0",
+        "version": "0.5.0",
     }
 
 
@@ -32,7 +32,7 @@ def test_core_and_integration_versions_are_intentionally_independent():
         core_version = tomllib.load(pyproject_file)["project"]["version"]
 
     assert core_version == "0.2.0"
-    assert manifest["version"] == INTEGRATION_VERSION == "0.4.0"
+    assert manifest["version"] == INTEGRATION_VERSION == "0.5.0"
     assert manifest["requirements"] == ["controlel==0.2.0"]
     assert manifest["version"] != manifest["requirements"][0].partition("==")[2]
 
@@ -57,6 +57,7 @@ def test_required_integration_files_exist():
         "runtime_executor.py",
         "scheduler.py",
         "measurement_ingestion.py",
+        "observability.py",
         "heat_source.py",
         "failure_sink.py",
         "strings.json",
@@ -79,6 +80,8 @@ def test_operational_translations_are_truthful_and_action_oriented():
         "runtime_active": {"name": "Runtime is active"},
         "recoverable_failure": {"name": "Recoverable failure is active"},
         "fatal_failure": {"name": "Fatal failure is active"},
+        "safety_bypassed_lockout": {"name": "Safety command bypassed source lockout"},
+        "emergency_disable_attempted": {"name": "Emergency heating-off command was attempted"},
     }
     assert sensors["grace_remaining"]["name"] == ("Sensor failure grace time remaining")
     assert sensors["grace_deadline"]["name"] == "Sensor failure grace deadline"

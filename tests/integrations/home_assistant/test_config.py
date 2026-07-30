@@ -17,6 +17,9 @@ from custom_components.controlel.config import (
 )
 from custom_components.controlel.const import (
     CONF_CONTROLLED_ENTITY_ID,
+    CONF_DEBUG_DURATION,
+    CONF_DEBUG_UNTIL_CHANGED,
+    CONF_DIAGNOSTIC_PROFILE,
     CONF_DISABLE_SERVICE_DOMAIN,
     CONF_DISABLE_SERVICE_NAME,
     CONF_DISABLE_TARGET_ENTITY_ID,
@@ -40,11 +43,14 @@ from custom_components.controlel.const import (
     CONF_ZONE_NAME,
     CONTROL_MODE_CUSTOM,
     CONTROL_MODE_SIMPLE,
+    DEFAULT_DEBUG_DURATION,
+    DEFAULT_DIAGNOSTIC_PROFILE,
     DEFAULT_INDETERMINATE_GRACE_PERIOD,
     DEFAULT_INDETERMINATE_TIMEOUT_ACTION,
     DEFAULT_MAX_FUTURE_SKEW,
     DEFAULT_PRIMARY_MEASUREMENT_MAX_AGE,
     DEFAULT_TARGET_TEMPERATURE,
+    LEGACY_DIAGNOSTIC_PROFILE,
 )
 
 
@@ -90,6 +96,9 @@ def test_legacy_031_entry_missing_protection_settings_retains_zero_behavior():
     assert config.heating_turn_off_differential == 0.0
     assert config.minimum_heating_on_time == timedelta(0)
     assert config.minimum_heating_off_time == timedelta(0)
+    assert config.diagnostic_profile == "detailed"
+    assert config.debug_duration == timedelta(minutes=60)
+    assert config.configured_debug_duration == timedelta(minutes=60)
     assert config.heat_source.enable_heating.domain == "switch"
     assert config.heat_source_control_mode == CONTROL_MODE_SIMPLE
     assert config.controlled_entity_id == "switch.boiler"
@@ -237,6 +246,76 @@ def test_defaults_are_safe_and_expressed_in_runtime_seconds():
     assert DEFAULT_MAX_FUTURE_SKEW == 30.0
     assert DEFAULT_INDETERMINATE_GRACE_PERIOD == 120.0
     assert DEFAULT_INDETERMINATE_TIMEOUT_ACTION == "disable_heating"
+    assert DEFAULT_DIAGNOSTIC_PROFILE == "basic"
+    assert LEGACY_DIAGNOSTIC_PROFILE == "detailed"
+    assert DEFAULT_DEBUG_DURATION == 3600.0
+
+
+def test_040_entry_missing_profile_resolves_detailed_without_mutation() -> None:
+    data = entry_data()
+    data.update(
+        {
+            CONF_HEATING_TURN_ON_DIFFERENTIAL: 0.3,
+            CONF_HEATING_TURN_OFF_DIFFERENTIAL: 0.1,
+            CONF_MINIMUM_HEATING_ON_TIME: 600.0,
+            CONF_MINIMUM_HEATING_OFF_TIME: 300.0,
+        }
+    )
+    original = dict(data)
+
+    first_load = integration_config_from_entry(data, {})
+    restarted = integration_config_from_entry(data, {})
+
+    assert first_load.diagnostic_profile == "detailed"
+    assert restarted.diagnostic_profile == "detailed"
+    assert data == original
+    assert CONF_DIAGNOSTIC_PROFILE not in data
+
+
+@pytest.mark.parametrize("profile", ["basic", "detailed"])
+def test_explicit_profile_is_preserved_exactly(profile: str) -> None:
+    data = entry_data()
+    data[CONF_DIAGNOSTIC_PROFILE] = profile
+
+    assert integration_config_from_entry_data(data).diagnostic_profile == profile
+
+
+def test_regulation_configuration_is_identical_across_diagnostic_profiles() -> None:
+    configurations = []
+    for profile in ("basic", "detailed", "debug"):
+        data = entry_data()
+        data[CONF_DIAGNOSTIC_PROFILE] = profile
+        configurations.append(integration_config_from_entry_data(data))
+
+    first = configurations[0]
+    for candidate in configurations[1:]:
+        assert candidate.zone_control == first.zone_control
+        assert candidate.heat_source_configuration == first.heat_source_configuration
+        assert candidate.max_future_skew == first.max_future_skew
+        assert candidate.indeterminate_grace_period == first.indeterminate_grace_period
+        assert candidate.indeterminate_timeout_action is first.indeterminate_timeout_action
+
+
+def test_debug_profile_supports_bounded_and_manual_duration() -> None:
+    bounded = entry_data()
+    bounded.update(
+        {
+            CONF_DIAGNOSTIC_PROFILE: "debug",
+            CONF_DEBUG_DURATION: 1800.0,
+            CONF_DEBUG_UNTIL_CHANGED: False,
+        }
+    )
+    manual = dict(bounded)
+    manual[CONF_DEBUG_UNTIL_CHANGED] = True
+
+    bounded_config = integration_config_from_entry_data(bounded)
+    manual_config = integration_config_from_entry_data(manual)
+
+    assert bounded_config.diagnostic_profile == "debug"
+    assert bounded_config.debug_duration == timedelta(minutes=30)
+    assert manual_config.diagnostic_profile == "debug"
+    assert manual_config.debug_duration is None
+    assert manual_config.configured_debug_duration == timedelta(minutes=30)
 
 
 def test_options_override_mutable_legacy_data_but_never_stable_ids():
