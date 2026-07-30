@@ -4,10 +4,15 @@ import asyncio
 import logging
 from collections import deque
 from collections.abc import Callable, Coroutine
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol, cast
 
 from controlel.application.runtime.control_runtime import ControlRuntime
+from controlel.application.runtime.fatal_shutdown_result import (
+    FatalShutdownEmergencyOutcome,
+    FatalShutdownResult,
+)
 from controlel.application.runtime.heat_demand_evaluation_result import (
     HeatDemandEvaluationResult,
     HeatDemandEvaluationStatus,
@@ -41,15 +46,18 @@ from .measurement_ingestion import (
     StateVersion,
 )
 from .operational import (
+    ActiveLockoutType,
     CommandOutcome,
     DecisionCode,
     DecisionReason,
     DecisionTraceRecord,
+    EmergencyDisableOutcome,
     HeatDemandState,
     MeasurementStatus,
     OperationalSnapshotSource,
     RuntimeStatus,
     SafetyState,
+    SourceControlState,
     initial_snapshot,
 )
 from .runtime_executor import (
@@ -115,6 +123,8 @@ class HomeAssistantControlelHost:
                 sensor_id=config.sensor_id.value,
                 temperature_entity_id=config.temperature_entity_id,
                 target_temperature=config.target_temperature.value,
+                heating_turn_on_differential=config.heating_turn_on_differential,
+                heating_turn_off_differential=config.heating_turn_off_differential,
                 timeout_action=config.indeterminate_timeout_action.value,
                 integration_version=INTEGRATION_VERSION,
                 core_version=core_version,
@@ -245,7 +255,7 @@ class HomeAssistantControlelHost:
 
     def request_fatal_shutdown(self, error: Exception) -> None:
         """Coordinate terminal shutdown on the HA loop after a fatal failure."""
-        if self._stopping or self._stopped:
+        if self._stopping or self._stopped or self._fatal_error is not None:
             return
         self._logger.error(
             "Stopping Controlel after fatal runtime failure",
@@ -258,7 +268,19 @@ class HomeAssistantControlelHost:
             now=now,
             runtime_status=RuntimeStatus.FATAL_ERROR,
             safety_state=SafetyState.FATAL_ERROR,
+            source_control_state=SourceControlState.FATAL_ERROR,
+            minimum_on_deadline=None,
+            minimum_off_deadline=None,
+            active_lockout_type=None,
+            lockout_remaining_seconds=None,
+            deferred_command=None,
+            deferred_reason=None,
+            safety_bypassed_lockout=True,
             fatal_failure_active=True,
+            emergency_disable_attempted=False,
+            emergency_disable_outcome=EmergencyDisableOutcome.REQUESTED,
+            emergency_disable_timestamp=now,
+            original_fatal_cause=type(error).__name__,
             last_command_outcome=CommandOutcome.FAILED_FATAL,
             last_command_timestamp=now,
             last_command_failure_type=type(error).__name__,
@@ -270,12 +292,132 @@ class HomeAssistantControlelHost:
                 safety=SafetyState.FATAL_ERROR,
             ),
         )
-        if not self._initialized:
-            return
+        self._logger.warning("Emergency heating-off command requested")
         self._fatal_shutdown_task = self._create_task(
-            self.async_stop(),
+            self._async_fatal_shutdown(error, now),
             "Controlel fatal runtime shutdown",
         )
+
+    async def _async_fatal_shutdown(
+        self,
+        error: Exception,
+        requested_at: datetime,
+    ) -> None:
+        failed_action = getattr(error, "action", None)
+        if not isinstance(failed_action, HeatingAction):
+            failed_action = None
+
+        fatal_shutdown = getattr(self._runtime, "fatal_shutdown", None)
+        if not callable(fatal_shutdown) or self._executor.closed:
+            self._record_fatal_emergency_outcome(
+                requested_at=requested_at,
+                outcome=EmergencyDisableOutcome.NO_COMMAND_PATH_AVAILABLE,
+                attempted=False,
+                failure_type=None,
+            )
+        else:
+            try:
+                result = await self._executor.async_submit(
+                    fatal_shutdown,
+                    failed_action,
+                    requested_at,
+                )
+            except Exception as emergency_error:
+                self._record_fatal_emergency_outcome(
+                    requested_at=requested_at,
+                    outcome=EmergencyDisableOutcome.FAILED,
+                    attempted=True,
+                    failure_type=type(emergency_error).__name__,
+                )
+            else:
+                if not isinstance(result, FatalShutdownResult):
+                    self._record_fatal_emergency_outcome(
+                        requested_at=requested_at,
+                        outcome=EmergencyDisableOutcome.NO_COMMAND_PATH_AVAILABLE,
+                        attempted=False,
+                        failure_type=None,
+                    )
+                else:
+                    outcome = {
+                        FatalShutdownEmergencyOutcome.DISABLE_DISPATCHED: (EmergencyDisableOutcome.DISPATCHED),
+                        FatalShutdownEmergencyOutcome.DISABLE_FAILED: (EmergencyDisableOutcome.FAILED),
+                        FatalShutdownEmergencyOutcome.DISABLE_SKIPPED_ALREADY_FAILED: (
+                            EmergencyDisableOutcome.SKIPPED_ALREADY_FAILED
+                        ),
+                    }[result.emergency_disable_outcome]
+                    self._record_fatal_emergency_outcome(
+                        requested_at=result.timestamp,
+                        outcome=outcome,
+                        attempted=result.emergency_disable_attempted,
+                        failure_type=result.emergency_failure_type,
+                    )
+
+        await self.async_stop()
+
+    def _record_fatal_emergency_outcome(
+        self,
+        *,
+        requested_at: datetime,
+        outcome: EmergencyDisableOutcome,
+        attempted: bool,
+        failure_type: str | None,
+    ) -> None:
+        code = {
+            EmergencyDisableOutcome.DISPATCHED: (DecisionCode.FATAL_SHUTDOWN_DISABLE_DISPATCHED),
+            EmergencyDisableOutcome.FAILED: DecisionCode.FATAL_SHUTDOWN_DISABLE_FAILED,
+            EmergencyDisableOutcome.SKIPPED_ALREADY_FAILED: (
+                DecisionCode.FATAL_SHUTDOWN_DISABLE_SKIPPED_ALREADY_FAILED
+            ),
+            EmergencyDisableOutcome.NO_COMMAND_PATH_AVAILABLE: (DecisionCode.FATAL_SHUTDOWN_NO_COMMAND_PATH_AVAILABLE),
+        }[outcome]
+        command_outcome = (
+            CommandOutcome.DISPATCHED if outcome is EmergencyDisableOutcome.DISPATCHED else CommandOutcome.FAILED_FATAL
+        )
+        requested = HeatingAction.DISABLE_HEATING.value if attempted else None
+        self.snapshot_source.update(
+            now=requested_at,
+            runtime_status=RuntimeStatus.FATAL_ERROR,
+            safety_state=SafetyState.FATAL_ERROR,
+            source_control_state=SourceControlState.FATAL_ERROR,
+            minimum_on_deadline=None,
+            minimum_off_deadline=None,
+            active_lockout_type=None,
+            lockout_remaining_seconds=None,
+            deferred_command=None,
+            deferred_reason=None,
+            safety_bypassed_lockout=True,
+            fatal_failure_active=True,
+            emergency_disable_attempted=attempted,
+            emergency_disable_outcome=outcome,
+            emergency_disable_timestamp=requested_at,
+            last_requested_command=requested,
+            last_command_outcome=command_outcome,
+            last_command_timestamp=requested_at,
+            last_command_failure_type=failure_type,
+            trace_record=replace(
+                self._trace_record(
+                    code=code,
+                    reason=DecisionReason.FATAL_RUNTIME_FAILURE,
+                    timestamp=requested_at,
+                    requested=requested,
+                    outcome=command_outcome,
+                    safety=SafetyState.FATAL_ERROR,
+                ),
+                emergency_disable_outcome=outcome,
+            ),
+        )
+        wording = {
+            EmergencyDisableOutcome.DISPATCHED: ("Emergency heating-off command dispatched"),
+            EmergencyDisableOutcome.FAILED: "Emergency heating-off command failed",
+            EmergencyDisableOutcome.SKIPPED_ALREADY_FAILED: (
+                "Emergency heating-off command failed; recursive request skipped"
+            ),
+            EmergencyDisableOutcome.NO_COMMAND_PATH_AVAILABLE: ("Unable to request emergency heating-off command"),
+        }[outcome]
+        if outcome is EmergencyDisableOutcome.DISPATCHED:
+            self._logger.warning(wording)
+        else:
+            self._logger.error(wording)
 
     async def async_stop(self) -> None:
         async with self._lifecycle_lock:
@@ -473,6 +615,7 @@ class HomeAssistantControlelHost:
             now=now,
             current_temperature=None,
             measurement_status=status,
+            latest_input_status=status,
             measurement_timestamp=timestamp,
             last_meaningful_event_at=now,
         )
@@ -486,6 +629,7 @@ class HomeAssistantControlelHost:
         base: dict[str, Any] = {
             "current_temperature": measurement.value.value,
             "measurement_status": MeasurementStatus.VALID,
+            "latest_input_status": MeasurementStatus.VALID,
             "measurement_timestamp": measurement.timestamp,
             "last_meaningful_event_at": now,
         }
@@ -497,12 +641,14 @@ class HomeAssistantControlelHost:
                 base.update(
                     current_temperature=None,
                     measurement_status=MeasurementStatus.FUTURE_TIMESTAMP,
+                    latest_input_status=MeasurementStatus.FUTURE_TIMESTAMP,
                     demand_reason=DecisionReason.MEASUREMENT_FUTURE_TIMESTAMP,
                 )
             elif result.reason is TemperatureNoDecisionReason.PRIMARY_MEASUREMENT_EXPIRED:
                 base.update(
                     current_temperature=None,
                     measurement_status=MeasurementStatus.STALE,
+                    latest_input_status=MeasurementStatus.STALE,
                     zone_heat_demand=HeatDemandState.INDETERMINATE,
                     demand_reason=DecisionReason.MEASUREMENT_STALE,
                 )
@@ -524,7 +670,11 @@ class HomeAssistantControlelHost:
             if demand is HeatDemandState.HEAT_REQUIRED
             else DecisionReason.TEMPERATURE_AT_OR_ABOVE_TARGET
         )
-        base.update(zone_heat_demand=demand, demand_reason=reason)
+        base.update(
+            raw_zone_heat_demand=demand,
+            demand_reason=reason,
+            active_demand_cause=reason,
+        )
         evaluation = result.heat_demand_evaluation
         if evaluation is None:
             code = (
@@ -614,6 +764,8 @@ class HomeAssistantControlelHost:
             HeatDemandEvaluationStatus.DEMAND_COMMAND_SUPPRESSED: (CommandOutcome.SUPPRESSED_DUPLICATE),
             HeatDemandEvaluationStatus.SAFETY_COMMAND_EXECUTED: CommandOutcome.DISPATCHED,
             HeatDemandEvaluationStatus.SAFETY_COMMAND_SUPPRESSED: (CommandOutcome.SUPPRESSED_DUPLICATE),
+            HeatDemandEvaluationStatus.DEMAND_COMMAND_DEFERRED: CommandOutcome.DEFERRED,
+            HeatDemandEvaluationStatus.SAFETY_COMMAND_DEFERRED: CommandOutcome.DEFERRED,
         }[result.status]
         if result.status is HeatDemandEvaluationStatus.INDETERMINATE_GRACE:
             code = DecisionCode.INDETERMINATE_PRESERVE_PREVIOUS
@@ -627,6 +779,10 @@ class HomeAssistantControlelHost:
                 else DecisionCode.TIMEOUT_ENABLE_HEATING
             )
             reason = DecisionReason.SAFETY_GRACE_EXPIRED
+        elif outcome is CommandOutcome.DEFERRED:
+            code = DecisionCode.COMMAND_DEFERRED
+            if result.source_control_assessment is not None:
+                reason = DecisionReason(result.source_control_assessment.reason.value)
         elif outcome is CommandOutcome.SUPPRESSED_DUPLICATE:
             code = DecisionCode.COMMAND_SUPPRESSED_DUPLICATE
             reason = DecisionReason.DUPLICATE_COMMAND
@@ -636,12 +792,51 @@ class HomeAssistantControlelHost:
         command_timestamp = result.command.created_at if result.command is not None else None
         changes: dict[str, Any] = {
             "zone_heat_demand": demand,
+            "hysteresis_demand": demand,
             "demand_reason": reason,
+            "active_demand_cause": reason,
             "safety_state": safety,
             "grace_deadline": result.safety_assessment.timeout_at
             if safety is SafetyState.INDETERMINATE_GRACE
             else None,
         }
+        hysteresis = result.hysteresis_assessment
+        if hysteresis is not None and demand is not HeatDemandState.INDETERMINATE:
+            raw_demand = (
+                HeatDemandState.HEAT_REQUIRED if hysteresis.raw_requires_heat else HeatDemandState.NO_HEAT_REQUIRED
+            )
+            filtered_demand = (
+                HeatDemandState.HEAT_REQUIRED
+                if hysteresis.state.demand.value == "heat_required"
+                else HeatDemandState.NO_HEAT_REQUIRED
+            )
+            hysteresis_reason = DecisionReason(hysteresis.reason.value)
+            changes.update(
+                raw_zone_heat_demand=raw_demand,
+                zone_heat_demand=filtered_demand,
+                hysteresis_demand=filtered_demand,
+                heating_enable_threshold=hysteresis.enable_threshold,
+                heating_disable_threshold=hysteresis.disable_threshold,
+                demand_reason=hysteresis_reason,
+                active_demand_cause=hysteresis_reason,
+            )
+            demand = filtered_demand
+            reason = hysteresis_reason
+        source = result.source_control_assessment
+        if source is not None:
+            state = source.state
+            changes.update(
+                source_control_state=SourceControlState(state.phase.value),
+                minimum_on_deadline=state.minimum_on_deadline,
+                minimum_off_deadline=state.minimum_off_deadline,
+                active_lockout_type=(
+                    ActiveLockoutType(source.active_lockout.value) if source.active_lockout is not None else None
+                ),
+                deferred_command=(state.deferred_command.value if state.deferred_command is not None else None),
+                deferred_reason=(state.deferred_reason.value if state.deferred_reason is not None else None),
+                last_normal_command_dispatch=state.last_normal_command_dispatch,
+                safety_bypassed_lockout=source.safety_bypassed_lockout,
+            )
         if command is not None:
             changes.update(
                 last_requested_command=command,
@@ -653,19 +848,25 @@ class HomeAssistantControlelHost:
             changes["duplicate_commands_suppressed"] = self.snapshot_source.current.duplicate_commands_suppressed + 1
         if outcome is CommandOutcome.DISPATCHED:
             changes["recoverable_failure_active"] = False
-        return (
-            changes,
-            self._trace_record(
-                code=code,
-                reason=reason,
-                timestamp=timestamp,
-                measured=measured,
-                demand=demand,
-                requested=command,
-                outcome=outcome,
-                safety=safety,
-            ),
+        trace = self._trace_record(
+            code=code,
+            reason=reason,
+            timestamp=timestamp,
+            measured=measured,
+            demand=demand,
+            requested=command,
+            outcome=outcome,
+            safety=safety,
         )
+        trace = replace(
+            trace,
+            raw_demand=changes.get("raw_zone_heat_demand"),
+            hysteresis_demand=changes.get("hysteresis_demand"),
+            source_control_state=changes.get("source_control_state"),
+            deferred_reason=changes.get("deferred_reason"),
+            safety_bypassed_lockout=changes.get("safety_bypassed_lockout", False),
+        )
+        return changes, trace
 
     def _reason_from_building_demand(
         self,
@@ -706,6 +907,7 @@ class HomeAssistantControlelHost:
             now=datetime.now(UTC),
             current_temperature=measurement.value.value,
             measurement_status=MeasurementStatus.VALID,
+            latest_input_status=MeasurementStatus.VALID,
             measurement_timestamp=measurement.timestamp,
             zone_heat_demand=demand,
             demand_reason=reason,
@@ -775,6 +977,21 @@ class HomeAssistantControlelHost:
             "safety_state": safety_state,
             "grace_deadline": deadline if safety_state is SafetyState.INDETERMINATE_GRACE else None,
         }
+        source = self._runtime.source_control_assessment
+        if source is not None:
+            state = source.state
+            changes.update(
+                source_control_state=SourceControlState(state.phase.value),
+                minimum_on_deadline=state.minimum_on_deadline,
+                minimum_off_deadline=state.minimum_off_deadline,
+                active_lockout_type=(
+                    ActiveLockoutType(source.active_lockout.value) if source.active_lockout is not None else None
+                ),
+                deferred_command=(state.deferred_command.value if state.deferred_command is not None else None),
+                deferred_reason=(state.deferred_reason.value if state.deferred_reason is not None else None),
+                last_normal_command_dispatch=state.last_normal_command_dispatch,
+                safety_bypassed_lockout=source.safety_bypassed_lockout,
+            )
         trace: DecisionTraceRecord | None = None
         if safety_state is SafetyState.INDETERMINATE_GRACE:
             if current.safety_state is not SafetyState.INDETERMINATE_GRACE:

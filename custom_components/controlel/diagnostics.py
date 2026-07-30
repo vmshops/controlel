@@ -21,9 +21,13 @@ from .const import (
     CONF_ENABLE_SERVICE_NAME,
     CONF_ENABLE_TARGET_ENTITY_ID,
     CONF_HEAT_SOURCE_CONTROL_MODE,
+    CONF_HEATING_TURN_OFF_DIFFERENTIAL,
+    CONF_HEATING_TURN_ON_DIFFERENTIAL,
     CONF_INDETERMINATE_GRACE_PERIOD,
     CONF_INDETERMINATE_TIMEOUT_ACTION,
     CONF_MAX_FUTURE_SKEW,
+    CONF_MINIMUM_HEATING_OFF_TIME,
+    CONF_MINIMUM_HEATING_ON_TIME,
     CONF_PRIMARY_MEASUREMENT_MAX_AGE,
     CONF_SENSOR_ID,
     CONF_SENSOR_NAME,
@@ -40,6 +44,10 @@ _COMMON_MUTABLE_KEYS = (
     CONF_SENSOR_NAME,
     CONF_TEMPERATURE_ENTITY_ID,
     CONF_TARGET_TEMPERATURE,
+    CONF_HEATING_TURN_ON_DIFFERENTIAL,
+    CONF_HEATING_TURN_OFF_DIFFERENTIAL,
+    CONF_MINIMUM_HEATING_ON_TIME,
+    CONF_MINIMUM_HEATING_OFF_TIME,
     CONF_PRIMARY_MEASUREMENT_MAX_AGE,
     CONF_MAX_FUTURE_SKEW,
     CONF_INDETERMINATE_GRACE_PERIOD,
@@ -84,6 +92,12 @@ def _normalized_config(config: HomeAssistantIntegrationConfig) -> dict[str, Any]
         "sensor_id": config.sensor_id.value,
         "temperature_entity_id": config.temperature_entity_id,
         "target_temperature": config.target_temperature.value,
+        "heating_turn_on_differential": config.heating_turn_on_differential,
+        "heating_turn_off_differential": config.heating_turn_off_differential,
+        "heating_enable_threshold": (config.target_temperature.value - config.heating_turn_on_differential),
+        "heating_disable_threshold": (config.target_temperature.value + config.heating_turn_off_differential),
+        "minimum_heating_on_time_seconds": config.minimum_heating_on_time.total_seconds(),
+        "minimum_heating_off_time_seconds": config.minimum_heating_off_time.total_seconds(),
         "primary_measurement_max_age_seconds": config.primary_measurement_max_age.total_seconds(),
         "max_future_skew_seconds": config.max_future_skew.total_seconds(),
         "indeterminate_grace_period_seconds": config.indeterminate_grace_period.total_seconds(),
@@ -122,6 +136,14 @@ def _configuration_provenance(
                 "value": config.indeterminate_grace_period.total_seconds() / 60,
                 "unit": "minutes",
             },
+            "minimum_heating_on_time_minutes": {
+                "value": config.minimum_heating_on_time.total_seconds() / 60,
+                "unit": "minutes",
+            },
+            "minimum_heating_off_time_minutes": {
+                "value": config.minimum_heating_off_time.total_seconds() / 60,
+                "unit": "minutes",
+            },
         },
         "precedence_source": {key: _precedence_source(key, data, options) for key in mutable_keys},
     }
@@ -154,6 +176,13 @@ def _precedence_source(
             return "config_entry.options"
         if CONF_ENABLE_TARGET_ENTITY_ID in data:
             return "config_entry.data"
+    if key in {
+        CONF_HEATING_TURN_ON_DIFFERENTIAL,
+        CONF_HEATING_TURN_OFF_DIFFERENTIAL,
+        CONF_MINIMUM_HEATING_ON_TIME,
+        CONF_MINIMUM_HEATING_OFF_TIME,
+    }:
+        return "legacy_compatibility_default"
     return "generated_new_entry_default"
 
 

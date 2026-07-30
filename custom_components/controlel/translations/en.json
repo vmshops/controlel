@@ -10,6 +10,8 @@
           "sensor_name": "Sensor name",
           "temperature_entity_id": "Temperature sensor",
           "target_temperature": "Target temperature",
+          "heating_turn_on_differential": "Heating turn-on differential",
+          "heating_turn_off_differential": "Heating turn-off differential",
           "heat_source_control_mode": "Heat-source control mode",
           "controlled_entity_id": "Controlled heat-source switch",
           "show_advanced": "Configure advanced and safety settings"
@@ -19,6 +21,8 @@
           "sensor_name": "A user-facing name for this temperature measurement inside Controlel.",
           "temperature_entity_id": "The Home Assistant temperature entity used for control.",
           "target_temperature": "Heating is requested while the measured temperature is below this value.",
+          "heating_turn_on_differential": "How far below target the room must fall before heating is requested.",
+          "heating_turn_off_differential": "How far above target the room must rise before heating is stopped.",
           "heat_source_control_mode": "Use one normal switch, or choose custom services for an advanced installation.",
           "controlled_entity_id": "The switch Controlel turns on and off.",
           "show_advanced": "Set stable IDs, safety times, or other advanced values before creating the entry."
@@ -34,6 +38,8 @@
           "max_future_skew": "Future clock tolerance",
           "indeterminate_grace_period_minutes": "Sensor failure grace period",
           "indeterminate_timeout_action": "Timeout action",
+          "minimum_heating_on_time_minutes": "Minimum heating-on time",
+          "minimum_heating_off_time_minutes": "Minimum heating-off time",
           "enable_service_domain": "Enable service domain",
           "enable_service_name": "Enable service name",
           "enable_target_entity_id": "Enable target entity",
@@ -48,6 +54,8 @@
           "max_future_skew": "How much future timestamp error is tolerated before the measurement is rejected.",
           "indeterminate_grace_period_minutes": "How long Controlel preserves the current decision when the sensor becomes unknown, unavailable, invalid, or stale before applying the timeout action.",
           "indeterminate_timeout_action": "What Controlel does if valid measurement data does not return before the grace period expires.",
+          "minimum_heating_on_time_minutes": "Shortest permitted run after an enable command is dispatched; this does not confirm physical boiler state.",
+          "minimum_heating_off_time_minutes": "Shortest permitted idle period after a disable command is dispatched; this does not confirm physical boiler state.",
           "enable_service_domain": "Home Assistant service domain used when heating is required.",
           "enable_service_name": "Home Assistant service called when heating is required.",
           "enable_target_entity_id": "Entity targeted by the enable command.",
@@ -80,6 +88,8 @@
           "sensor_name": "Sensor name",
           "temperature_entity_id": "Temperature sensor",
           "target_temperature": "Target temperature",
+          "heating_turn_on_differential": "Heating turn-on differential",
+          "heating_turn_off_differential": "Heating turn-off differential",
           "heat_source_control_mode": "Heat-source control mode",
           "controlled_entity_id": "Controlled heat-source switch"
         },
@@ -88,6 +98,8 @@
           "sensor_name": "A user-facing name for this temperature measurement inside Controlel.",
           "temperature_entity_id": "The Home Assistant temperature entity used for control.",
           "target_temperature": "Heating is requested while the measured temperature is below this value.",
+          "heating_turn_on_differential": "How far below target the room must fall before heating is requested.",
+          "heating_turn_off_differential": "How far above target the room must rise before heating is stopped.",
           "heat_source_control_mode": "Use one normal switch, or choose custom services for an advanced installation.",
           "controlled_entity_id": "The switch Controlel turns on and off."
         }
@@ -100,6 +112,8 @@
           "max_future_skew": "Future clock tolerance",
           "indeterminate_grace_period_minutes": "Sensor failure grace period",
           "indeterminate_timeout_action": "Timeout action",
+          "minimum_heating_on_time_minutes": "Minimum heating-on time",
+          "minimum_heating_off_time_minutes": "Minimum heating-off time",
           "enable_service_domain": "Enable service domain",
           "enable_service_name": "Enable service name",
           "enable_target_entity_id": "Enable target entity",
@@ -112,6 +126,8 @@
           "max_future_skew": "How much future timestamp error is tolerated before the measurement is rejected.",
           "indeterminate_grace_period_minutes": "How long Controlel preserves the current decision when the sensor becomes unknown, unavailable, invalid, or stale before applying the timeout action.",
           "indeterminate_timeout_action": "What Controlel does if valid measurement data does not return before the grace period expires.",
+          "minimum_heating_on_time_minutes": "Shortest permitted run after an enable command is dispatched; this does not confirm physical boiler state.",
+          "minimum_heating_off_time_minutes": "Shortest permitted idle period after a disable command is dispatched; this does not confirm physical boiler state.",
           "enable_service_domain": "Home Assistant service domain used when heating is required.",
           "enable_service_name": "Home Assistant service called when heating is required.",
           "enable_target_entity_id": "Entity targeted by the enable command.",
@@ -135,6 +151,8 @@
     "sensor": {
       "current_temperature": {"name": "Current temperature"},
       "target_temperature": {"name": "Target temperature"},
+      "heating_enable_threshold": {"name": "Heating enable threshold"},
+      "heating_disable_threshold": {"name": "Heating disable threshold"},
       "measurement_age": {"name": "Measurement age"},
       "measurement_status": {
         "name": "Measurement status",
@@ -156,6 +174,43 @@
           "indeterminate": "Indeterminate"
         }
       },
+      "hysteresis_demand": {
+        "name": "Hysteresis demand",
+        "state": {
+          "heat_required": "Heating requested",
+          "no_heat_required": "No heat required",
+          "indeterminate": "Indeterminate"
+        }
+      },
+      "source_control_state": {
+        "name": "Source-control state",
+        "state": {
+          "idle": "Idle",
+          "heating_requested": "Heating requested",
+          "heating_not_requested": "Heating not requested",
+          "deferred_enable": "Enable deferred",
+          "deferred_disable": "Disable deferred",
+          "stopped": "Stopped",
+          "fatal_error": "Fatal error"
+        }
+      },
+      "active_lockout_type": {
+        "name": "Active lockout type",
+        "state": {
+          "minimum_on": "Minimum on time",
+          "minimum_off": "Minimum off time"
+        }
+      },
+      "lockout_remaining": {"name": "Lockout time remaining"},
+      "deferred_command": {
+        "name": "Deferred command",
+        "state": {
+          "enable_heating": "Enable heating",
+          "disable_heating": "Disable heating"
+        }
+      },
+      "minimum_on_deadline": {"name": "Minimum on deadline"},
+      "minimum_off_deadline": {"name": "Minimum off deadline"},
       "safety_state": {
         "name": "Safety state",
         "state": {
@@ -178,6 +233,7 @@
           "timeout_enable_heating": "Heating-on command requested",
           "command_suppressed_duplicate": "Duplicate command suppressed because it was already requested",
           "command_dispatched": "Command dispatched",
+          "command_deferred": "Command deferred by source protection",
           "command_failed": "Command failed",
           "runtime_started": "Runtime started",
           "runtime_stopped": "Runtime stopped"
@@ -188,6 +244,17 @@
         "state": {
           "temperature_below_target": "Temperature below target",
           "temperature_at_or_above_target": "Temperature at or above target",
+          "below_enable_threshold": "Temperature at or below the heating enable threshold",
+          "above_disable_threshold": "Temperature at or above the heating disable threshold",
+          "inside_hysteresis_deadband": "Temperature inside the hysteresis deadband",
+          "preserved_previous_demand": "Previous logical demand preserved inside the deadband",
+          "legacy_exact_threshold": "Legacy exact-threshold behavior",
+          "startup_from_raw_demand": "Startup demand initialized from the current measurement",
+          "minimum_on_time_active": "Minimum heating-on time is active",
+          "minimum_off_time_active": "Minimum heating-off time is active",
+          "deferred_command_cancelled": "Deferred command cancelled after demand changed",
+          "lockout_expired_reevaluation": "Current demand reevaluated after lockout expiry",
+          "safety_disable_bypassed_lockout": "Safety disable bypassed minimum-on protection",
           "measurement_unavailable": "Measurement unavailable",
           "measurement_unknown": "Measurement unknown",
           "measurement_stale": "Measurement became stale",
@@ -216,6 +283,7 @@
           "suppressed_duplicate": "Duplicate command suppressed because it was already requested",
           "failed_recoverable": "Recoverable service failure",
           "failed_fatal": "Fatal runtime failure"
+          ,"deferred": "Deferred by minimum-time protection"
         }
       },
       "last_command_time": {"name": "Last command time"},

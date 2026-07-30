@@ -108,7 +108,7 @@ async def test_real_repairs_registry_creates_one_stable_error_issue_for_fatal_fa
     assert issue is not None
     assert issue.severity is ir.IssueSeverity.ERROR
     assert issue.translation_key == "fatal_runtime_failure"
-    assert issue.translation_placeholders == {"error": "fatal programming failure"}
+    assert issue.translation_placeholders == {"error": "RuntimeError"}
     assert fatal_errors == [error, error]
     assert len([item for item in registry.issues.values() if item.domain == DOMAIN]) == 1
 

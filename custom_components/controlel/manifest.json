@@ -7,7 +7,7 @@
   "integration_type": "hub",
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/vmshops/controlel/issues",
-  "requirements": ["controlel==0.1.0"],
+  "requirements": ["controlel==0.2.0"],
   "single_config_entry": true,
-  "version": "0.3.1"
+  "version": "0.4.0"
 }

@@ -146,7 +146,7 @@ class HomeAssistantScheduledFailureSink:
             is_fixable=False,
             severity=(self._error_severity if self._error_severity is not None else _issue_severity_error()),
             translation_key="fatal_runtime_failure",
-            translation_placeholders={"error": str(error)},
+            translation_placeholders={"error": type(error).__name__},
         )
         if self._fatal_handler is not None:
             self._fatal_handler(error)

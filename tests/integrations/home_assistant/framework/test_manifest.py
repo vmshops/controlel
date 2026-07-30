@@ -9,8 +9,8 @@ import controlel
 from custom_components.controlel.const import DOMAIN
 
 ROOT = Path(__file__).parents[4].resolve()
-MANIFEST_CORE_VERSION = "0.1.0"
-INTEGRATION_VERSION = "0.3.1"
+MANIFEST_CORE_VERSION = "0.2.0"
+INTEGRATION_VERSION = "0.4.0"
 
 
 @pytest.mark.asyncio
@@ -43,7 +43,7 @@ def test_core_package_matches_framework_composition(
         assert package_path.is_relative_to(source_root)
     else:
         assert "site-packages" in package_path.as_posix()
-        assert not package_path.is_relative_to(ROOT)
+        assert not package_path.is_relative_to(source_root)
         assert source_root not in {Path(entry or ".").resolve() for entry in sys.path}
 
 

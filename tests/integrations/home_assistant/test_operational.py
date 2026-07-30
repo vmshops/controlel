@@ -5,11 +5,13 @@ import pytest
 
 from custom_components.controlel.operational import (
     TRACE_LIMIT,
+    ActiveLockoutType,
     CommandOutcome,
     DecisionCode,
     DecisionReason,
     DecisionTraceRecord,
     HeatDemandState,
+    MeasurementStatus,
     OperationalSnapshotSource,
     RuntimeStatus,
     SafetyState,
@@ -31,9 +33,11 @@ def source() -> OperationalSnapshotSource:
             sensor_id="room_temperature",
             temperature_entity_id="sensor.room_temperature",
             target_temperature=21.0,
+            heating_turn_on_differential=0.3,
+            heating_turn_off_differential=0.1,
             timeout_action="disable_heating",
-            integration_version="0.3.1",
-            core_version="0.1.0",
+            integration_version="0.4.0",
+            core_version="0.2.0",
         )
     )
 
@@ -95,6 +99,18 @@ def test_elapsed_values_advance_without_a_measurement_event() -> None:
 
     assert refreshed.measurement_age_seconds == 40
     assert refreshed.grace_remaining_seconds == 90
+
+
+def test_expired_lockout_never_exposes_negative_remaining_duration() -> None:
+    snapshots = source()
+    snapshots.update(
+        now=NOW,
+        active_lockout_type=ActiveLockoutType.MINIMUM_ON,
+        minimum_on_deadline=NOW + timedelta(seconds=10),
+    )
+
+    assert snapshots.snapshot_at(NOW + timedelta(seconds=5)).lockout_remaining_seconds == 5
+    assert snapshots.snapshot_at(NOW + timedelta(seconds=10)).lockout_remaining_seconds is None
 
 
 def test_grace_visibility_is_truthful_across_lifecycle_and_stale_updates() -> None:
@@ -201,6 +217,32 @@ def test_diagnostics_serialization_uses_json_safe_stable_values() -> None:
             "requested_command": "enable_heating",
             "command_outcome": "dispatched",
             "safety_state": "normal",
+            "raw_demand": None,
+            "hysteresis_demand": None,
+            "source_control_state": None,
+            "deferred_reason": None,
+            "safety_bypassed_lockout": False,
+            "emergency_disable_outcome": "none",
             "sequence": 1,
         }
     ]
+
+
+def test_latest_input_status_and_active_demand_cause_remove_ambiguous_snapshot_mapping() -> None:
+    snapshots = source()
+    snapshots.update(
+        now=NOW,
+        measurement_status=MeasurementStatus.STALE,
+        latest_input_status=MeasurementStatus.STALE,
+        demand_reason=DecisionReason.MEASUREMENT_STALE,
+        active_demand_cause=DecisionReason.MEASUREMENT_STALE,
+    )
+
+    snapshot = snapshots.update(
+        now=NOW + timedelta(seconds=1),
+        measurement_status=MeasurementStatus.INVALID_VALUE,
+        latest_input_status=MeasurementStatus.INVALID_VALUE,
+    )
+
+    assert snapshot.latest_input_status is MeasurementStatus.INVALID_VALUE
+    assert snapshot.active_demand_cause is DecisionReason.MEASUREMENT_STALE

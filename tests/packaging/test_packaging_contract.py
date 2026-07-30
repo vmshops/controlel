@@ -99,8 +99,8 @@ def test_manifest_pins_published_core_and_keeps_version_independent() -> None:
     core_version = load_pyproject()["project"]["version"]
 
     assert core_version == "0.2.0"
-    assert manifest["requirements"] == ["controlel==0.1.0"]
-    assert manifest["version"] == "0.3.1"
+    assert manifest["requirements"] == ["controlel==0.2.0"]
+    assert manifest["version"] == "0.4.0"
     assert manifest["version"] != core_version
     assert manifest["issue_tracker"] == "https://github.com/vmshops/controlel/issues"
 
@@ -146,5 +146,5 @@ def test_core_and_integration_tag_namespaces_are_explicit() -> None:
 
     assert "`core-vX.Y.Z` is reserved for core/PyPI releases" in normalized_guide
     assert "`vX.Y.Z` is reserved for Home Assistant integration releases" in normalized_guide
-    assert "core `0.2.0` tag is `core-v0.2.0`" in normalized_guide
+    assert "`core-v0.2.0` is the namespace-correct tag name" in normalized_guide
     assert "existing integration tag `v0.2.0` must remain unchanged" in normalized_guide
