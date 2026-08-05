@@ -499,7 +499,7 @@ def test_scheduled_cancellation_failure_reaches_sink():
     clock.current_time = task.when
     cancellation_error = RuntimeError("cancellation failed")
 
-    def fail_replacement(_deadline) -> None:
+    def fail_replacement(_deadline, **_kwargs) -> None:
         raise cancellation_error
 
     runtime._replace_scheduled_evaluation = fail_replacement

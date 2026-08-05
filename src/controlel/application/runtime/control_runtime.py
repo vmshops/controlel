@@ -61,6 +61,10 @@ from controlel.application.services.temperature_hysteresis_policy import (
     TemperatureHysteresisAssessment,
     TemperatureHysteresisPolicy,
 )
+from controlel.application.services.zone_heat_demand_confirmation_policy import (
+    ZoneHeatDemandConfirmationAssessment,
+    ZoneHeatDemandConfirmationPolicy,
+)
 from controlel.application.state.heat_demand_aggregator import HeatDemandAggregator
 from controlel.application.state.heat_demand_safety_state_store import (
     HeatDemandSafetyStateStore,
@@ -73,6 +77,10 @@ from controlel.application.state.temperature_hysteresis_state import (
     TemperatureHysteresisState,
 )
 from controlel.application.state.zone_demand_store import ZoneDemandStore
+from controlel.application.state.zone_heat_demand_confirmation_state import (
+    ZoneHeatDemandConfirmationPhase,
+    ZoneHeatDemandConfirmationState,
+)
 from controlel.application.state.zone_temperature_aggregator import (
     ZoneTemperatureAggregator,
 )
@@ -80,6 +88,7 @@ from controlel.application.time.clock import Clock
 from controlel.domain.commands.command_family import CommandFamily
 from controlel.domain.commands.heat_source_command import HeatSourceCommand
 from controlel.domain.commands.heating_action import HeatingAction
+from controlel.domain.demands.building_heat_demand import BuildingHeatDemand
 from controlel.domain.demands.building_heat_demand_status import (
     BuildingHeatDemandStatus,
 )
@@ -108,6 +117,7 @@ class ControlRuntime:
         indeterminate_timeout_action: HeatingAction,
         heating_turn_on_differential: float = 0.0,
         heating_turn_off_differential: float = 0.0,
+        heat_demand_confirmation_duration: timedelta = timedelta(0),
         minimum_heating_on_time: timedelta = timedelta(0),
         minimum_heating_off_time: timedelta = timedelta(0),
         demand_arbitrator: DemandArbitrator | None = None,
@@ -143,12 +153,17 @@ class ControlRuntime:
             turn_on_differential=heating_turn_on_differential,
             turn_off_differential=heating_turn_off_differential,
         )
+        self.zone_heat_demand_confirmation_policy = ZoneHeatDemandConfirmationPolicy(
+            confirmation_duration=heat_demand_confirmation_duration,
+        )
         self.source_control_policy = SourceControlPolicy(
             minimum_on_time=minimum_heating_on_time,
             minimum_off_time=minimum_heating_off_time,
         )
         self.temperature_hysteresis_state: TemperatureHysteresisState | None = None
         self.temperature_hysteresis_assessment: TemperatureHysteresisAssessment | None = None
+        self.zone_heat_demand_confirmation_state: ZoneHeatDemandConfirmationState | None = None
+        self.zone_heat_demand_confirmation_assessment: ZoneHeatDemandConfirmationAssessment | None = None
         self.source_control_state: SourceControlState | None = None
         self.source_control_assessment: SourceControlAssessment | None = None
         self.target_resolver = ZoneTargetResolver(
@@ -187,6 +202,13 @@ class ControlRuntime:
         with self._runtime_operation("reevaluate_heat_demand"):
             return self._evaluate_heat_demand(HeatDemandEvaluationTrigger.MANUAL)
 
+    def mark_measurement_indeterminate(self) -> HeatDemandEvaluationResult:
+        """Invalidate current zone input and reevaluate through safety policy."""
+
+        with self._runtime_operation("mark_measurement_indeterminate"):
+            self.zone_demand_store.clear()
+            return self._evaluate_heat_demand(HeatDemandEvaluationTrigger.MANUAL)
+
     def process_temperature(
         self,
         measurement: Measurement,
@@ -211,6 +233,11 @@ class ControlRuntime:
                     self.source_control_state,
                     now=self.source_control_state.last_evaluated_at,
                 )
+            now = self.clock.now()
+            self.zone_heat_demand_confirmation_state = self.zone_heat_demand_confirmation_policy.stopped_state(
+                self.zone_heat_demand_confirmation_state,
+                now=now,
+            )
 
     def fatal_shutdown(
         self,
@@ -243,6 +270,10 @@ class ControlRuntime:
                     pass
             self.source_control_state = self.source_control_policy.fatal_state(
                 self.source_control_state,
+                now=requested_at,
+            )
+            self.zone_heat_demand_confirmation_state = self.zone_heat_demand_confirmation_policy.fatal_state(
+                self.zone_heat_demand_confirmation_state,
                 now=requested_at,
             )
 
@@ -376,7 +407,28 @@ class ControlRuntime:
         indeterminate_start_hint: datetime | None = None,
     ) -> HeatDemandEvaluationResult:
         aggregate_demand = self.heat_demand_aggregator.evaluate()
-        building_heat_demand = self.demand_arbitrator.resolve(aggregate_demand)
+        previous_confirmation_deadline = (
+            self.zone_heat_demand_confirmation_state.confirmation_deadline
+            if self.zone_heat_demand_confirmation_state is not None
+            else None
+        )
+        confirmation_assessment = self.zone_heat_demand_confirmation_policy.evaluate(
+            hysteresis_demand=aggregate_demand.status,
+            now=aggregate_demand.evaluated_at,
+            current_state=self.zone_heat_demand_confirmation_state,
+            deadline_reevaluation=(
+                trigger is HeatDemandEvaluationTrigger.SCHEDULED
+                and self.zone_heat_demand_confirmation_state is not None
+                and self.zone_heat_demand_confirmation_state.confirmation_deadline == scheduled_for
+            ),
+        )
+        self.zone_heat_demand_confirmation_state = confirmation_assessment.state
+        self.zone_heat_demand_confirmation_assessment = confirmation_assessment
+        confirmed_aggregate_demand = _with_confirmed_zone_demand(
+            aggregate_demand,
+            confirmation_assessment.output_demand,
+        )
+        building_heat_demand = self.demand_arbitrator.resolve(confirmed_aggregate_demand)
         safety_assessment = self.heat_demand_safety_policy.evaluate(
             demand=building_heat_demand,
             current_state=self.heat_demand_safety_state_store.get(),
@@ -385,6 +437,11 @@ class ControlRuntime:
         self.heat_demand_safety_state_store.save(safety_assessment.state)
 
         eligibility_deadline = self.heat_demand_deadline_calculator.next_eligibility_change_at(building_heat_demand)
+        confirmation_deadline = confirmation_assessment.state.confirmation_deadline
+        confirmation_callback_invalidated = (
+            previous_confirmation_deadline is not None
+            and confirmation_assessment.state.phase is not ZoneHeatDemandConfirmationPhase.CONFIRMATION_PENDING
+        )
         grace_deadline = (
             safety_assessment.timeout_at
             if safety_assessment.phase is HeatDemandSafetyPhase.INDETERMINATE_GRACE
@@ -395,9 +452,20 @@ class ControlRuntime:
         source_assessment: SourceControlAssessment | None = None
         if safety_assessment.phase is HeatDemandSafetyPhase.INDETERMINATE_GRACE:
             status = HeatDemandEvaluationStatus.INDETERMINATE_GRACE
-            deadlines = [deadline for deadline in (eligibility_deadline, grace_deadline) if deadline is not None]
+            deadlines = [
+                deadline
+                for deadline in (
+                    eligibility_deadline,
+                    grace_deadline,
+                    confirmation_deadline,
+                )
+                if deadline is not None
+            ]
             next_evaluation_at = min(deadlines) if deadlines else None
-            self._replace_scheduled_evaluation(next_evaluation_at)
+            self._replace_scheduled_evaluation(
+                next_evaluation_at,
+                force=confirmation_callback_invalidated,
+            )
         else:
             if safety_assessment.phase is HeatDemandSafetyPhase.DETERMINATE:
                 action = {
@@ -440,12 +508,16 @@ class ControlRuntime:
                 for deadline in (
                     eligibility_deadline,
                     grace_deadline,
+                    confirmation_deadline,
                     source_deadline,
                 )
                 if deadline is not None
             ]
             next_evaluation_at = min(deadlines) if deadlines else None
-            self._replace_scheduled_evaluation(next_evaluation_at)
+            self._replace_scheduled_evaluation(
+                next_evaluation_at,
+                force=confirmation_callback_invalidated,
+            )
             if source_assessment.outcome is SourceControlOutcome.DEFER:
                 status = deferred_status
             elif source_assessment.outcome is SourceControlOutcome.SUPPRESS_DUPLICATE:
@@ -476,17 +548,20 @@ class ControlRuntime:
             scheduled_for=scheduled_for,
             next_evaluation_at=next_evaluation_at,
             hysteresis_assessment=self.temperature_hysteresis_assessment,
+            confirmation_assessment=confirmation_assessment,
             source_control_assessment=source_assessment,
         )
 
     def _replace_scheduled_evaluation(
         self,
         deadline: datetime | None,
+        *,
+        force: bool = False,
     ) -> None:
         if deadline is not None and (deadline.tzinfo is None or deadline.utcoffset() is None):
             raise ValueError("scheduled deadline must be timezone-aware")
 
-        if deadline == self._scheduled_deadline and self._scheduled_handle is not None:
+        if not force and deadline == self._scheduled_deadline and self._scheduled_handle is not None:
             return
 
         old_handle = self._scheduled_handle
@@ -563,3 +638,21 @@ class ControlRuntime:
             scheduled_for=scheduled_for,
             indeterminate_start_hint=scheduled_for,
         )
+
+
+def _with_confirmed_zone_demand(
+    aggregate_demand: BuildingHeatDemand,
+    status: BuildingHeatDemandStatus,
+) -> BuildingHeatDemand:
+    if status is BuildingHeatDemandStatus.INDETERMINATE:
+        return aggregate_demand.model_copy(update={"status": status})
+    requires_heat = status is BuildingHeatDemandStatus.HEAT_REQUIRED
+    eligible_demands = tuple(
+        demand.model_copy(update={"requires_heat": requires_heat}) for demand in aggregate_demand.eligible_demands
+    )
+    return aggregate_demand.model_copy(
+        update={
+            "status": status,
+            "eligible_demands": eligible_demands,
+        }
+    )

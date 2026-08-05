@@ -22,9 +22,12 @@ The goal is to create a reliable heating controller capable of optimizing comfor
 
 Project phase: Home Assistant one-zone host vertical slice
 
-Core package version: 0.2.0 (published and immutable)
+Core package candidate version: 0.3.0
 
 Home Assistant integration candidate version: 0.5.0
+
+Core `0.3.0` is under development and has not been tagged or published. The
+integration manifest remains pinned to published immutable `controlel==0.2.0`.
 
 Use the latest published release for HACS custom-repository installation.
 Version `0.5.0` is under development and has not been tagged or published.
@@ -120,3 +123,18 @@ published version must never be uploaded.
 Repository packaging CI remains validation-only and contains no publication
 automation. See the [core release guide](docs/development/ReleaseGuide.md) for
 the published release record, build validation, and version separation.
+
+## Zone heat-demand confirmation
+
+The core candidate inserts a zone-owned confirmation policy after hysteresis
+and before `IdentityDemandArbitrator`. Positive-duration heat demand must remain
+continuous until its deadline; the deadline reevaluates current hysteresis
+demand rather than replaying stored state. No-heat demand clears immediately.
+Invalid, unavailable, stale, or future-dated input cancels a pending interval,
+and valid recovery starts a complete new interval. Zero duration preserves
+legacy immediate behavior.
+
+This filter is separate from heat-source minimum-off protection and does not
+detect an open window. The shared source policy consumes confirmed aggregate
+demand only. Pending state is not persisted across reload or restart, and no
+state claims that a physical heat source is on or off.

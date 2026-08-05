@@ -12,6 +12,9 @@ from controlel.application.services.source_control_policy import (
 from controlel.application.services.temperature_hysteresis_policy import (
     TemperatureHysteresisAssessment,
 )
+from controlel.application.services.zone_heat_demand_confirmation_policy import (
+    ZoneHeatDemandConfirmationAssessment,
+)
 from controlel.domain.commands.heat_source_command import HeatSourceCommand
 from controlel.domain.commands.heating_action import HeatingAction
 from controlel.domain.demands.building_heat_demand import BuildingHeatDemand
@@ -47,6 +50,7 @@ class HeatDemandEvaluationResult:
     scheduled_for: datetime | None
     next_evaluation_at: datetime | None
     hysteresis_assessment: TemperatureHysteresisAssessment | None = None
+    confirmation_assessment: ZoneHeatDemandConfirmationAssessment | None = None
     source_control_assessment: SourceControlAssessment | None = None
 
     def __post_init__(self) -> None:
@@ -70,6 +74,14 @@ class HeatDemandEvaluationResult:
             SourceControlAssessment,
         ):
             raise TypeError("source_control_assessment must be a SourceControlAssessment or None")
+        if self.confirmation_assessment is not None and not isinstance(
+            self.confirmation_assessment,
+            ZoneHeatDemandConfirmationAssessment,
+        ):
+            raise TypeError("confirmation_assessment must be a ZoneHeatDemandConfirmationAssessment or None")
+        if self.confirmation_assessment is not None:
+            if self.confirmation_assessment.state.last_evaluated_at != self.building_heat_demand.evaluated_at:
+                raise ValueError("confirmation assessment and building demand evaluation times must match")
 
         for field_name, value in (
             ("scheduled_for", self.scheduled_for),
