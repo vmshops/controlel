@@ -107,6 +107,7 @@ def test_control_runtime_constructor_uses_shared_source_contract_only():
         "indeterminate_timeout_action",
         "heating_turn_on_differential",
         "heating_turn_off_differential",
+        "heat_demand_confirmation_duration",
         "minimum_heating_on_time",
         "minimum_heating_off_time",
         "demand_arbitrator",

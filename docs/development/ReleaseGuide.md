@@ -1,5 +1,15 @@
 # Release guide
 
+## Milestone 27 core sequencing
+
+Phase A prepares core candidate `0.3.0` while integration `0.5.0` remains
+unchanged. The integration manifest remains pinned to published
+`"requirements": ["controlel==0.2.0"]`.
+
+After separate approval, Phase B may publish immutable core `0.3.0` using
+`core-v0.3.0` and must verify public hashes and a clean installation. Core tags
+remain `core-vX.Y.Z`; integration tags remain `vX.Y.Z`.
+
 ## Milestone 26 sequencing
 
 Phase A prepared core `0.2.0` and integration `0.4.0` while retaining the

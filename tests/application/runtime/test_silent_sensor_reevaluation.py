@@ -136,6 +136,7 @@ def create_runtime(
     timeout_action: HeatingAction = HeatingAction.DISABLE_HEATING,
     turn_on_differential: float = 0.0,
     turn_off_differential: float = 0.0,
+    confirmation_duration: timedelta = timedelta(0),
     minimum_on: timedelta = timedelta(0),
     minimum_off: timedelta = timedelta(0),
     demand_arbitrator=None,
@@ -170,6 +171,7 @@ def create_runtime(
         indeterminate_timeout_action=timeout_action,
         heating_turn_on_differential=turn_on_differential,
         heating_turn_off_differential=turn_off_differential,
+        heat_demand_confirmation_duration=confirmation_duration,
         minimum_heating_on_time=minimum_on,
         minimum_heating_off_time=minimum_off,
         demand_arbitrator=demand_arbitrator,
@@ -197,6 +199,196 @@ def measurement(
         value=Temperature(value),
         timestamp=timestamp,
     )
+
+
+def test_confirmation_deadline_is_owned_by_serial_runtime_scheduler() -> None:
+    runtime, clock, scheduler, port = create_runtime(confirmation_duration=timedelta(minutes=2))
+
+    pending = runtime.process_temperature(measurement(19))
+    confirmation_task = scheduler.active[0]
+
+    assert pending.heat_demand_evaluation.building_heat_demand.status is (BuildingHeatDemandStatus.NO_HEAT_REQUIRED)
+    assert confirmation_task.when == NOW + timedelta(minutes=2)
+    assert [command.action for command in port.commands] == [HeatingAction.DISABLE_HEATING]
+
+    clock.current_time = confirmation_task.when
+    confirmation_task.invoke()
+
+    assert runtime.zone_heat_demand_confirmation_state.confirmed_demand is (BuildingHeatDemandStatus.HEAT_REQUIRED)
+    assert [command.action for command in port.commands] == [
+        HeatingAction.DISABLE_HEATING,
+        HeatingAction.ENABLE_HEATING,
+    ]
+
+
+def test_hysteresis_enable_threshold_equality_starts_confirmation() -> None:
+    runtime, clock, scheduler, _ = create_runtime(
+        turn_on_differential=0.3,
+        turn_off_differential=0.1,
+        confirmation_duration=timedelta(minutes=2),
+    )
+    runtime.process_temperature(measurement(22.2))
+    clock.current_time += timedelta(seconds=1)
+
+    pending = runtime.process_temperature(measurement(21.7, timestamp=clock.current_time))
+
+    assert pending.heat_demand_evaluation.hysteresis_assessment.state.demand.value == "heat_required"
+    assert pending.heat_demand_evaluation.confirmation_assessment.state.phase.value == "confirmation_pending"
+    assert scheduler.active[0].when == clock.current_time + timedelta(minutes=2)
+
+
+def test_startup_inside_hysteresis_deadband_uses_raw_no_heat_without_confirmation() -> None:
+    runtime, _, scheduler, _ = create_runtime(
+        turn_on_differential=0.3,
+        turn_off_differential=0.1,
+        confirmation_duration=timedelta(minutes=2),
+    )
+
+    result = runtime.process_temperature(measurement(22.0))
+
+    assert result.heat_demand_evaluation.hysteresis_assessment.state.demand.value == "no_heat_required"
+    assert result.heat_demand_evaluation.confirmation_assessment.state.phase.value == "no_heat_required"
+    assert result.heat_demand_evaluation.confirmation_assessment.state.confirmation_deadline is None
+    assert [task.when for task in scheduler.active] == [NOW + MAX_AGE + datetime.resolution]
+
+
+def test_restart_with_changed_duration_starts_one_fresh_confirmation_interval() -> None:
+    first_runtime, first_clock, first_scheduler, first_port = create_runtime(
+        confirmation_duration=timedelta(minutes=2),
+    )
+    first_runtime.process_temperature(measurement(19))
+    stale_task = first_scheduler.active[0]
+    first_runtime.stop()
+    first_commands = list(first_port.commands)
+    first_clock.current_time = stale_task.when
+    stale_task.invoke()
+
+    restart_clock = MutableClock(NOW + timedelta(seconds=30))
+    restarted, _, restart_scheduler, _ = create_runtime(
+        clock=restart_clock,
+        confirmation_duration=timedelta(minutes=3),
+    )
+    pending = restarted.process_temperature(
+        measurement(19, timestamp=restart_clock.current_time),
+    )
+
+    assert stale_task.cancelled is True
+    assert first_port.commands == first_commands
+    assert pending.heat_demand_evaluation.confirmation_assessment.state.confirmation_started_at == (
+        restart_clock.current_time
+    )
+    assert pending.heat_demand_evaluation.confirmation_assessment.state.confirmation_deadline == (
+        restart_clock.current_time + timedelta(minutes=3)
+    )
+    assert len(restart_scheduler.active) == 1
+
+
+def test_transient_demand_is_cancelled_without_source_enable_or_lockout() -> None:
+    runtime, clock, scheduler, port = create_runtime(
+        confirmation_duration=timedelta(minutes=2),
+        minimum_off=timedelta(minutes=5),
+    )
+    runtime.process_temperature(measurement(19))
+    stale_confirmation = scheduler.active[0]
+    clock.current_time = NOW + timedelta(minutes=1)
+
+    runtime.process_temperature(measurement(23, timestamp=clock.current_time))
+    commands_before_stale_callback = list(port.commands)
+    stale_confirmation.invoke()
+
+    assert stale_confirmation.cancelled is True
+    assert port.commands == commands_before_stale_callback
+    assert all(command.action is not HeatingAction.ENABLE_HEATING for command in port.commands)
+    assert runtime.source_control_state.deferred_command is None
+
+
+def test_confirmed_zone_demand_then_waits_for_independent_minimum_off() -> None:
+    runtime, clock, scheduler, port = create_runtime(
+        confirmation_duration=timedelta(minutes=2),
+        minimum_off=timedelta(minutes=5),
+    )
+    runtime.process_temperature(measurement(23))
+    clock.current_time = NOW + timedelta(seconds=1)
+    runtime.process_temperature(measurement(19, timestamp=clock.current_time))
+    confirmation_task = scheduler.active[0]
+    clock.current_time = confirmation_task.when
+
+    confirmation_task.invoke()
+
+    assert runtime.zone_heat_demand_confirmation_state.confirmed_demand is (BuildingHeatDemandStatus.HEAT_REQUIRED)
+    assert runtime.source_control_state.deferred_command is (HeatingAction.ENABLE_HEATING)
+    assert runtime.source_control_state.next_reevaluation_deadline == (NOW + timedelta(minutes=5))
+    assert [command.action for command in port.commands] == [HeatingAction.DISABLE_HEATING]
+
+
+def test_arbitrator_receives_only_confirmed_zone_demand() -> None:
+    arbitrator = ForceNoHeatArbitrator()
+    runtime, clock, scheduler, _ = create_runtime(
+        confirmation_duration=timedelta(minutes=2),
+        demand_arbitrator=arbitrator,
+    )
+
+    runtime.process_temperature(measurement(19))
+    assert arbitrator.received[-1].status is BuildingHeatDemandStatus.NO_HEAT_REQUIRED
+    assert arbitrator.received[-1].eligible_demands[0].requires_heat is False
+
+    confirmation_task = scheduler.active[0]
+    clock.current_time = confirmation_task.when
+    confirmation_task.invoke()
+
+    assert arbitrator.received[-1].status is BuildingHeatDemandStatus.HEAT_REQUIRED
+    assert arbitrator.received[-1].eligible_demands[0].requires_heat is True
+
+
+def test_stop_and_fatal_reject_confirmation_callback() -> None:
+    for terminal in ("stop", "fatal"):
+        runtime, clock, scheduler, port = create_runtime(confirmation_duration=timedelta(minutes=2))
+        runtime.process_temperature(measurement(19))
+        task = scheduler.active[0]
+        commands_before = list(port.commands)
+        if terminal == "stop":
+            runtime.stop()
+        else:
+            runtime.fatal_shutdown(None, NOW + timedelta(seconds=1))
+            commands_before = list(port.commands)
+        clock.current_time = task.when
+
+        task.invoke()
+
+        assert task.cancelled is True
+        assert port.commands == commands_before
+
+
+def test_indeterminate_measurement_invalidates_pending_callback_and_starts_grace() -> None:
+    runtime, _, scheduler, port = create_runtime(confirmation_duration=timedelta(minutes=2))
+    runtime.process_temperature(measurement(19))
+    stale_confirmation = scheduler.active[0]
+
+    result = runtime.mark_measurement_indeterminate()
+
+    assert stale_confirmation.cancelled is True
+    assert scheduler.active != [stale_confirmation]
+    assert result.status is HeatDemandEvaluationStatus.INDETERMINATE_GRACE
+    assert runtime.zone_heat_demand_confirmation_state.last_reason.value == (
+        "heat_demand_confirmation_cancelled_measurement_indeterminate"
+    )
+    assert all(command.action is not HeatingAction.ENABLE_HEATING for command in port.commands)
+
+
+def test_already_confirmed_demand_uses_existing_safety_grace_when_indeterminate() -> None:
+    runtime, clock, scheduler, port = create_runtime(confirmation_duration=timedelta(minutes=2))
+    runtime.process_temperature(measurement(19))
+    task = scheduler.active[0]
+    clock.current_time = task.when
+    task.invoke()
+
+    clock.current_time += timedelta(seconds=1)
+    result = runtime.mark_measurement_indeterminate()
+
+    assert result.status is HeatDemandEvaluationStatus.INDETERMINATE_GRACE
+    assert result.safety_assessment.state.last_determinate_status is (BuildingHeatDemandStatus.HEAT_REQUIRED)
+    assert runtime.zone_heat_demand_confirmation_state.confirmed_demand is (BuildingHeatDemandStatus.HEAT_REQUIRED)
+    assert port.commands[-1].action is HeatingAction.ENABLE_HEATING
 
 
 def test_constructor_has_no_clock_schedule_command_or_state_side_effects():

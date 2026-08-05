@@ -16,3 +16,6 @@ class ZoneDemandStore:
 
     def list_current(self) -> list[ZoneDemand]:
         return list(self._demands.values())
+
+    def clear(self) -> None:
+        self._demands.clear()

@@ -27,7 +27,7 @@ from custom_components.controlel.const import (
 ROOT = Path(__file__).parents[4]
 FRAMEWORK_COMPOSITION_ENV = "CONTROLEL_FRAMEWORK_COMPOSITION"
 FRAMEWORK_CORE_VERSION_BY_COMPOSITION = {
-    "local": "0.2.0",
+    "local": "0.3.0",
     "public": "0.2.0",
 }
 

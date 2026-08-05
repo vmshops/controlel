@@ -101,3 +101,28 @@ loop. Bridge coroutines never acquire the host's submission/lifecycle lock.
 The initial adapter is deliberately one entry, one zone, one primary sensor,
 and one shared heat source. Reconfiguration unloads and reconstructs the
 runtime; repositories are never mutated live.
+
+## Zone heat-demand confirmation
+
+Milestone 27 inserts a deterministic core policy between zone hysteresis and
+the demand-arbitration seam:
+
+```text
+measurement -> hysteresis -> zone confirmation -> demand arbitrator
+            -> safety -> shared source control
+```
+
+The state machine is `no_heat_required`, `confirmation_pending`,
+`heat_required_confirmed`, `indeterminate`, `stopped`, or `fatal_error`.
+Positive-duration heat demand starts one fresh interval. Repeated identical
+measurements retain its start and deadline. At the deadline the serialized
+runtime reevaluates current hysteresis demand; it never confirms a stored
+request blindly. A no-heat result removes confirmed demand immediately.
+Indeterminate input cancels a pending interval, while an already-confirmed
+request enters the existing safety/grace policy.
+
+Confirmation is zone-owned. Source minimum on/off policy receives only the
+confirmed aggregate demand and remains independent of zone IDs, measurements,
+Home Assistant entities, and confirmation state. Restart and reload construct
+a fresh policy; pending elapsed time is neither persisted nor inferred from a
+physical heat-source state.
