@@ -22,10 +22,10 @@ def _write_varying_sdist(
     reverse_members: bool,
 ) -> None:
     members = [
-        ("controlel-0.3.0", None),
-        ("controlel-0.3.0/PKG-INFO", b"Metadata-Version: 2.4\nName: controlel\nVersion: 0.3.0\n"),
+        ("controlel-0.4.0", None),
+        ("controlel-0.4.0/PKG-INFO", b"Metadata-Version: 2.4\nName: controlel\nVersion: 0.4.0\n"),
         (
-            "controlel-0.3.0/src/controlel/application/services/temperature_hysteresis_policy.py",
+            "controlel-0.4.0/src/controlel/application/services/temperature_hysteresis_policy.py",
             b'"""Policy."""\n',
         ),
     ]
@@ -88,9 +88,9 @@ def test_canonicalize_sdist_removes_all_container_metadata_variance(
             assert member.uname == ""
             assert member.gname == ""
             assert member.mode == (0o755 if member.isdir() else 0o644)
-        pkg_info = archive.extractfile("controlel-0.3.0/PKG-INFO")
+        pkg_info = archive.extractfile("controlel-0.4.0/PKG-INFO")
         assert pkg_info is not None
-        assert b"Version: 0.3.0" in pkg_info.read()
+        assert b"Version: 0.4.0" in pkg_info.read()
 
 
 def test_source_date_epoch_accepts_only_non_negative_integer(

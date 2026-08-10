@@ -29,6 +29,26 @@ One scheduler deadline represents the earliest demand-validity, safety-grace,
 or deferred-command reevaluation. Expiry always reevaluates current state.
 Generation checks reject stale callbacks after rescheduling, reload, or stop.
 
+## Source-control snapshot semantics
+
+The immutable core source-control snapshot owns aggregate demand, logical
+machine state, successful enable/disable dispatch evidence, passive
+`earliest_next_enable_time` and `earliest_next_disable_time` boundaries,
+current active lockout, deferred command metadata, safety-bypass evidence, and
+the last requested command/outcome. Home Assistant projects this one snapshot;
+entities do not derive competing source state.
+
+A passive boundary records when a future opposite command becomes eligible and
+may exist without current demand for that command. An active lockout exists
+only when the currently requested command is blocked. A deferred command exists
+for exactly the same interval and records reason, start, deadline, and derived
+remaining time. Deadline expiry schedules reevaluation of current aggregate
+demand and current protection state. It never replays a stored command.
+
+Successful dispatch timestamps prove only that an adapter call returned
+successfully. No state name or timestamp claims physical boiler, burner, relay,
+or circulation state without explicit future feedback.
+
 ## Integration observability controller
 
 The integration owns presentation policy separately from the core runtime.

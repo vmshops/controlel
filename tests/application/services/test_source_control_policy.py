@@ -7,7 +7,10 @@ from controlel.application.services.source_control_policy import (
     SourceControlOutcome,
     SourceControlPolicy,
 )
-from controlel.application.state.source_control_state import SourceControlReason
+from controlel.application.state.source_control_state import (
+    SourceCommandOutcome,
+    SourceControlReason,
+)
 from controlel.domain.commands.heating_action import HeatingAction
 
 NOW = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)
@@ -212,3 +215,185 @@ def test_timestamps_must_be_aware_and_monotonic() -> None:
             now=NOW - timedelta(seconds=1),
             current_state=state,
         )
+
+
+def test_passive_enable_boundary_is_not_an_active_lockout_or_deferred_command() -> None:
+    configured = policy()
+    state = dispatch(configured, HeatingAction.DISABLE_HEATING)
+
+    assert state.earliest_next_enable_time == NOW + timedelta(minutes=5)
+    assert state.active_lockout_type is None
+    assert state.active_lockout_deadline is None
+    assert state.deferred_command is None
+    assert state.deferred_deadline is None
+
+
+def test_enable_before_passive_boundary_creates_truthful_lockout_and_deferred_snapshot() -> None:
+    configured = policy()
+    state = dispatch(configured, HeatingAction.DISABLE_HEATING)
+    blocked_at = NOW + timedelta(minutes=1)
+
+    blocked = configured.evaluate(
+        desired_command=HeatingAction.ENABLE_HEATING,
+        now=blocked_at,
+        current_state=state,
+    )
+
+    assert blocked.state.phase.value == "heating_requested_waiting_minimum_off"
+    assert blocked.state.active_lockout_type is ActiveLockoutType.MINIMUM_OFF
+    assert blocked.state.active_lockout_deadline == NOW + timedelta(minutes=5)
+    assert blocked.state.deferred_command is HeatingAction.ENABLE_HEATING
+    assert blocked.state.deferred_since == blocked_at
+    assert blocked.state.deferred_deadline == NOW + timedelta(minutes=5)
+
+
+def test_cleared_demand_cancels_enable_but_retains_passive_boundary() -> None:
+    configured = policy()
+    state = dispatch(configured, HeatingAction.DISABLE_HEATING)
+    blocked = configured.evaluate(
+        desired_command=HeatingAction.ENABLE_HEATING,
+        now=NOW + timedelta(minutes=1),
+        current_state=state,
+    )
+
+    cleared = configured.evaluate(
+        desired_command=HeatingAction.DISABLE_HEATING,
+        now=NOW + timedelta(minutes=2),
+        current_state=blocked.state,
+    )
+
+    assert cleared.state.active_lockout_type is None
+    assert cleared.state.deferred_command is None
+    assert cleared.state.earliest_next_enable_time == NOW + timedelta(minutes=5)
+
+
+def test_deadline_reevaluation_dispatches_current_enable_once_and_clears_deferred_state() -> None:
+    configured = policy()
+    state = dispatch(configured, HeatingAction.DISABLE_HEATING)
+    blocked = configured.evaluate(
+        desired_command=HeatingAction.ENABLE_HEATING,
+        now=NOW + timedelta(minutes=1),
+        current_state=state,
+    )
+    deadline = NOW + timedelta(minutes=5)
+
+    allowed = configured.evaluate(
+        desired_command=HeatingAction.ENABLE_HEATING,
+        now=deadline,
+        current_state=blocked.state,
+        lockout_expiry_reevaluation=True,
+    )
+    recorded = configured.record_dispatched(
+        allowed,
+        dispatched_at=deadline,
+        safety_command=False,
+    )
+    duplicate = configured.evaluate(
+        desired_command=HeatingAction.ENABLE_HEATING,
+        now=deadline,
+        current_state=recorded,
+    )
+
+    assert allowed.outcome is SourceControlOutcome.DISPATCH
+    assert recorded.last_successful_enable_dispatch == deadline
+    assert recorded.active_lockout_type is None
+    assert recorded.deferred_command is None
+    assert duplicate.outcome is SourceControlOutcome.SUPPRESS_DUPLICATE
+
+
+def test_passive_disable_boundary_is_not_active_until_disable_is_requested() -> None:
+    configured = policy()
+    state = dispatch(configured, HeatingAction.ENABLE_HEATING)
+
+    assert state.earliest_next_disable_time == NOW + timedelta(minutes=10)
+    assert state.active_lockout_type is None
+    assert state.deferred_command is None
+
+    blocked = configured.evaluate(
+        desired_command=HeatingAction.DISABLE_HEATING,
+        now=NOW + timedelta(minutes=1),
+        current_state=state,
+    )
+    assert blocked.state.phase.value == "heating_not_requested_waiting_minimum_on"
+    assert blocked.state.active_lockout_type is ActiveLockoutType.MINIMUM_ON
+    assert blocked.state.deferred_command is HeatingAction.DISABLE_HEATING
+
+
+def test_returning_demand_cancels_deferred_disable_without_changing_successful_enable() -> None:
+    configured = policy()
+    state = dispatch(configured, HeatingAction.ENABLE_HEATING)
+    blocked = configured.evaluate(
+        desired_command=HeatingAction.DISABLE_HEATING,
+        now=NOW + timedelta(minutes=1),
+        current_state=state,
+    )
+
+    returned = configured.evaluate(
+        desired_command=HeatingAction.ENABLE_HEATING,
+        now=NOW + timedelta(minutes=2),
+        current_state=blocked.state,
+    )
+
+    assert returned.state.deferred_command is None
+    assert returned.state.active_lockout_type is None
+    assert returned.state.last_successful_enable_dispatch == NOW
+    assert returned.state.earliest_next_disable_time == NOW + timedelta(minutes=10)
+
+
+def test_safety_disable_bypass_clears_false_lockout_claim_after_success() -> None:
+    configured = policy()
+    state = dispatch(configured, HeatingAction.ENABLE_HEATING)
+    safety = configured.evaluate(
+        desired_command=HeatingAction.DISABLE_HEATING,
+        now=NOW + timedelta(minutes=1),
+        current_state=state,
+        safety_command=True,
+    )
+    recorded = configured.record_dispatched(
+        safety,
+        dispatched_at=NOW + timedelta(minutes=1),
+        safety_command=True,
+    )
+
+    assert safety.active_lockout is None
+    assert recorded.phase.value == "safety_override"
+    assert recorded.safety_bypass_active is True
+    assert recorded.active_lockout_type is None
+    assert recorded.deferred_command is None
+    assert recorded.last_successful_disable_dispatch == NOW + timedelta(minutes=1)
+
+
+def test_duplicate_or_unrecorded_dispatch_never_fabricates_success_timestamps() -> None:
+    configured = policy()
+    state = dispatch(configured, HeatingAction.DISABLE_HEATING)
+    duplicate = configured.evaluate(
+        desired_command=HeatingAction.DISABLE_HEATING,
+        now=NOW + timedelta(seconds=1),
+        current_state=state,
+    )
+    fresh = configured.evaluate(
+        desired_command=HeatingAction.ENABLE_HEATING,
+        now=NOW + timedelta(minutes=5),
+        current_state=duplicate.state,
+    )
+
+    assert duplicate.state.last_successful_disable_dispatch == NOW
+    assert duplicate.state.last_successful_enable_dispatch is None
+    assert fresh.state.last_successful_disable_dispatch == NOW
+    assert fresh.state.last_successful_enable_dispatch is None
+
+    failed = configured.record_failed(fresh, failed_at=NOW + timedelta(minutes=5))
+    assert failed.last_command_outcome is SourceCommandOutcome.FAILED
+    assert failed.last_successful_disable_dispatch == NOW
+    assert failed.last_successful_enable_dispatch is None
+
+
+def test_restart_initial_state_has_no_inferred_dispatch_or_protection_history() -> None:
+    state = policy().initial_state(NOW)
+
+    assert state.phase.value == "indeterminate"
+    assert state.last_dispatched_command is None
+    assert state.last_successful_enable_dispatch is None
+    assert state.last_successful_disable_dispatch is None
+    assert state.earliest_next_enable_time is None
+    assert state.earliest_next_disable_time is None

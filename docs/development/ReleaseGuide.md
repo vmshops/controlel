@@ -1,18 +1,19 @@
 # Release guide
 
-## Milestone 27 sequencing
+## Milestone 28 sequencing
 
-Phase A prepares core candidate `0.3.0` and integration candidate `0.6.0`.
-The integration manifest intentionally remains
-`"requirements": ["controlel==0.2.0"]`. Local-source and candidate-wheel
-framework compositions validate the new deterministic core; this composition
-must not be released as an integration.
+Phase A prepares core candidate `0.4.0`. The integration source adds the future
+0.7.0 observability contract, but its manifest and `INTEGRATION_VERSION` remain
+`0.6.0` with `"requirements": ["controlel==0.3.0"]`. Local-source composition
+validates the candidate core; public-package composition proves compatibility
+against the immutable published dependency.
 
-After separate approval, Phase B may publish immutable core `0.3.0` using
-`core-v0.3.0` and must verify public hashes and a clean installation. Only then
-may Phase C change the manifest to exactly `controlel==0.3.0`, restore
-public-package framework validation, and prepare integration tag `v0.6.0`.
-Core tags remain `core-vX.Y.Z`; integration tags remain `vX.Y.Z`.
+After separate approval, Phase B may publish immutable core `0.4.0` using
+`core-v0.4.0` and must verify public hashes and a clean installation. Only then
+may Phase C change the manifest and `INTEGRATION_VERSION` to `0.7.0`, pin
+exactly `controlel==0.4.0`, rerun public composition, and prepare integration
+tag `v0.7.0`. This repository change performs no publication step. Core tags
+remain `core-vX.Y.Z`; integration tags remain `vX.Y.Z`.
 
 ## Milestone 26 sequencing
 
