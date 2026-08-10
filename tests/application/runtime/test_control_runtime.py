@@ -3,9 +3,14 @@ from inspect import signature
 
 from controlel.application.runtime.control_runtime import ControlRuntime
 from controlel.application.runtime.runtime_processing_result import RuntimeProcessingStatus
+from controlel.application.services.heating_episode_observer import HeatingEpisodeObserver
+from controlel.application.services.source_control_policy import SourceControlOutcome
 from controlel.application.services.zone_heat_delivery_controller import ZoneHeatDeliveryController
 from controlel.domain.commands.heat_source_command import HeatSourceCommand
 from controlel.domain.commands.heating_action import HeatingAction
+from controlel.domain.demands.building_heat_demand_status import BuildingHeatDemandStatus
+from controlel.domain.demands.zone_demand import ZoneDemand
+from controlel.domain.demands.zone_heat_demand_input import ZoneHeatDemandInput, ZoneHeatDemandInputReason
 from controlel.domain.entities.zone import Zone
 from controlel.domain.heat_delivery import (
     HeatDeliveryActuatorConfiguration,
@@ -14,6 +19,8 @@ from controlel.domain.heat_delivery import (
     HeatDeliveryCapabilities,
     HeatDeliveryMode,
     HeatDeliveryOwnership,
+    HeatingEpisodeTerminationReason,
+    ObservationQuality,
 )
 from controlel.domain.measurements.measurement import Measurement
 from controlel.domain.repositories.sensor_repository import SensorRepository
@@ -101,6 +108,29 @@ def test_control_runtime_processes_temperature_and_keeps_runtime_measurement():
     assert port.commands == [result.heat_demand_evaluation.command]
 
 
+def test_runtime_stop_bounds_episode_and_fresh_runtime_does_not_restore_it() -> None:
+    runtime, port = create_runtime()
+    runtime.process_temperature(
+        Measurement(
+            sensor_id=SensorId(value="living_room_temperature"),
+            value=Temperature(19),
+            timestamp=NOW,
+        )
+    )
+
+    runtime.stop()
+    reloaded_runtime, _ = create_runtime()
+
+    assert runtime.heating_episode_observer.active_episodes == ()
+    assert (
+        runtime.heating_episode_observer.completed_episodes[0].termination_reason
+        is HeatingEpisodeTerminationReason.RUNTIME_STOPPED
+    )
+    assert reloaded_runtime.heating_episode_observer.active_episodes == ()
+    assert reloaded_runtime.heating_episode_observer.completed_episodes == ()
+    assert len(port.commands) == 1
+
+
 def test_control_runtime_constructor_uses_shared_source_contract_only():
     parameters = signature(ControlRuntime).parameters
 
@@ -135,7 +165,27 @@ class RecordingHeatDeliveryPort:
         self.commands.append(command)
 
 
-def test_runtime_branches_confirmed_zone_demand_to_heat_delivery_without_changing_source() -> None:
+class SelectivelyFailingObserver(HeatingEpisodeObserver):
+    def __init__(self, failed_zone_id: ZoneId) -> None:
+        super().__init__()
+        self.failed_zone_id = failed_zone_id
+        self.called_zone_ids: list[ZoneId] = []
+
+    def observe(self, **kwargs):
+        zone_id = kwargs["zone_id"]
+        self.called_zone_ids.append(zone_id)
+        if zone_id == self.failed_zone_id:
+            raise RuntimeError("observation failed")
+        return super().observe(**kwargs)
+
+
+def create_heat_delivery_runtime() -> tuple[
+    ControlRuntime,
+    NoOpHeatSource,
+    RecordingHeatDeliveryPort,
+    SensorId,
+    ZoneId,
+]:
     sensor_id = SensorId("bedroom_temperature")
     zone_id = ZoneId("bedroom")
     sensors = SensorRepository()
@@ -179,6 +229,66 @@ def test_runtime_branches_confirmed_zone_demand_to_heat_delivery_without_changin
         HeatingAction.DISABLE_HEATING,
         heat_delivery_controller=controller,
     )
+    return runtime, source, delivery_port, sensor_id, zone_id
+
+
+def test_observer_exception_does_not_change_heating_control() -> None:
+    runtime, source, delivery_port, sensor_id, zone_id = create_heat_delivery_runtime()
+    observer = SelectivelyFailingObserver(zone_id)
+    runtime.heating_episode_observer = observer
+
+    result = runtime.process_temperature(Measurement(sensor_id=sensor_id, value=Temperature(20), timestamp=NOW))
+
+    assert result.status is RuntimeProcessingStatus.COMMAND_EXECUTED
+    assert observer.called_zone_ids == [zone_id]
+    assert runtime.heating_episode_observation_errors == {zone_id: "RuntimeError: observation failed"}
+    assert runtime.heating_episode_observation_error == "bedroom: RuntimeError: observation failed"
+    assert [command.value for command in delivery_port.commands] == [30]
+    assert source.commands == [result.heat_demand_evaluation.command]
+    assert result.heat_demand_evaluation.source_control_assessment is runtime.source_control_assessment
+    assert runtime.source_control_assessment.outcome is SourceControlOutcome.DISPATCH
+
+
+def test_one_zone_observation_failure_does_not_skip_remaining_zones() -> None:
+    runtime, source = create_runtime()
+    failed_zone_id = ZoneId("living_room")
+    remaining_zone_id = ZoneId("bedroom")
+    runtime.zone_repository.add(
+        Zone(
+            zone_id=remaining_zone_id,
+            primary_sensor_id=SensorId("bedroom_temperature"),
+            primary_measurement_max_age=timedelta(minutes=5),
+            name="Bedroom",
+            target_temperature=Temperature(22),
+        )
+    )
+    observer = SelectivelyFailingObserver(failed_zone_id)
+    runtime.heating_episode_observer = observer
+    zone_inputs = tuple(
+        ZoneHeatDemandInput(
+            zone_id=zone_id,
+            demand=BuildingHeatDemandStatus.HEAT_REQUIRED,
+            reason=ZoneHeatDemandInputReason.ELIGIBLE,
+            evidence=ZoneDemand(
+                zone_id=zone_id,
+                requires_heat=True,
+                source_sensor_id=SensorId(f"{zone_id.value}_temperature"),
+                observed_at=NOW,
+            ),
+        )
+        for zone_id in (failed_zone_id, remaining_zone_id)
+    )
+
+    runtime._observe_heating_episodes(zone_inputs, captured_at=NOW)
+
+    assert observer.called_zone_ids == [failed_zone_id, remaining_zone_id]
+    assert runtime.heating_episode_observation_errors == {failed_zone_id: "RuntimeError: observation failed"}
+    assert [episode.zone_id for episode in observer.active_episodes] == [remaining_zone_id]
+    assert source.commands == []
+
+
+def test_runtime_branches_confirmed_zone_demand_to_heat_delivery_without_changing_source() -> None:
+    runtime, source, delivery_port, sensor_id, _ = create_heat_delivery_runtime()
 
     result = runtime.process_temperature(Measurement(sensor_id=sensor_id, value=Temperature(20), timestamp=NOW))
     runtime.reevaluate_heat_demand()
@@ -186,3 +296,21 @@ def test_runtime_branches_confirmed_zone_demand_to_heat_delivery_without_changin
     assert [command.value for command in delivery_port.commands] == [30]
     assert len(source.commands) == 1
     assert source.commands[0] == result.heat_demand_evaluation.command
+    episode = runtime.heating_episode_observer.active_episodes[0]
+    assert episode.initial_temperature == 20
+    assert len(episode.samples) == 2
+    assert episode.samples[-1].source_observation.reported_heat_available.quality is ObservationQuality.UNKNOWN
+
+    no_heat_result = runtime.process_temperature(Measurement(sensor_id=sensor_id, value=Temperature(23), timestamp=NOW))
+
+    assert no_heat_result.status is RuntimeProcessingStatus.COMMAND_EXECUTED
+    assert [command.value for command in delivery_port.commands] == [30, 22]
+    assert [command.action for command in source.commands] == [
+        HeatingAction.ENABLE_HEATING,
+        HeatingAction.DISABLE_HEATING,
+    ]
+    assert runtime.heating_episode_observer.active_episodes == ()
+    assert (
+        runtime.heating_episode_observer.completed_episodes[0].termination_reason
+        is HeatingEpisodeTerminationReason.DEMAND_CLEARED
+    )

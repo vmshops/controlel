@@ -49,6 +49,11 @@ from controlel.application.services.heat_demand_safety_policy import (
 from controlel.application.services.heat_source_command_dispatcher import (
     HeatSourceCommandDispatcher,
 )
+from controlel.application.services.heating_episode_observer import (
+    HeatingEpisodeObserver,
+    heat_delivery_observation_from_state,
+    heat_source_observation_from_state,
+)
 from controlel.application.services.measurement_timestamp_validator import (
     MeasurementTimestampValidator,
 )
@@ -95,9 +100,14 @@ from controlel.domain.demands.building_heat_demand_status import (
     BuildingHeatDemandStatus,
 )
 from controlel.domain.demands.zone_demand import ZoneDemand
-from controlel.domain.demands.zone_heat_demand_input import ZoneHeatDemandInputReason
+from controlel.domain.demands.zone_heat_demand_input import ZoneHeatDemandInput, ZoneHeatDemandInputReason
 from controlel.domain.events.temperature_measured_event import (
     TemperatureMeasuredEvent,
+)
+from controlel.domain.heat_delivery import (
+    HeatingEpisodeTerminationReason,
+    ObservationQuality,
+    ObservedValue,
 )
 from controlel.domain.measurements.measurement import Measurement
 from controlel.domain.repositories.sensor_repository import SensorRepository
@@ -134,6 +144,9 @@ class ControlRuntime:
         self.state_store = RuntimeStateStore()
         self.zone_repository = zone_repository
         self.heat_delivery_controller = heat_delivery_controller
+        self.heating_episode_observer = HeatingEpisodeObserver()
+        self.heating_episode_observation_error: str | None = None
+        self.heating_episode_observation_errors: dict[ZoneId, str] = {}
         self.zone_demand_store = ZoneDemandStore()
         self.heat_demand_safety_state_store = HeatDemandSafetyStateStore()
         self.heat_source_state_store = HeatSourceStateStore()
@@ -247,6 +260,10 @@ class ControlRuntime:
                     now=self.source_control_state.last_evaluated_at,
                 )
             now = self.clock.now()
+            self._terminate_heating_episodes(
+                ended_at=now,
+                reason=HeatingEpisodeTerminationReason.RUNTIME_STOPPED,
+            )
             self.zone_heat_demand_confirmation_states = {
                 zone_id: self.zone_heat_demand_confirmation_policy.stopped_state(state, now=now)
                 for zone_id, state in self.zone_heat_demand_confirmation_states.items()
@@ -290,6 +307,10 @@ class ControlRuntime:
             self.source_control_state = self.source_control_policy.fatal_state(
                 self.source_control_state,
                 now=requested_at,
+            )
+            self._terminate_heating_episodes(
+                ended_at=requested_at,
+                reason=HeatingEpisodeTerminationReason.FATAL_SHUTDOWN,
             )
             self.zone_heat_demand_confirmation_states = {
                 zone_id: self.zone_heat_demand_confirmation_policy.fatal_state(state, now=requested_at)
@@ -641,6 +662,10 @@ class ControlRuntime:
                         source_assessment,
                         state=self.source_control_state,
                     )
+                    self._observe_heating_episodes(
+                        tuple(confirmed_inputs),
+                        captured_at=building_heat_demand.evaluated_at,
+                    )
                     raise
                 if executed:
                     self.source_control_state = self.source_control_policy.record_dispatched(
@@ -666,6 +691,10 @@ class ControlRuntime:
                     self.source_control_assessment = source_assessment
                     status = suppressed_status
 
+        self._observe_heating_episodes(
+            tuple(confirmed_inputs),
+            captured_at=building_heat_demand.evaluated_at,
+        )
         return HeatDemandEvaluationResult(
             trigger=trigger,
             status=status,
@@ -677,6 +706,98 @@ class ControlRuntime:
             hysteresis_assessment=self.temperature_hysteresis_assessment,
             confirmation_assessment=confirmation_assessment,
             source_control_assessment=source_assessment,
+        )
+
+    def _observe_heating_episodes(
+        self,
+        zone_inputs: tuple[ZoneHeatDemandInput, ...],
+        *,
+        captured_at: datetime,
+    ) -> None:
+        """Observe completed control facts without influencing control behavior."""
+
+        try:
+            source_observation = heat_source_observation_from_state(
+                self.source_control_state,
+                captured_at=captured_at,
+            )
+        except Exception as error:
+            self.heating_episode_observation_errors = {}
+            self.heating_episode_observation_error = f"{type(error).__name__}: {error}"
+            return
+
+        errors: dict[ZoneId, str] = {}
+        for zone_input in zone_inputs:
+            try:
+                zone = self.zone_repository.get(zone_input.zone_id)
+                latest = self.state_store.get_latest(zone.primary_sensor_id)
+                zone_temperature = self._zone_temperature_observation(
+                    zone_input.reason,
+                    latest,
+                )
+                actuator_observations = (
+                    tuple(
+                        heat_delivery_observation_from_state(state, captured_at=captured_at)
+                        for state in self.heat_delivery_controller.states_for_zone(zone_input.zone_id)
+                    )
+                    if self.heat_delivery_controller is not None
+                    else ()
+                )
+                self.heating_episode_observer.observe(
+                    zone_id=zone_input.zone_id,
+                    confirmed_demand=zone_input.demand,
+                    target_temperature=zone.target_temperature.value,
+                    zone_temperature=zone_temperature,
+                    actuator_observations=actuator_observations,
+                    source_observation=source_observation,
+                    captured_at=captured_at,
+                )
+            except Exception as error:
+                errors[zone_input.zone_id] = f"{type(error).__name__}: {error}"
+
+        self.heating_episode_observation_errors = errors
+        self.heating_episode_observation_error = (
+            "; ".join(
+                f"{zone_id.value}: {error}" for zone_id, error in sorted(errors.items(), key=lambda item: item[0].value)
+            )
+            or None
+        )
+
+    def _terminate_heating_episodes(
+        self,
+        *,
+        ended_at: datetime,
+        reason: HeatingEpisodeTerminationReason,
+    ) -> None:
+        try:
+            self.heating_episode_observer.terminate_all(
+                ended_at=ended_at,
+                reason=reason,
+            )
+        except Exception as error:
+            self.heating_episode_observation_error = f"{type(error).__name__}: {error}"
+
+    @staticmethod
+    def _zone_temperature_observation(
+        reason: ZoneHeatDemandInputReason,
+        measurement: Measurement | None,
+    ) -> ObservedValue[float]:
+        if measurement is None or reason is ZoneHeatDemandInputReason.MISSING:
+            return ObservedValue.unknown("zone measurement is missing")
+        if reason is ZoneHeatDemandInputReason.ELIGIBLE:
+            return ObservedValue.valid(measurement.value.value, measurement.timestamp)
+        if reason is ZoneHeatDemandInputReason.EXPIRED:
+            return ObservedValue(
+                value=measurement.value.value,
+                observed_at=measurement.timestamp,
+                quality=ObservationQuality.STALE,
+                reason="zone measurement is expired",
+            )
+        return ObservedValue(
+            value=measurement.value.value,
+            observed_at=measurement.timestamp,
+            quality=ObservationQuality.CONFLICTING,
+            reason="zone measurement is future-dated",
         )
 
     def _representative_zone_id(

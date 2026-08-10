@@ -13,6 +13,17 @@ from .model import (
     HeatDeliveryOwnership,
     HeatDeliveryState,
 )
+from .observation import (
+    HeatDeliveryActivity,
+    HeatDeliveryObservation,
+    HeatingDemandTransition,
+    HeatingEpisode,
+    HeatingEpisodeSample,
+    HeatingEpisodeTerminationReason,
+    HeatSourceObservation,
+    ObservationQuality,
+    ObservedValue,
+)
 
 __all__ = (
     "HeatDeliveryActuatorConfiguration",
@@ -26,4 +37,13 @@ __all__ = (
     "HeatDeliveryMode",
     "HeatDeliveryOwnership",
     "HeatDeliveryState",
+    "HeatDeliveryActivity",
+    "HeatDeliveryObservation",
+    "HeatingDemandTransition",
+    "HeatingEpisode",
+    "HeatingEpisodeSample",
+    "HeatingEpisodeTerminationReason",
+    "HeatSourceObservation",
+    "ObservationQuality",
+    "ObservedValue",
 )
