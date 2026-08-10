@@ -6,7 +6,19 @@ from controlel.domain.commands.heating_action import HeatingAction
 
 
 class SourceControlPhase(StrEnum):
-    """Logical source-control state; never a claim about physical source state."""
+    """Legacy source-control phase retained for integration compatibility."""
+
+    IDLE = "idle"
+    HEATING_REQUESTED = "heating_requested"
+    HEATING_NOT_REQUESTED = "heating_not_requested"
+    DEFERRED_ENABLE = "deferred_enable"
+    DEFERRED_DISABLE = "deferred_disable"
+    STOPPED = "stopped"
+    FATAL_ERROR = "fatal_error"
+
+
+class DetailedSourceControlPhase(StrEnum):
+    """Precise logical source-control state; never physical source feedback."""
 
     INDETERMINATE = "indeterminate"
     HEATING_NOT_REQUESTED = "heating_not_requested"
@@ -54,6 +66,7 @@ class SourceControlState:
     """
 
     phase: SourceControlPhase
+    detailed_phase: DetailedSourceControlPhase
     aggregate_demand: HeatingAction | None
     last_dispatched_command: HeatingAction | None
     last_successful_enable_dispatch: datetime | None
@@ -75,6 +88,8 @@ class SourceControlState:
     def __post_init__(self) -> None:
         if not isinstance(self.phase, SourceControlPhase):
             raise TypeError("phase must be a SourceControlPhase")
+        if not isinstance(self.detailed_phase, DetailedSourceControlPhase):
+            raise TypeError("detailed_phase must be a DetailedSourceControlPhase")
         for label, value in (
             ("aggregate_demand", self.aggregate_demand),
             ("last_dispatched_command", self.last_dispatched_command),

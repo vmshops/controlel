@@ -4,6 +4,7 @@ from enum import StrEnum
 
 from controlel.application.state.source_control_state import (
     ActiveLockoutType,
+    DetailedSourceControlPhase,
     SourceCommandOutcome,
     SourceControlPhase,
     SourceControlReason,
@@ -23,15 +24,9 @@ class SourceControlAssessment:
     state: SourceControlState
     outcome: SourceControlOutcome
     reason: SourceControlReason
+    active_lockout: ActiveLockoutType | None
+    lockout_deadline: datetime | None
     safety_bypassed_lockout: bool
-
-    @property
-    def active_lockout(self) -> ActiveLockoutType | None:
-        return self.state.active_lockout_type
-
-    @property
-    def lockout_deadline(self) -> datetime | None:
-        return self.state.active_lockout_deadline
 
 
 class SourceControlPolicy:
@@ -47,7 +42,8 @@ class SourceControlPolicy:
     def initial_state(self, now: datetime) -> SourceControlState:
         _aware(now, "now")
         return SourceControlState(
-            phase=SourceControlPhase.INDETERMINATE,
+            phase=SourceControlPhase.IDLE,
+            detailed_phase=DetailedSourceControlPhase.INDETERMINATE,
             aggregate_demand=None,
             last_dispatched_command=None,
             last_successful_enable_dispatch=None,
@@ -83,6 +79,7 @@ class SourceControlPolicy:
         if now < state.last_evaluated_at:
             raise ValueError("source-control evaluation time must not regress")
 
+        active_lockout, lockout_deadline = self._protection_boundary(state, now)
         blocking_lockout, blocking_deadline = self._blocking_lockout(state, desired_command, now)
         bypass = (
             safety_command
@@ -93,7 +90,7 @@ class SourceControlPolicy:
         if bypass:
             updated = _clear_deferred(
                 state,
-                phase=SourceControlPhase.SAFETY_OVERRIDE,
+                detailed_phase=DetailedSourceControlPhase.SAFETY_OVERRIDE,
                 aggregate_demand=desired_command,
                 safety_bypass_active=True,
                 last_requested_command=desired_command,
@@ -104,6 +101,8 @@ class SourceControlPolicy:
                 state=updated,
                 outcome=SourceControlOutcome.DISPATCH,
                 reason=SourceControlReason.SAFETY_DISABLE_BYPASSED_LOCKOUT,
+                active_lockout=active_lockout,
+                lockout_deadline=lockout_deadline,
                 safety_bypassed_lockout=True,
             )
 
@@ -112,6 +111,7 @@ class SourceControlPolicy:
             updated = _clear_deferred(
                 state,
                 phase=_settled_phase(desired_command),
+                detailed_phase=_detailed_settled_phase(desired_command),
                 aggregate_demand=desired_command,
                 safety_bypass_active=False,
                 last_requested_command=desired_command,
@@ -126,6 +126,8 @@ class SourceControlPolicy:
                     if cancelled
                     else SourceControlReason.DUPLICATE_COMMAND
                 ),
+                active_lockout=active_lockout,
+                lockout_deadline=lockout_deadline,
                 safety_bypassed_lockout=False,
             )
 
@@ -143,9 +145,14 @@ class SourceControlPolicy:
             updated = replace(
                 state,
                 phase=(
-                    SourceControlPhase.HEATING_NOT_REQUESTED_WAITING_MINIMUM_ON
+                    SourceControlPhase.DEFERRED_DISABLE
                     if desired_command is HeatingAction.DISABLE_HEATING
-                    else SourceControlPhase.HEATING_REQUESTED_WAITING_MINIMUM_OFF
+                    else SourceControlPhase.DEFERRED_ENABLE
+                ),
+                detailed_phase=(
+                    DetailedSourceControlPhase.HEATING_NOT_REQUESTED_WAITING_MINIMUM_ON
+                    if desired_command is HeatingAction.DISABLE_HEATING
+                    else DetailedSourceControlPhase.HEATING_REQUESTED_WAITING_MINIMUM_OFF
                 ),
                 aggregate_demand=desired_command,
                 active_lockout_type=blocking_lockout,
@@ -163,6 +170,8 @@ class SourceControlPolicy:
                 state=updated,
                 outcome=SourceControlOutcome.DEFER,
                 reason=reason,
+                active_lockout=active_lockout,
+                lockout_deadline=lockout_deadline,
                 safety_bypassed_lockout=False,
             )
 
@@ -173,7 +182,7 @@ class SourceControlPolicy:
         )
         updated = _clear_deferred(
             state,
-            phase=_allowed_phase(desired_command),
+            detailed_phase=_detailed_allowed_phase(desired_command),
             aggregate_demand=desired_command,
             safety_bypass_active=False,
             last_requested_command=desired_command,
@@ -184,6 +193,8 @@ class SourceControlPolicy:
             state=updated,
             outcome=SourceControlOutcome.DISPATCH,
             reason=reason,
+            active_lockout=active_lockout,
+            lockout_deadline=lockout_deadline,
             safety_bypassed_lockout=False,
         )
 
@@ -212,8 +223,11 @@ class SourceControlPolicy:
         )
         return _clear_deferred(
             assessment.state,
-            phase=(
-                SourceControlPhase.SAFETY_OVERRIDE if assessment.safety_bypassed_lockout else _settled_phase(action)
+            phase=_settled_phase(action),
+            detailed_phase=(
+                DetailedSourceControlPhase.SAFETY_OVERRIDE
+                if assessment.safety_bypassed_lockout
+                else _detailed_settled_phase(action)
             ),
             last_dispatched_command=action,
             last_successful_enable_dispatch=enable_dispatch,
@@ -279,6 +293,7 @@ class SourceControlPolicy:
         return _clear_deferred(
             state,
             phase=SourceControlPhase.STOPPED,
+            detailed_phase=DetailedSourceControlPhase.STOPPED,
             safety_bypass_active=False,
             last_evaluated_at=now,
         )
@@ -293,6 +308,7 @@ class SourceControlPolicy:
         return _clear_deferred(
             state,
             phase=SourceControlPhase.FATAL_ERROR,
+            detailed_phase=DetailedSourceControlPhase.FATAL_ERROR,
             earliest_next_enable_time=None,
             earliest_next_disable_time=None,
             safety_bypass_active=True,
@@ -345,19 +361,27 @@ def _clear_deferred(state: SourceControlState, **changes: object) -> SourceContr
     )
 
 
-def _allowed_phase(action: HeatingAction) -> SourceControlPhase:
+def _detailed_allowed_phase(action: HeatingAction) -> DetailedSourceControlPhase:
     return (
-        SourceControlPhase.HEATING_REQUESTED_AND_ALLOWED
+        DetailedSourceControlPhase.HEATING_REQUESTED_AND_ALLOWED
         if action is HeatingAction.ENABLE_HEATING
-        else SourceControlPhase.HEATING_NOT_REQUESTED
+        else DetailedSourceControlPhase.HEATING_NOT_REQUESTED
     )
 
 
 def _settled_phase(action: HeatingAction) -> SourceControlPhase:
     return (
-        SourceControlPhase.HEATING_ACTIVE_REQUEST
+        SourceControlPhase.HEATING_REQUESTED
         if action is HeatingAction.ENABLE_HEATING
         else SourceControlPhase.HEATING_NOT_REQUESTED
+    )
+
+
+def _detailed_settled_phase(action: HeatingAction) -> DetailedSourceControlPhase:
+    return (
+        DetailedSourceControlPhase.HEATING_ACTIVE_REQUEST
+        if action is HeatingAction.ENABLE_HEATING
+        else DetailedSourceControlPhase.HEATING_NOT_REQUESTED
     )
 
 

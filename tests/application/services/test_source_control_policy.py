@@ -8,7 +8,9 @@ from controlel.application.services.source_control_policy import (
     SourceControlPolicy,
 )
 from controlel.application.state.source_control_state import (
+    DetailedSourceControlPhase,
     SourceCommandOutcome,
+    SourceControlPhase,
     SourceControlReason,
 )
 from controlel.domain.commands.heating_action import HeatingAction
@@ -222,6 +224,7 @@ def test_passive_enable_boundary_is_not_an_active_lockout_or_deferred_command() 
     state = dispatch(configured, HeatingAction.DISABLE_HEATING)
 
     assert state.earliest_next_enable_time == NOW + timedelta(minutes=5)
+    assert state.minimum_off_deadline == NOW + timedelta(minutes=5)
     assert state.active_lockout_type is None
     assert state.active_lockout_deadline is None
     assert state.deferred_command is None
@@ -239,7 +242,8 @@ def test_enable_before_passive_boundary_creates_truthful_lockout_and_deferred_sn
         current_state=state,
     )
 
-    assert blocked.state.phase.value == "heating_requested_waiting_minimum_off"
+    assert blocked.state.phase is SourceControlPhase.DEFERRED_ENABLE
+    assert blocked.state.detailed_phase is DetailedSourceControlPhase.HEATING_REQUESTED_WAITING_MINIMUM_OFF
     assert blocked.state.active_lockout_type is ActiveLockoutType.MINIMUM_OFF
     assert blocked.state.active_lockout_deadline == NOW + timedelta(minutes=5)
     assert blocked.state.deferred_command is HeatingAction.ENABLE_HEATING
@@ -265,6 +269,8 @@ def test_cleared_demand_cancels_enable_but_retains_passive_boundary() -> None:
     assert cleared.state.active_lockout_type is None
     assert cleared.state.deferred_command is None
     assert cleared.state.earliest_next_enable_time == NOW + timedelta(minutes=5)
+    assert cleared.active_lockout is ActiveLockoutType.MINIMUM_OFF
+    assert cleared.lockout_deadline == NOW + timedelta(minutes=5)
 
 
 def test_deadline_reevaluation_dispatches_current_enable_once_and_clears_deferred_state() -> None:
@@ -306,6 +312,7 @@ def test_passive_disable_boundary_is_not_active_until_disable_is_requested() -> 
     state = dispatch(configured, HeatingAction.ENABLE_HEATING)
 
     assert state.earliest_next_disable_time == NOW + timedelta(minutes=10)
+    assert state.minimum_on_deadline == NOW + timedelta(minutes=10)
     assert state.active_lockout_type is None
     assert state.deferred_command is None
 
@@ -314,7 +321,8 @@ def test_passive_disable_boundary_is_not_active_until_disable_is_requested() -> 
         now=NOW + timedelta(minutes=1),
         current_state=state,
     )
-    assert blocked.state.phase.value == "heating_not_requested_waiting_minimum_on"
+    assert blocked.state.phase is SourceControlPhase.DEFERRED_DISABLE
+    assert blocked.state.detailed_phase is DetailedSourceControlPhase.HEATING_NOT_REQUESTED_WAITING_MINIMUM_ON
     assert blocked.state.active_lockout_type is ActiveLockoutType.MINIMUM_ON
     assert blocked.state.deferred_command is HeatingAction.DISABLE_HEATING
 
@@ -355,8 +363,12 @@ def test_safety_disable_bypass_clears_false_lockout_claim_after_success() -> Non
         safety_command=True,
     )
 
-    assert safety.active_lockout is None
-    assert recorded.phase.value == "safety_override"
+    assert safety.active_lockout is ActiveLockoutType.MINIMUM_ON
+    assert safety.lockout_deadline == NOW + timedelta(minutes=10)
+    assert safety.state.active_lockout_type is None
+    assert safety.state.active_lockout_deadline is None
+    assert recorded.phase is SourceControlPhase.HEATING_NOT_REQUESTED
+    assert recorded.detailed_phase is DetailedSourceControlPhase.SAFETY_OVERRIDE
     assert recorded.safety_bypass_active is True
     assert recorded.active_lockout_type is None
     assert recorded.deferred_command is None
@@ -391,7 +403,8 @@ def test_duplicate_or_unrecorded_dispatch_never_fabricates_success_timestamps() 
 def test_restart_initial_state_has_no_inferred_dispatch_or_protection_history() -> None:
     state = policy().initial_state(NOW)
 
-    assert state.phase.value == "indeterminate"
+    assert state.phase is SourceControlPhase.IDLE
+    assert state.detailed_phase is DetailedSourceControlPhase.INDETERMINATE
     assert state.last_dispatched_command is None
     assert state.last_successful_enable_dispatch is None
     assert state.last_successful_disable_dispatch is None
