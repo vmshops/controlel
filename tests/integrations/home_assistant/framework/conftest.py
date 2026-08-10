@@ -1,4 +1,6 @@
+import json
 import os
+import tomllib
 from collections.abc import Iterator
 from pathlib import Path
 from shutil import copytree
@@ -26,9 +28,15 @@ from custom_components.controlel.const import (
 
 ROOT = Path(__file__).parents[4]
 FRAMEWORK_COMPOSITION_ENV = "CONTROLEL_FRAMEWORK_COMPOSITION"
+MANIFEST_REQUIREMENT = json.loads(
+    (ROOT / "custom_components" / "controlel" / "manifest.json").read_text(encoding="utf-8")
+)["requirements"][0]
+MANIFEST_CORE_VERSION = MANIFEST_REQUIREMENT.removeprefix("controlel==")
+with (ROOT / "pyproject.toml").open("rb") as pyproject_file:
+    REPOSITORY_CORE_VERSION = tomllib.load(pyproject_file)["project"]["version"]
 FRAMEWORK_CORE_VERSION_BY_COMPOSITION = {
-    "local": "0.4.0",
-    "public": "0.4.0",
+    "local": REPOSITORY_CORE_VERSION,
+    "public": MANIFEST_CORE_VERSION,
 }
 
 
@@ -53,6 +61,12 @@ def framework_composition() -> str:
 def expected_framework_core_version(framework_composition: str) -> str:
     """Return the exact core version selected by the framework composition."""
     return FRAMEWORK_CORE_VERSION_BY_COMPOSITION[framework_composition]
+
+
+@pytest.fixture(scope="session")
+def manifest_core_requirement() -> str:
+    """Return the released public core requirement declared by the integration."""
+    return MANIFEST_REQUIREMENT
 
 
 @pytest.fixture

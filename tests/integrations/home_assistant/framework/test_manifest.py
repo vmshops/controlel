@@ -9,12 +9,14 @@ import controlel
 from custom_components.controlel.const import DOMAIN
 
 ROOT = Path(__file__).parents[4].resolve()
-MANIFEST_CORE_VERSION = "0.4.0"
 INTEGRATION_VERSION = "0.7.0"
 
 
 @pytest.mark.asyncio
-async def test_real_loader_accepts_manifest_and_discovers_component(hass) -> None:
+async def test_real_loader_accepts_manifest_and_discovers_component(
+    hass,
+    manifest_core_requirement: str,
+) -> None:
     integration = await async_get_integration(hass, DOMAIN)
 
     assert integration.domain == DOMAIN
@@ -26,7 +28,7 @@ async def test_real_loader_accepts_manifest_and_discovers_component(hass) -> Non
     assert integration.single_config_entry is True
     assert integration.manifest["integration_type"] == "hub"
     assert integration.manifest["iot_class"] == "local_push"
-    assert integration.requirements == [f"controlel=={MANIFEST_CORE_VERSION}"]
+    assert integration.requirements == [manifest_core_requirement]
     assert integration.file_path.name == DOMAIN
 
 
