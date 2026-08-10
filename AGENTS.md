@@ -1,67 +1,161 @@
-# Controlel Development Instructions
+# Controlel Agent Guidelines
 
-## Project
+## Project purpose
 
-Controlel is a local-first, modular and event-driven regulation platform.
+Controlel is a general heating control platform.
 
-The repository root is the directory containing `.git`, `pyproject.toml`, `src`, `tests` and `docs`.
+The goal is not to create device-specific automations.
+The goal is a robust, explainable and safe heating control architecture
+supporting different homes, boilers, radiators and actuators.
 
-## Architecture
+---
 
-Maintain these layers:
+# Core architecture principles
 
-- `src/controlel/domain`
-  - Pure domain models and business rules.
-  - Must not depend on Home Assistant, MQTT, databases, HTTP or hardware integrations.
+## Separation of layers
 
-- `src/controlel/application`
-  - Use cases, orchestration, handlers, runtime, event bus and interfaces.
+Always keep these responsibilities separated:
 
-- `src/controlel/infrastructure`
-  - External integrations, providers, persistence and hardware adapters.
+Zone:
+- comfort targets
+- occupancy context
+- room demand
 
-Keep these concepts separate:
+Heat Delivery:
+- actuator strategy
+- zone heat delivery
 
-- Measurement = observed value.
-- ControlContext = prepared regulation inputs.
-- Decision = what should happen and why.
-- Event = something that happened.
-- Command = executable requested action.
-- Provider or adapter = communication with the outside world.
+Source Control:
+- boiler permission
+- anti-cycling
+- minimum on/off protection
+- safety
 
-The canonical Sensor model is:
+Future Boiler Optimization:
+- water temperature
+- efficiency optimization
 
-`src/controlel/domain/sensors/sensor.py`
+Never mix these layers.
 
-The canonical SensorId model is:
+---
 
-`src/controlel/domain/value_objects/sensor_id.py`
+# Truthfulness rules
 
-Do not create duplicate domain models in other folders.
+Never infer physical reality.
 
-## Working method
+Examples:
 
-Before editing:
+A successful command is not physical confirmation.
 
-1. Read relevant implementation and tests.
-2. Run `git status`.
-3. Run `pytest` to establish the baseline.
-4. Search all usages before changing a public model or constructor.
-5. Do not guess file paths or class locations.
+Wrong:
+"Valve opened to 50%, therefore valve is 50% open."
 
-While editing:
+Correct:
+"Command requested 50%, physical position unknown."
 
-1. Make the smallest coherent change.
-2. Do not perform unrelated refactors.
-3. Preserve existing contracts unless the task explicitly changes them.
-4. If a contract changes, update all affected usages and tests consistently.
-5. Do not add compatibility behavior merely to satisfy obsolete tests without first identifying the authoritative contract.
-6. Never duplicate a model to fix an import error.
+Wrong:
+"Boiler enable command means burner is running."
 
-After editing run:
+Correct:
+"Heat source permission was granted."
 
-```powershell
-python -m pytest
-ruff check .
-ruff format --check .
-pre-commit run --all-files
+Unknown is not false.
+
+---
+
+# Event-driven architecture
+
+Prefer:
+- events
+- explicit state transitions
+- deterministic deadlines
+
+Avoid:
+- unnecessary polling
+- hidden background loops
+- periodic evaluation without architectural reason
+
+---
+
+# Safety
+
+Safety behavior always has priority.
+
+Never bypass:
+- source protection
+- anti-cycling
+- minimum on/off times
+- deferred commands
+- failure handling
+
+---
+
+# Adaptive behavior
+
+Adaptive or learning behavior must be evidence based.
+
+Never implement:
+- blind boost logic
+- maximum output assumptions
+- reactions to single measurements
+
+Observation comes before adaptation.
+
+---
+
+# Commands and observations
+
+Keep separate:
+
+Command:
+"What we requested"
+
+Observation:
+"What the system reported"
+
+Assessment:
+"What we conclude from evidence"
+
+Decision:
+"What we choose to do"
+
+Never merge these concepts.
+
+---
+
+# Compatibility
+
+Existing behavior is valuable.
+
+Before changing existing logic:
+
+- understand current contracts
+- preserve backward compatibility
+- add tests
+- avoid unnecessary redesign
+
+---
+
+# Testing philosophy
+
+Behavior changes require tests.
+
+Prefer:
+- immutable domain models
+- explicit state
+- deterministic tests
+- explainable failures
+
+---
+
+# When uncertain
+
+Prefer:
+
+Explicit state over assumptions.
+
+Diagnostics over magic.
+
+Safe fallback over aggressive action.
+
+Simple architecture over premature intelligence.
