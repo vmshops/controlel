@@ -24,6 +24,18 @@ from .observation import (
     ObservationQuality,
     ObservedValue,
 )
+from .performance import (
+    DEFAULT_STABLE_TEMPERATURE_TOLERANCE,
+    DEFAULT_TARGET_CHANGE_TOLERANCE,
+    HeatingPerformanceAssessment,
+    HeatingPerformanceAssessmentCriteria,
+    HeatingPerformanceAssessmentReason,
+    HeatingPerformanceAssessmentStatus,
+    HeatingPerformanceEvidenceSummary,
+    ObservationQualityCount,
+    ObservedTemperatureDirection,
+    ObservedTemperatureResponse,
+)
 
 __all__ = (
     "HeatDeliveryActuatorConfiguration",
@@ -46,4 +58,14 @@ __all__ = (
     "HeatSourceObservation",
     "ObservationQuality",
     "ObservedValue",
+    "HeatingPerformanceAssessment",
+    "HeatingPerformanceAssessmentCriteria",
+    "HeatingPerformanceAssessmentReason",
+    "HeatingPerformanceAssessmentStatus",
+    "HeatingPerformanceEvidenceSummary",
+    "ObservationQualityCount",
+    "ObservedTemperatureDirection",
+    "ObservedTemperatureResponse",
+    "DEFAULT_STABLE_TEMPERATURE_TOLERANCE",
+    "DEFAULT_TARGET_CHANGE_TOLERANCE",
 )

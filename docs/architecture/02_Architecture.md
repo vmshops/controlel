@@ -222,3 +222,22 @@ confirmed aggregate demand and remains independent of zone IDs, measurements,
 Home Assistant entities, and confirmation state. Restart and reload construct
 a fresh policy; pending elapsed time is neither persisted nor inferred from a
 physical heat-source state.
+
+## Shadow heating-performance assessment
+
+Completed in-memory heating episodes are submitted after control decisions and
+commands are finalized. The Home Assistant host schedules one-shot assessment
+drains only after the serialized runtime operation returns; assessment uses the
+shared host executor and never holds the runtime execution guard. There is no
+polling loop, periodic worker, command path, or feedback into demand, heat
+delivery, source control, safety, or scheduling.
+
+Assessment criteria contain explicit deterministic tolerances. Results describe
+observed temperature response and evidence quality only. Bounded episode and
+pending-assessment history reports truncation or capacity eviction explicitly;
+neither is interpreted as physical heat delivery.
+
+Deferred beyond this shadow milestone are failed-assessment retry policy,
+persistent history, distinct physical actuator-event accounting, exhaustive
+manual evidence-summary consistency validation, physical burner confirmation,
+adaptive assistance, and source-water-temperature optimization.

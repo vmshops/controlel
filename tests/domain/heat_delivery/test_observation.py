@@ -112,6 +112,8 @@ def test_heating_episode_is_an_immutable_snapshot() -> None:
                 changed_at=NOW,
             ),
         ),
+        total_sample_count=1,
+        samples_truncated=False,
         samples=(sample,),
     )
 

@@ -1,5 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from controlel.application.services.heating_episode_observer import (
     HeatingEpisodeObserver,
     heat_delivery_observation_from_state,
@@ -118,7 +120,31 @@ def test_memory_is_bounded_for_samples_and_completed_episodes() -> None:
 
     assert len(observer.completed_episodes) == 2
     assert all(len(episode.samples) == 2 for episode in observer.completed_episodes)
+    assert all(episode.samples_truncated for episode in observer.completed_episodes)
+    assert all(episode.total_sample_count == 4 for episode in observer.completed_episodes)
     assert observer.completed_episodes[0].started_at == NOW + timedelta(hours=2)
+
+
+@pytest.mark.parametrize(
+    ("sample_count", "expected_truncated"),
+    [(2, False), (3, True), (5, True)],
+)
+def test_episode_history_reports_no_one_and_multiple_evictions(
+    sample_count: int,
+    expected_truncated: bool,
+) -> None:
+    observer = HeatingEpisodeObserver(max_samples_per_episode=2)
+    for index in range(sample_count):
+        observe(
+            observer,
+            BuildingHeatDemandStatus.HEAT_REQUIRED,
+            at=NOW + timedelta(minutes=index),
+        )
+
+    episode = observer.active_episodes[0]
+    assert episode.total_sample_count == sample_count
+    assert episode.retained_sample_count == min(sample_count, 2)
+    assert episode.samples_truncated is expected_truncated
 
 
 def test_new_observer_after_reload_has_no_shared_episode_state() -> None:

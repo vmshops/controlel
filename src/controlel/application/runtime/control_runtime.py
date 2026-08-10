@@ -57,6 +57,9 @@ from controlel.application.services.heating_episode_observer import (
 from controlel.application.services.measurement_timestamp_validator import (
     MeasurementTimestampValidator,
 )
+from controlel.application.services.shadow_heating_performance_monitor import (
+    ShadowHeatingPerformanceMonitor,
+)
 from controlel.application.services.source_control_policy import (
     SourceControlAssessment,
     SourceControlOutcome,
@@ -147,6 +150,7 @@ class ControlRuntime:
         self.heating_episode_observer = HeatingEpisodeObserver()
         self.heating_episode_observation_error: str | None = None
         self.heating_episode_observation_errors: dict[ZoneId, str] = {}
+        self.heating_performance_monitor = ShadowHeatingPerformanceMonitor()
         self.zone_demand_store = ZoneDemandStore()
         self.heat_demand_safety_state_store = HeatDemandSafetyStateStore()
         self.heat_source_state_store = HeatSourceStateStore()
@@ -743,7 +747,7 @@ class ControlRuntime:
                     if self.heat_delivery_controller is not None
                     else ()
                 )
-                self.heating_episode_observer.observe(
+                episode = self.heating_episode_observer.observe(
                     zone_id=zone_input.zone_id,
                     confirmed_demand=zone_input.demand,
                     target_temperature=zone.target_temperature.value,
@@ -752,6 +756,8 @@ class ControlRuntime:
                     source_observation=source_observation,
                     captured_at=captured_at,
                 )
+                if episode is not None and episode.ended_at is not None:
+                    self.heating_performance_monitor.submit_episode(episode)
             except Exception as error:
                 errors[zone_input.zone_id] = f"{type(error).__name__}: {error}"
 
@@ -770,10 +776,12 @@ class ControlRuntime:
         reason: HeatingEpisodeTerminationReason,
     ) -> None:
         try:
-            self.heating_episode_observer.terminate_all(
+            episodes = self.heating_episode_observer.terminate_all(
                 ended_at=ended_at,
                 reason=reason,
             )
+            for episode in episodes:
+                self.heating_performance_monitor.submit_episode(episode)
         except Exception as error:
             self.heating_episode_observation_error = f"{type(error).__name__}: {error}"
 

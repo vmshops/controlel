@@ -16,8 +16,19 @@ from controlel.application.runtime.runtime_processing_result import (
     RuntimeProcessingStatus,
     TemperatureNoDecisionReason,
 )
+from controlel.application.services.heating_performance_assessor import HeatingPerformanceAssessor
+from controlel.application.services.shadow_heating_performance_monitor import ShadowHeatingPerformanceMonitor
 from controlel.application.services.source_control_policy import SourceControlPolicy
 from controlel.domain.commands.heating_action import HeatingAction
+from controlel.domain.demands.building_heat_demand_status import BuildingHeatDemandStatus
+from controlel.domain.heat_delivery import (
+    HeatingDemandTransition,
+    HeatingEpisode,
+    HeatingEpisodeSample,
+    HeatingEpisodeTerminationReason,
+    HeatSourceObservation,
+    ObservedValue,
+)
 from controlel.domain.value_objects.sensor_id import SensorId
 from controlel.domain.value_objects.temperature import Temperature
 from controlel.domain.value_objects.zone_id import ZoneId
@@ -250,6 +261,101 @@ class FakeRuntime:
         self.operations.append(("stop", None))
 
 
+def completed_shadow_episode(offset: int = 0) -> HeatingEpisode:
+    started_at = NOW + timedelta(minutes=offset)
+    ended_at = started_at + timedelta(minutes=1)
+    samples = tuple(
+        HeatingEpisodeSample(
+            captured_at=timestamp,
+            zone_temperature=ObservedValue.valid(temperature, timestamp),
+            target_temperature=21.0,
+            actuator_observations=(),
+            source_observation=HeatSourceObservation(captured_at=timestamp),
+        )
+        for timestamp, temperature in ((started_at, 19.0), (ended_at, 19.5))
+    )
+    return HeatingEpisode(
+        zone_id=ZoneId("room"),
+        started_at=started_at,
+        ended_at=ended_at,
+        termination_reason=HeatingEpisodeTerminationReason.DEMAND_CLEARED,
+        initial_target_temperature=21.0,
+        current_target_temperature=21.0,
+        initial_temperature=19.0,
+        current_temperature=19.5,
+        demand_transitions=(
+            HeatingDemandTransition(demand=BuildingHeatDemandStatus.HEAT_REQUIRED, changed_at=started_at),
+            HeatingDemandTransition(demand=BuildingHeatDemandStatus.NO_HEAT_REQUIRED, changed_at=ended_at),
+        ),
+        total_sample_count=2,
+        samples_truncated=False,
+        samples=samples,
+    )
+
+
+class ShadowAssessmentRuntime(FakeRuntime):
+    def __init__(self, monitor: ShadowHeatingPerformanceMonitor) -> None:
+        super().__init__()
+        self.heating_performance_monitor = monitor
+        self._episode_offset = 0
+
+    def process_temperature(self, measurement):
+        result = super().process_temperature(measurement)
+        self.heating_performance_monitor.submit_episode(completed_shadow_episode(self._episode_offset))
+        self._episode_offset += 2
+        return result
+
+
+class BlockingShadowAssessor:
+    def __init__(self) -> None:
+        self.entered = Event()
+        self.release = Event()
+        self._delegate = HeatingPerformanceAssessor()
+
+    def assess(self, episode):
+        self.entered.set()
+        if not self.release.wait(timeout=5):
+            raise TimeoutError("shadow assessment was not released")
+        return self._delegate.assess(episode)
+
+
+class FailingShadowAssessor:
+    def assess(self, episode):
+        raise RuntimeError(f"shadow failure for {episode.zone_id.value}")
+
+
+def create_shadow_test_host(runtime: FakeRuntime) -> HomeAssistantControlelHost:
+    hass = FakeHass()
+    failure_sink = HomeAssistantScheduledFailureSink(
+        hass,
+        HomeAssistantEventLoopBridge(asyncio.get_running_loop()),
+        "entry",
+        logging.getLogger(__name__),
+        create_issue=lambda *args, **kwargs: None,
+        delete_issue=lambda *args: None,
+        warning_severity="warning",
+        error_severity="error",
+    )
+    host = HomeAssistantControlelHost(
+        hass=hass,
+        runtime=runtime,
+        executor=HomeAssistantRuntimeExecutor(),
+        measurement_mapper=HomeAssistantMeasurementMapper(
+            HomeAssistantSensorBinding("sensor.room", SensorId("room_temperature"))
+        ),
+        failure_sink=failure_sink,
+        config=host_config(),
+        core_version="0.5.0",
+        logger=logging.getLogger(__name__),
+        state_subscriber=lambda hass, entity_id, listener: lambda: None,
+        state_getter=lambda entity_id: None,
+        shutdown_subscriber=lambda hass, listener: lambda: None,
+        interval_subscriber=lambda hass, listener, interval: lambda: None,
+    )
+    failure_sink.bind_fatal_handler(host.request_fatal_shutdown)
+    return host
+
+
 def test_home_assistant_runtime_start_does_not_evaluate_empty_core_state(monkeypatch):
     def fail_if_called(runtime):
         raise AssertionError("core startup evaluation must not run before a real HA state")
@@ -258,6 +364,81 @@ def test_home_assistant_runtime_start_does_not_evaluate_empty_core_state(monkeyp
     runtime = object.__new__(HomeAssistantControlRuntime)
 
     assert runtime.start() is None
+
+
+def test_production_host_drains_completed_episode_after_control_returns() -> None:
+    async def scenario():
+        monitor = ShadowHeatingPerformanceMonitor()
+        runtime = ShadowAssessmentRuntime(monitor)
+        host = create_shadow_test_host(runtime)
+        await host.async_initialize()
+
+        result = await host.async_process_state(FakeState("19", NOW))
+        for _ in range(100):
+            if monitor.assessments:
+                break
+            await asyncio.sleep(0.001)
+
+        await host.async_stop()
+        return result, monitor.assessments, len(host._shadow_assessment_tasks)
+
+    result, assessments, remaining_shadow_tasks = asyncio.run(scenario())
+
+    assert result is not None
+    assert result.status is RuntimeProcessingStatus.NO_DECISION
+    assert len(assessments) == 1
+    assert assessments[0].zone_id == ZoneId("room")
+    assert remaining_shadow_tasks == 0
+
+
+def test_blocked_production_assessor_does_not_block_next_control_event() -> None:
+    async def scenario():
+        assessor = BlockingShadowAssessor()
+        monitor = ShadowHeatingPerformanceMonitor(assessor=assessor)
+        runtime = ShadowAssessmentRuntime(monitor)
+        host = create_shadow_test_host(runtime)
+        await host.async_initialize()
+
+        first = await host.async_process_state(FakeState("19", NOW))
+        while not assessor.entered.is_set():
+            await asyncio.sleep(0)
+        second = await asyncio.wait_for(
+            host.async_process_state(FakeState("19.5", NOW + timedelta(seconds=1))),
+            timeout=1,
+        )
+        operations_before_release = tuple(runtime.operations)
+        assessor.release.set()
+        await host.async_stop()
+        return first, second, operations_before_release, monitor.assessments
+
+    first, second, operations, assessments = asyncio.run(scenario())
+
+    assert first is not None and second is not None
+    assert [operation[0] for operation in operations] == ["start", "measurement", "measurement"]
+    assert len(assessments) == 2
+
+
+def test_production_assessor_failure_cannot_change_completed_control_result() -> None:
+    async def scenario():
+        monitor = ShadowHeatingPerformanceMonitor(assessor=FailingShadowAssessor())
+        runtime = ShadowAssessmentRuntime(monitor)
+        host = create_shadow_test_host(runtime)
+        await host.async_initialize()
+
+        result = await host.async_process_state(FakeState("19", NOW))
+        for _ in range(100):
+            if monitor.errors:
+                break
+            await asyncio.sleep(0.001)
+        await host.async_stop()
+        return result, tuple(runtime.operations), monitor.errors
+
+    result, operations, errors = asyncio.run(scenario())
+
+    assert result is not None
+    assert result.status is RuntimeProcessingStatus.NO_DECISION
+    assert operations[:2] == (("start", None), ("measurement", 19.0))
+    assert errors == {ZoneId("room"): "RuntimeError: shadow failure for room"}
 
 
 def test_start_precedes_snapshot_buffer_drain_live_events_and_stop():

@@ -203,6 +203,8 @@ class HeatingEpisode:
     initial_temperature: float | None
     current_temperature: float | None
     demand_transitions: tuple[HeatingDemandTransition, ...]
+    total_sample_count: int
+    samples_truncated: bool
     samples: tuple[HeatingEpisodeSample, ...]
 
     def __post_init__(self) -> None:
@@ -213,6 +215,10 @@ class HeatingEpisode:
                 raise ValueError("episode cannot end before it starts")
         if (self.ended_at is None) != (self.termination_reason is None):
             raise ValueError("episode end time and termination reason must coexist")
+        if self.total_sample_count < len(self.samples):
+            raise ValueError("total_sample_count cannot be smaller than retained samples")
+        if self.samples_truncated is not (self.total_sample_count > len(self.samples)):
+            raise ValueError("samples_truncated must describe whether samples were evicted")
         if not self.demand_transitions:
             raise ValueError("episode requires at least one demand transition")
         first_transition = self.demand_transitions[0]
@@ -224,6 +230,10 @@ class HeatingEpisode:
             for observation in sample.actuator_observations:
                 if observation.zone_id != self.zone_id:
                     raise ValueError("actuator observations must belong to the episode zone")
+
+    @property
+    def retained_sample_count(self) -> int:
+        return len(self.samples)
 
 
 def _aware(value: datetime, label: str) -> None:
