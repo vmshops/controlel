@@ -48,6 +48,7 @@ Controlel uses distinct release states:
 
 The distribution name and Python import package are both `controlel`. Versions
 `0.1.0`, `0.2.0`, and `0.3.0` are publicly available on PyPI and immutable.
+PyPI versions are immutable; corrections always require a higher version.
 
 The first core release is `0.1.0`. The single authoritative release
 version is the static `project.version` in `pyproject.toml`. Runtime access uses
@@ -88,6 +89,10 @@ text. The approved immutable public PyPI artifacts are:
 
 These are the published hashes. Later clean tag rebuilds are verification
 evidence and must not be represented as the bytes uploaded to PyPI.
+
+This historical exception is the reason strict provenance-bound final release
+preparation is now mandatory. An older candidate artifact must never be
+uploaded merely because its embedded version matches a newly approved release.
 
 ## Published core 0.1.0 record
 
@@ -204,25 +209,107 @@ Pop-Location
 Do not run the full source-tree suite as an installed-wheel smoke test. The
 installed test intentionally verifies a small representative package surface.
 
+## Strict final public core preparation
+
+Ordinary development builds continue to use
+`scripts/packaging/build_core_release.py`; they do not require a tag. Artifacts
+eligible for a public upload must instead be produced by the strict interface:
+
+```powershell
+$version = "X.Y.Z"
+$commit = "0123456789abcdef0123456789abcdef01234567"
+$tag = "core-vX.Y.Z"
+$output = "dist/core-final-X.Y.Z"
+
+python scripts/packaging/prepare_final_core_release.py `
+    --version $version `
+    --commit $commit `
+    --tag $tag `
+    --output-dir $output
+
+python scripts/packaging/validate_core_release_provenance.py `
+    --provenance "$output/core-release-provenance.json" `
+    --artifact-dir $output
+```
+
+The tag is optional for a pre-tag immutable verification, but a public release
+must use the reviewed annotated `core-vX.Y.Z` tag. Lightweight tags are
+explicitly rejected when `--tag` is supplied. The tag name must match the
+release version and dereference to the exact requested commit.
+
+### Cleanliness and immutable export policy
+
+Strict preparation requires the invoking worktree to have exact `HEAD` at the
+full 40-character requested commit and to be completely clean according to
+`git status --porcelain --untracked-files=all`. This rejects tracked changes
+and every non-ignored untracked file, including source and packaging inputs.
+Ignored generated output such as `dist/` does not make the checkout dirty and
+cannot contaminate the build because source is never copied from the checkout.
+
+As a second independent protection, the tool exports the requested commit with
+`git archive`, with checkout line-ending conversion disabled, into two fresh
+temporary source roots. Both wheel/sdist pairs are built only there using the
+commit timestamp as `SOURCE_DATE_EPOCH`. Repeated wheels and canonicalized
+sdists must be byte-identical, and rebuilding a wheel from the canonical sdist
+must reproduce the same wheel bytes. The explicit output directory must not
+already exist, preventing an older candidate from remaining beside the final
+artifacts.
+
+### Provenance schema and upload binding
+
+Successful preparation writes exactly one wheel, one sdist, and
+`core-release-provenance.json`. Schema version 1 contains:
+
+- tool name/version and schema version;
+- package name and release version;
+- exact commit, optional tag, tag type, and resolved tag commit;
+- immutable export mechanism, commit/tree identity, and export SHA-256;
+- deterministic build epoch and timestamp source;
+- repeated-build and canonical-sdist rebuild verification results;
+- wheel and sdist filenames, sizes, and SHA-256 hashes;
+- the ordered two-file upload allowlist and final verification status.
+
+`artifact_directory` is the manifest-relative value `.`. The validator requires
+the supplied artifact directory to be the manifest's actual parent, rejects any
+additional or substituted wheel/sdist, verifies filename, size, hash, package
+metadata, and version, and prints an upload command naming only the two verified
+artifacts. The provenance JSON contains no credentials or personal filesystem
+paths.
+
 ## Future core release checklist
 
-Published core versions `0.1.0`, `0.2.0`, and `0.3.0` are immutable. Before any future
-core publication:
+Published core versions `0.1.0`, `0.2.0`, and `0.3.0` are immutable. Every
+future core publication follows this order:
+
+1. implementation;
+2. core-only merge;
+3. green CI for the exact merged `HEAD`;
+4. immutable release verification;
+5. annotated `core-vX.Y.Z` tag at that exact commit;
+6. strict final-release build from that exact tag and commit;
+7. provenance and upload-binding verification;
+8. PyPI upload of only those exact two verified artifact bytes;
+9. public PyPI filename, size, hash, metadata, and clean-install verification.
+
+Before executing the separately approved upload:
 
 - obtain explicit approval for the future core release;
 - confirm the `controlel` package-index project is controlled by the project
   owner;
 - use a package-index account controlled by the project owner;
 - enable two-factor authentication;
-- build from a clean, reviewed commit;
+- build from a clean, reviewed exact commit using the strict final-release
+  command, never from a retained candidate artifact;
 - use only the `core-vX.Y.Z` tag namespace for core/PyPI provenance;
 - rerun tests, build, Twine, archive-content, and clean-install checks;
-- require identical wheel and sdist hashes across three clean builds;
+- require identical repeated wheel/sdist bytes and an identical wheel rebuilt
+  from the canonical sdist;
 - record wheel and sdist filenames and cryptographic hashes;
 - verify package name, version, metadata, and filenames before upload;
 - keep credentials, tokens, `.pypirc`, and release configuration out of the
   repository;
-- upload only the approved artifacts manually;
+- rerun the provenance upload-binding validator immediately before upload and
+  upload only the two paths it names;
 - install the new exact version from the public index into another clean
   environment;
 - confirm the installed files, version, and hashes correspond to the approved
