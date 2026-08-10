@@ -407,6 +407,15 @@ def _basic_schema(
     options_flow: bool = False,
 ) -> vol.Schema:
     values = defaults or {}
+    actuator_entity_id = values.get(CONF_HEAT_DELIVERY_ACTUATOR_ENTITY_ID)
+    actuator_entity_marker = (
+        vol.Optional(
+            CONF_HEAT_DELIVERY_ACTUATOR_ENTITY_ID,
+            default=actuator_entity_id,
+        )
+        if actuator_entity_id
+        else vol.Optional(CONF_HEAT_DELIVERY_ACTUATOR_ENTITY_ID)
+    )
     schema: dict[vol.Marker, object] = {
         vol.Required(
             CONF_ZONE_NAME,
@@ -519,10 +528,7 @@ def _basic_schema(
                 mode=selector.SelectSelectorMode.DROPDOWN,
             )
         ),
-        vol.Optional(
-            CONF_HEAT_DELIVERY_ACTUATOR_ENTITY_ID,
-            default=values.get(CONF_HEAT_DELIVERY_ACTUATOR_ENTITY_ID, vol.UNDEFINED),
-        ): selector.EntitySelector(selector.EntitySelectorConfig(domain="climate")),
+        actuator_entity_marker: selector.EntitySelector(selector.EntitySelectorConfig(domain="climate")),
         vol.Required(
             CONF_HEAT_DELIVERY_OWNERSHIP,
             default=values.get(CONF_HEAT_DELIVERY_OWNERSHIP, HEAT_DELIVERY_OWNERSHIP_DEVICE),

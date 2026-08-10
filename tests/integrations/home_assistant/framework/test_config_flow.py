@@ -171,6 +171,7 @@ async def test_user_step_has_basic_defaults_and_filtered_selectors(hass) -> None
     assert defaults[CONF_HEAT_DELIVERY_MODE] == HEAT_DELIVERY_MODE_UNMANAGED
     assert defaults[CONF_HEAT_DELIVERY_OWNERSHIP] == HEAT_DELIVERY_OWNERSHIP_DEVICE
     assert defaults[CONF_HEAT_DELIVERY_ASSIST_TARGET] == DEFAULT_HEAT_DELIVERY_ASSIST_TARGET
+    assert CONF_HEAT_DELIVERY_ACTUATOR_ENTITY_ID not in defaults
     assert defaults[CONF_SHOW_ADVANCED] is False
 
 
