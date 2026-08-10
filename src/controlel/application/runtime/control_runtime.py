@@ -523,7 +523,18 @@ class ControlRuntime:
             elif source_assessment.outcome is SourceControlOutcome.SUPPRESS_DUPLICATE:
                 status = suppressed_status
             else:
-                executed = self.heat_source_command_dispatcher.dispatch(command)
+                try:
+                    executed = self.heat_source_command_dispatcher.dispatch(command)
+                except Exception:
+                    self.source_control_state = self.source_control_policy.record_failed(
+                        source_assessment,
+                        failed_at=building_heat_demand.evaluated_at,
+                    )
+                    self.source_control_assessment = replace(
+                        source_assessment,
+                        state=self.source_control_state,
+                    )
+                    raise
                 if executed:
                     self.source_control_state = self.source_control_policy.record_dispatched(
                         source_assessment,
@@ -537,6 +548,15 @@ class ControlRuntime:
                     self.source_control_assessment = source_assessment
                     status = executed_status
                 else:
+                    self.source_control_state = self.source_control_policy.record_suppressed_duplicate(
+                        source_assessment,
+                        evaluated_at=building_heat_demand.evaluated_at,
+                    )
+                    source_assessment = replace(
+                        source_assessment,
+                        state=self.source_control_state,
+                    )
+                    self.source_control_assessment = source_assessment
                     status = suppressed_status
 
         return HeatDemandEvaluationResult(

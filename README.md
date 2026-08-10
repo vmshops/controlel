@@ -22,13 +22,15 @@ The goal is to create a reliable heating controller capable of optimizing comfor
 
 Project phase: Home Assistant one-zone host vertical slice
 
-Core package published version: 0.3.0
+Core package candidate version: 0.4.0 (unpublished; public 0.3.0 remains immutable)
 
-Home Assistant integration candidate version: 0.6.0
+Home Assistant integration candidate version: 0.7.0 (Phase C; current Phase A manifest remains 0.6.0)
 
 Use the latest published release for HACS custom-repository installation.
-Core `0.3.0` is published and immutable. Integration `0.6.0` remains an
-unpublished candidate and pins exactly `controlel==0.3.0`.
+Core `0.3.0` is published and immutable. Milestone 28 prepares core `0.4.0`
+without publication. Until that candidate is separately approved and public,
+the integration manifest remains `0.6.0` and pins exactly
+`controlel==0.3.0`; integration `0.7.0` is a Phase C candidate only.
 Controlel is not listed in the default HACS store.
 
 ## Home Assistant installation
@@ -72,6 +74,16 @@ preserves its last logical demand within the deadband and
 reevaluates current demand at a lockout deadline instead of replaying a stored
 command. Safety-disable commands bypass minimum-on protection; safety-enable
 commands remain subject to minimum-off protection.
+
+Source observability distinguishes a passive protection boundary from an
+active lockout. `earliest_next_enable_time` and
+`earliest_next_disable_time` may exist when no command is blocked. Active
+lockout and deferred-command fields exist only while the current aggregate
+demand requests a transition that protection prevents. A deadline callback
+reevaluates current demand and protection instead of replaying a stored
+command. Successful enable/disable dispatch timestamps are command evidence,
+not physical boiler feedback; Controlel does not infer whether a burner or
+boiler is physically running.
 
 Each entry creates one `Controlel — <Zone name>` device with a translated
 operational summary and stable operational/diagnostic entities. The summary
