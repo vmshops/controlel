@@ -110,7 +110,46 @@ async def async_setup_entry(
             binding=heat_source_configuration.binding,
             on_success=failure_sink.clear_service_failure_issue,
         )
-        runtime = ControlRuntime(
+        heat_delivery_controller = None
+        heat_delivery = config.heat_delivery_configuration
+        if heat_delivery.mode == "setpoint_assist":
+            from controlel.application.services.zone_heat_delivery_controller import (
+                ZoneHeatDeliveryController,
+            )
+            from controlel.domain.heat_delivery import (
+                HeatDeliveryActuatorConfiguration,
+                HeatDeliveryActuatorId,
+                HeatDeliveryAssistPolicy,
+                HeatDeliveryCapabilities,
+                HeatDeliveryMode,
+                HeatDeliveryOwnership,
+            )
+
+            from .heat_delivery import HomeAssistantHeatDeliveryPort
+
+            if heat_delivery.actuator_entity_id is None:
+                raise ValueError("setpoint assist requires an actuator entity")
+            actuator_id = HeatDeliveryActuatorId(heat_delivery.actuator_entity_id)
+            actuator_configuration = HeatDeliveryActuatorConfiguration(
+                actuator_id=actuator_id,
+                zone_id=zone.zone_id,
+                capabilities=HeatDeliveryCapabilities(can_set_target_temperature=True),
+                mode=HeatDeliveryMode(heat_delivery.mode),
+                ownership=HeatDeliveryOwnership(heat_delivery.ownership),
+                assist_policy=HeatDeliveryAssistPolicy(heat_delivery.assist_policy),
+                assist_target_temperature=heat_delivery.assist_target_temperature,
+            )
+            heat_delivery_controller = ZoneHeatDeliveryController(
+                (actuator_configuration,),
+                {
+                    actuator_id: HomeAssistantHeatDeliveryPort(
+                        hass=hass,
+                        bridge=bridge,
+                        entity_id=heat_delivery.actuator_entity_id,
+                    )
+                },
+            )
+        runtime_arguments: dict[str, Any] = dict(
             sensor_repository=sensor_repository,
             zone_repository=zone_repository,
             heat_source_port=heat_source_port,
@@ -126,6 +165,9 @@ async def async_setup_entry(
             minimum_heating_on_time=heat_source_configuration.minimum_heating_on_time,
             minimum_heating_off_time=heat_source_configuration.minimum_heating_off_time,
         )
+        if heat_delivery_controller is not None:
+            runtime_arguments["heat_delivery_controller"] = heat_delivery_controller
+        runtime = ControlRuntime(**runtime_arguments)
         host = HomeAssistantControlelHost(
             hass=hass,
             runtime=runtime,

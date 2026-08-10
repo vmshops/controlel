@@ -15,6 +15,11 @@
           "heat_demand_confirmation_duration_minutes": "Heat-demand confirmation time",
           "heat_source_control_mode": "Heat-source control mode",
           "controlled_entity_id": "Controlled heat-source switch",
+          "heat_delivery_mode": "Zone heat delivery",
+          "heat_delivery_actuator_entity_id": "Actuator climate entity",
+          "heat_delivery_ownership": "Actuator ownership",
+          "heat_delivery_assist_policy": "Assist policy",
+          "heat_delivery_assist_target": "Assist target temperature",
           "show_advanced": "Configure advanced and safety settings"
         },
         "data_description": {
@@ -27,6 +32,11 @@
           "heat_demand_confirmation_duration_minutes": "How long the zone must continuously remain below its heating threshold before its request is passed to the heat source. Zero responds immediately. This filters brief drops, is separate from minimum-off time, resets on invalid or unavailable measurements, and does not detect an open window.",
           "heat_source_control_mode": "Use one normal switch, or choose custom services for an advanced installation.",
           "controlled_entity_id": "The switch Controlel turns on and off.",
+          "heat_delivery_mode": "Leave zone delivery unmanaged or enable thermostat setpoint assist.",
+          "heat_delivery_actuator_entity_id": "The climate entity whose technical target Controlel commands.",
+          "heat_delivery_ownership": "Setpoint assist requires Controlel to own the actuator target.",
+          "heat_delivery_assist_policy": "Choose whether confirmed heating demand selects the assist target.",
+          "heat_delivery_assist_target": "Technical thermostat target while assist is active; this is not a valve position.",
           "show_advanced": "Set stable IDs, safety times, or other advanced values before creating the entry."
         }
       },
@@ -81,6 +91,8 @@
       "required": "This field is required.",
       "cannot_generate_id": "Use a name that begins with a letter and contains at least one ASCII letter.",
       "controlled_switch_required": "Select the switch that Controlel should turn on and off.",
+      "actuator_required": "Select a climate actuator for setpoint assist.",
+      "controlel_ownership_required": "Setpoint assist requires Controlel-owned actuator state.",
       "not_temperature_sensor": "Select a sensor entity whose device class is temperature.",
       "controlel_service_not_allowed": "Controlel cannot call its own service domain.",
       "unsupported_temperature_unit": "The temperature sensor must use Celsius or Fahrenheit."
@@ -100,7 +112,12 @@
           "heating_turn_off_differential": "Heating turn-off differential",
           "heat_demand_confirmation_duration_minutes": "Heat-demand confirmation time",
           "heat_source_control_mode": "Heat-source control mode",
-          "controlled_entity_id": "Controlled heat-source switch"
+          "controlled_entity_id": "Controlled heat-source switch",
+          "heat_delivery_mode": "Zone heat delivery",
+          "heat_delivery_actuator_entity_id": "Actuator climate entity",
+          "heat_delivery_ownership": "Actuator ownership",
+          "heat_delivery_assist_policy": "Assist policy",
+          "heat_delivery_assist_target": "Assist target temperature"
         },
         "data_description": {
           "zone_name": "The user-facing name of the controlled area.",
@@ -111,7 +128,12 @@
           "heating_turn_off_differential": "How far above target the room must rise before heating is stopped.",
           "heat_demand_confirmation_duration_minutes": "How long the zone must continuously remain below its heating threshold before its request is passed to the heat source. Zero responds immediately. This filters brief drops, is separate from minimum-off time, resets on invalid or unavailable measurements, and does not detect an open window.",
           "heat_source_control_mode": "Use one normal switch, or choose custom services for an advanced installation.",
-          "controlled_entity_id": "The switch Controlel turns on and off."
+          "controlled_entity_id": "The switch Controlel turns on and off.",
+          "heat_delivery_mode": "Leave zone delivery unmanaged or enable thermostat setpoint assist.",
+          "heat_delivery_actuator_entity_id": "The climate entity whose technical target Controlel commands.",
+          "heat_delivery_ownership": "Setpoint assist requires Controlel to own the actuator target.",
+          "heat_delivery_assist_policy": "Choose whether confirmed heating demand selects the assist target.",
+          "heat_delivery_assist_target": "Technical thermostat target while assist is active; this is not a valve position."
         }
       },
       "advanced": {
@@ -158,6 +180,8 @@
       "invalid_value": "Enter a valid value.",
       "required": "This field is required.",
       "controlled_switch_required": "Select the switch that Controlel should turn on and off.",
+      "actuator_required": "Select a climate actuator for setpoint assist.",
+      "controlel_ownership_required": "Setpoint assist requires Controlel-owned actuator state.",
       "not_temperature_sensor": "Select a sensor entity whose device class is temperature.",
       "controlel_service_not_allowed": "Controlel cannot call its own service domain.",
       "unsupported_temperature_unit": "The temperature sensor must use Celsius or Fahrenheit."

@@ -61,6 +61,9 @@ from controlel.application.services.temperature_hysteresis_policy import (
     TemperatureHysteresisAssessment,
     TemperatureHysteresisPolicy,
 )
+from controlel.application.services.zone_heat_delivery_controller import (
+    ZoneHeatDeliveryController,
+)
 from controlel.application.services.zone_heat_demand_confirmation_policy import (
     ZoneHeatDemandConfirmationAssessment,
     ZoneHeatDemandConfirmationPolicy,
@@ -92,6 +95,7 @@ from controlel.domain.demands.building_heat_demand_status import (
     BuildingHeatDemandStatus,
 )
 from controlel.domain.demands.zone_demand import ZoneDemand
+from controlel.domain.demands.zone_heat_demand_input import ZoneHeatDemandInputReason
 from controlel.domain.events.temperature_measured_event import (
     TemperatureMeasuredEvent,
 )
@@ -121,12 +125,15 @@ class ControlRuntime:
         minimum_heating_on_time: timedelta = timedelta(0),
         minimum_heating_off_time: timedelta = timedelta(0),
         demand_arbitrator: DemandArbitrator | None = None,
+        heat_delivery_controller: ZoneHeatDeliveryController | None = None,
     ) -> None:
         self.clock = clock
         self.scheduler = scheduler
         self.scheduled_failure_sink = scheduled_failure_sink
         self.event_bus = EventBus()
         self.state_store = RuntimeStateStore()
+        self.zone_repository = zone_repository
+        self.heat_delivery_controller = heat_delivery_controller
         self.zone_demand_store = ZoneDemandStore()
         self.heat_demand_safety_state_store = HeatDemandSafetyStateStore()
         self.heat_source_state_store = HeatSourceStateStore()
@@ -505,6 +512,21 @@ class ControlRuntime:
             confirmation_assessment.state if confirmation_assessment is not None else None
         )
         confirmed_aggregate_demand = aggregate_demand.model_copy(update={"zone_inputs": tuple(confirmed_inputs)})
+        if self.heat_delivery_controller is not None:
+            for zone_input in confirmed_inputs:
+                zone = self.zone_repository.get(zone_input.zone_id)
+                measurement = (
+                    self.state_store.get_latest(zone.primary_sensor_id)
+                    if zone_input.reason is ZoneHeatDemandInputReason.ELIGIBLE
+                    else None
+                )
+                self.heat_delivery_controller.evaluate_zone(
+                    zone_id=zone_input.zone_id,
+                    confirmed_demand=zone_input.demand,
+                    zone_target_temperature=zone.target_temperature.value,
+                    valid_zone_measurement_temperature=(measurement.value.value if measurement is not None else None),
+                    now=aggregate_demand.evaluated_at,
+                )
         confirmed_aggregate_demand = MultiZoneDemandArbitrator().resolve(confirmed_aggregate_demand)
         building_heat_demand = self.demand_arbitrator.resolve(confirmed_aggregate_demand)
         safety_assessment = self.heat_demand_safety_policy.evaluate(

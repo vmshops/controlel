@@ -36,8 +36,59 @@ indeterminate zones, counts, and a stable reason code. Aggregation is unweighted
 there are no priorities, percentages, or demand magnitudes. Source configuration
 is shared rather than copied into zones because minimum-time protection,
 dispatch evidence, deferred commands, and safety belong to the one physical
-command path. Future Milestone 30 valve/TRV coordination remains a separate
-zone-output concern.
+command path. Milestone 30 heat-delivery coordination is a separate zone-output
+concern.
+
+## Zone heat delivery
+
+Milestone 30 adds a separate branch after each zone's confirmation state:
+
+```text
+confirmed zone demand -> HeatDeliveryPolicy -> HeatDeliveryCommand
+                      -> capability-specific actuator port
+```
+
+This branch controls heat delivery into one zone. It cannot change building
+aggregation, source minimum-on/off protection, safety, arbitration, or source
+water temperature. Zone demand and zone heat delivery are different facts:
+zones contribute equally to building demand even when their actuator policies
+differ.
+
+The core is vendor independent. `HeatDeliveryCapabilities` represents target
+temperature, local/remote temperature, valve-position, binary, HVAC-mode, and
+HVAC-action abilities independently. Configuration rejects a control mode when
+its required write capability is absent. Stable actuator IDs and ordered
+configuration allow multiple actuators per zone; the initial Home Assistant UI
+exposes one climate actuator per entry.
+
+- `NATIVE`: a Controlel-owned thermostat target follows the zone target;
+  device-owned native actuators receive no writes.
+- `SETPOINT_ASSIST`: confirmed heat selects the configured assist target and no
+  heat deterministically selects the zone target. This influences the device's
+  native control and is neither valve modulation nor a user-requested boost.
+- `DIRECT_POSITION`: confirmed heat selects a configured heating position and
+  no heat selects a configured idle position. No adaptive algorithm exists.
+- `BINARY`: confirmed heat requests open and no heat requests close.
+
+Zone target, trusted zone measurement, and technical actuator target remain
+separate. Requested, successfully dispatched, failed, duplicate-suppressed,
+commanded, and reported values are also separate. A 100% position command does
+not prove that a valve is physically open. Reported state stays unknown unless
+a capable adapter supplies it, and a failed command never updates successful
+evidence. Actuator failures remain zone-local and recoverable by default rather
+than fabricating a fatal source failure.
+
+Remote-temperature forwarding is a distinct optional capability. Only a valid
+trusted zone measurement may be forwarded; indeterminate input produces no
+invented value. The initial Home Assistant adapter supports generic
+`climate.set_temperature` setpoint assist. Configurable direct-position and
+binary HA adapters are deferred until safe generic service contracts exist.
+
+Future work includes travel time, acknowledgement, open verification,
+last-flow-path safety, and explicit fatal-zone escalation. Milestone 31 may use
+current heating-episode facts for adaptive assist and performance observation,
+but Milestone 30 adds no learning or persistence. Source-water-temperature
+optimization remains a later independent layer.
 
 One scheduler deadline represents the earliest demand-validity, safety-grace,
 or deferred-command reevaluation. Expiry always reevaluates current state.

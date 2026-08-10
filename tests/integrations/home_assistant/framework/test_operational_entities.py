@@ -539,6 +539,7 @@ async def test_diagnostics_are_allowlisted_json_safe_and_redact_unknown_entry_da
     assert set(provenance["precedence_source"].values()) == {
         "config_entry.data",
         "legacy_compatibility_default",
+        "new_entry_default",
     }
     assert provenance["precedence_source"][CONF_DIAGNOSTIC_PROFILE] == ("legacy_compatibility_default")
     assert provenance["precedence_source"][CONF_HEAT_DEMAND_CONFIRMATION_DURATION] == "legacy_compatibility_default"

@@ -72,6 +72,17 @@ confirmation remain zone-local; a simple unweighted any-zone rule produces one
 building demand for the unchanged shared-source protection and dispatch path.
 Source minimum-time configuration is therefore not duplicated per zone.
 
+Milestone 30 adds an optional zone heat-delivery branch after confirmed zone
+demand. Existing entries remain unmanaged by default. The first Home Assistant
+slice can drive a generic climate entity with deterministic setpoint assist:
+confirmed heat selects a configured assist target and no heat restores the zone
+target. Core contracts also model native, direct-position, binary, remote-
+temperature, and multiple-actuator capabilities without vendor-specific logic.
+Commanded and reported actuator state remain distinct; no command claims a
+physical valve position without device feedback. Adaptive assist, learning,
+actuator travel verification, and source-water-temperature control are not part
+of this milestone.
+
 New entries default to asymmetric hysteresis of 0.3 Â°C below and 0.1 Â°C above
 the target, a two-minute heat-demand confirmation interval, plus command-based
 minimum on/off times of 10/5 minutes. Existing entries resolve all five

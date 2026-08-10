@@ -25,6 +25,11 @@ from .const import (
     CONF_ENABLE_SERVICE_DOMAIN,
     CONF_ENABLE_SERVICE_NAME,
     CONF_ENABLE_TARGET_ENTITY_ID,
+    CONF_HEAT_DELIVERY_ACTUATOR_ENTITY_ID,
+    CONF_HEAT_DELIVERY_ASSIST_POLICY,
+    CONF_HEAT_DELIVERY_ASSIST_TARGET,
+    CONF_HEAT_DELIVERY_MODE,
+    CONF_HEAT_DELIVERY_OWNERSHIP,
     CONF_HEAT_DEMAND_CONFIRMATION_DURATION,
     CONF_HEAT_SOURCE_CONTROL_MODE,
     CONF_HEATING_TURN_OFF_DIFFERENTIAL,
@@ -46,10 +51,17 @@ from .const import (
     DEFAULT_DEBUG_DURATION,
     DEFAULT_DEBUG_UNTIL_CHANGED,
     DEFAULT_DIAGNOSTIC_PROFILE_BEFORE_DEBUG,
+    DEFAULT_HEAT_DELIVERY_ASSIST_TARGET,
     DIAGNOSTIC_PROFILE_BASIC,
     DIAGNOSTIC_PROFILE_DEBUG,
     DIAGNOSTIC_PROFILE_DETAILED,
     DOMAIN,
+    HEAT_DELIVERY_ASSIST_ALWAYS,
+    HEAT_DELIVERY_ASSIST_NONE,
+    HEAT_DELIVERY_MODE_SETPOINT_ASSIST,
+    HEAT_DELIVERY_MODE_UNMANAGED,
+    HEAT_DELIVERY_OWNERSHIP_CONTROLEL,
+    HEAT_DELIVERY_OWNERSHIP_DEVICE,
     LEGACY_DIAGNOSTIC_PROFILE,
     LEGACY_HEAT_DEMAND_CONFIRMATION_DURATION,
     LEGACY_HEATING_TURN_OFF_DIFFERENTIAL,
@@ -130,6 +142,15 @@ class DiagnosticConfiguration:
 
 
 @dataclass(frozen=True)
+class HeatDeliveryConfiguration:
+    mode: str
+    actuator_entity_id: str | None
+    ownership: str
+    assist_policy: str
+    assist_target_temperature: float
+
+
+@dataclass(frozen=True)
 class HomeAssistantIntegrationConfig:
     sensor_id: SensorId
     sensor_name: str
@@ -153,6 +174,11 @@ class HomeAssistantIntegrationConfig:
     configured_debug_duration: timedelta
     diagnostic_profile_before_debug: str
     heat_demand_confirmation_duration: timedelta = timedelta(0)
+    heat_delivery_mode: str = HEAT_DELIVERY_MODE_UNMANAGED
+    heat_delivery_actuator_entity_id: str | None = None
+    heat_delivery_ownership: str = HEAT_DELIVERY_OWNERSHIP_DEVICE
+    heat_delivery_assist_policy: str = HEAT_DELIVERY_ASSIST_NONE
+    heat_delivery_assist_target: float = DEFAULT_HEAT_DELIVERY_ASSIST_TARGET
 
     def __post_init__(self) -> None:
         _validate_nonempty(self.sensor_name, "sensor name")
@@ -198,6 +224,31 @@ class HomeAssistantIntegrationConfig:
             DIAGNOSTIC_PROFILE_DETAILED,
         }:
             raise HomeAssistantConfigurationError("profile before Debug is invalid")
+        if self.heat_delivery_mode not in {
+            HEAT_DELIVERY_MODE_UNMANAGED,
+            HEAT_DELIVERY_MODE_SETPOINT_ASSIST,
+        }:
+            raise HomeAssistantConfigurationError("heat delivery mode is invalid")
+        if self.heat_delivery_ownership not in {
+            HEAT_DELIVERY_OWNERSHIP_DEVICE,
+            HEAT_DELIVERY_OWNERSHIP_CONTROLEL,
+        }:
+            raise HomeAssistantConfigurationError("heat delivery ownership is invalid")
+        if self.heat_delivery_assist_policy not in {
+            HEAT_DELIVERY_ASSIST_NONE,
+            HEAT_DELIVERY_ASSIST_ALWAYS,
+        }:
+            raise HomeAssistantConfigurationError("heat delivery assist policy is invalid")
+        if not isfinite(self.heat_delivery_assist_target):
+            raise HomeAssistantConfigurationError("heat delivery assist target must be finite")
+        if self.heat_delivery_mode == HEAT_DELIVERY_MODE_SETPOINT_ASSIST:
+            if not self.heat_delivery_actuator_entity_id:
+                raise HomeAssistantConfigurationError("setpoint assist requires an actuator entity")
+            _validate_entity_id(self.heat_delivery_actuator_entity_id, "heat delivery actuator entity ID")
+            if not self.heat_delivery_actuator_entity_id.startswith("climate."):
+                raise HomeAssistantConfigurationError("setpoint assist actuator must be a climate entity")
+            if self.heat_delivery_ownership != HEAT_DELIVERY_OWNERSHIP_CONTROLEL:
+                raise HomeAssistantConfigurationError("setpoint assist requires Controlel ownership")
 
     @property
     def sensor_binding(self) -> HomeAssistantSensorBinding:
@@ -238,6 +289,16 @@ class HomeAssistantIntegrationConfig:
             debug_duration=self.debug_duration,
             configured_debug_duration=self.configured_debug_duration,
             profile_before_debug=self.diagnostic_profile_before_debug,
+        )
+
+    @property
+    def heat_delivery_configuration(self) -> HeatDeliveryConfiguration:
+        return HeatDeliveryConfiguration(
+            mode=self.heat_delivery_mode,
+            actuator_entity_id=self.heat_delivery_actuator_entity_id,
+            ownership=self.heat_delivery_ownership,
+            assist_policy=self.heat_delivery_assist_policy,
+            assist_target_temperature=self.heat_delivery_assist_target,
         )
 
 
@@ -309,6 +370,10 @@ def integration_config_from_entry_data(
             )
         )
         control_mode = infer_control_mode(data)
+        heat_delivery_mode = str(data.get(CONF_HEAT_DELIVERY_MODE, HEAT_DELIVERY_MODE_UNMANAGED))
+        heat_delivery_entity = data.get(CONF_HEAT_DELIVERY_ACTUATOR_ENTITY_ID)
+        if heat_delivery_entity is not None:
+            heat_delivery_entity = str(heat_delivery_entity).strip() or None
         controlled_entity_id: str | None = None
         if control_mode == CONTROL_MODE_SIMPLE:
             controlled_entity_id = _required_string(
@@ -355,6 +420,13 @@ def integration_config_from_entry_data(
             debug_duration=debug_duration,
             configured_debug_duration=configured_debug_duration,
             diagnostic_profile_before_debug=profile_before_debug,
+            heat_delivery_mode=heat_delivery_mode,
+            heat_delivery_actuator_entity_id=heat_delivery_entity,
+            heat_delivery_ownership=str(data.get(CONF_HEAT_DELIVERY_OWNERSHIP, HEAT_DELIVERY_OWNERSHIP_DEVICE)),
+            heat_delivery_assist_policy=str(data.get(CONF_HEAT_DELIVERY_ASSIST_POLICY, HEAT_DELIVERY_ASSIST_NONE)),
+            heat_delivery_assist_target=_finite_optional_number(
+                data, CONF_HEAT_DELIVERY_ASSIST_TARGET, DEFAULT_HEAT_DELIVERY_ASSIST_TARGET
+            ),
         )
     except (KeyError, TypeError, ValueError) as error:
         if isinstance(error, HomeAssistantConfigurationError):

@@ -26,6 +26,11 @@ from custom_components.controlel.const import (
     CONF_ENABLE_SERVICE_DOMAIN,
     CONF_ENABLE_SERVICE_NAME,
     CONF_ENABLE_TARGET_ENTITY_ID,
+    CONF_HEAT_DELIVERY_ACTUATOR_ENTITY_ID,
+    CONF_HEAT_DELIVERY_ASSIST_POLICY,
+    CONF_HEAT_DELIVERY_ASSIST_TARGET,
+    CONF_HEAT_DELIVERY_MODE,
+    CONF_HEAT_DELIVERY_OWNERSHIP,
     CONF_HEAT_DEMAND_CONFIRMATION_DURATION,
     CONF_HEAT_SOURCE_CONTROL_MODE,
     CONF_HEATING_TURN_OFF_DIFFERENTIAL,
@@ -52,6 +57,10 @@ from custom_components.controlel.const import (
     DEFAULT_MAX_FUTURE_SKEW,
     DEFAULT_PRIMARY_MEASUREMENT_MAX_AGE,
     DEFAULT_TARGET_TEMPERATURE,
+    HEAT_DELIVERY_ASSIST_ALWAYS,
+    HEAT_DELIVERY_MODE_SETPOINT_ASSIST,
+    HEAT_DELIVERY_MODE_UNMANAGED,
+    HEAT_DELIVERY_OWNERSHIP_CONTROLEL,
     LEGACY_DIAGNOSTIC_PROFILE,
     LEGACY_HEAT_DEMAND_CONFIRMATION_DURATION,
     MAX_HEAT_DEMAND_CONFIRMATION_DURATION,
@@ -107,6 +116,39 @@ def test_legacy_031_entry_missing_protection_settings_retains_zero_behavior():
     assert config.heat_source.enable_heating.domain == "switch"
     assert config.heat_source_control_mode == CONTROL_MODE_SIMPLE
     assert config.controlled_entity_id == "switch.boiler"
+    assert config.heat_delivery_mode == HEAT_DELIVERY_MODE_UNMANAGED
+    assert config.heat_delivery_actuator_entity_id is None
+
+
+def test_reconstructs_setpoint_assist_without_changing_config_entry_version() -> None:
+    data = entry_data()
+    data.update(
+        {
+            CONF_HEAT_DELIVERY_MODE: HEAT_DELIVERY_MODE_SETPOINT_ASSIST,
+            CONF_HEAT_DELIVERY_ACTUATOR_ENTITY_ID: "climate.bedroom_trv",
+            CONF_HEAT_DELIVERY_OWNERSHIP: HEAT_DELIVERY_OWNERSHIP_CONTROLEL,
+            CONF_HEAT_DELIVERY_ASSIST_POLICY: HEAT_DELIVERY_ASSIST_ALWAYS,
+            CONF_HEAT_DELIVERY_ASSIST_TARGET: 30,
+        }
+    )
+    config = integration_config_from_entry_data(data)
+    assert config.heat_delivery_configuration.actuator_entity_id == "climate.bedroom_trv"
+    assert config.heat_delivery_configuration.assist_target_temperature == 30
+
+
+def test_setpoint_assist_rejects_missing_or_non_climate_actuator() -> None:
+    data = entry_data()
+    data.update(
+        {
+            CONF_HEAT_DELIVERY_MODE: HEAT_DELIVERY_MODE_SETPOINT_ASSIST,
+            CONF_HEAT_DELIVERY_OWNERSHIP: HEAT_DELIVERY_OWNERSHIP_CONTROLEL,
+        }
+    )
+    with pytest.raises(HomeAssistantConfigurationError, match="requires an actuator"):
+        integration_config_from_entry_data(data)
+    data[CONF_HEAT_DELIVERY_ACTUATOR_ENTITY_ID] = "switch.not_a_climate"
+    with pytest.raises(HomeAssistantConfigurationError, match="must be a climate"):
+        integration_config_from_entry_data(data)
 
 
 def test_reconstructs_explicit_hysteresis_and_anti_cycling_configuration():

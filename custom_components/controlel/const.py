@@ -41,6 +41,19 @@ CONF_ENABLE_TARGET_ENTITY_ID = "enable_target_entity_id"
 CONF_DISABLE_SERVICE_DOMAIN = "disable_service_domain"
 CONF_DISABLE_SERVICE_NAME = "disable_service_name"
 CONF_DISABLE_TARGET_ENTITY_ID = "disable_target_entity_id"
+CONF_HEAT_DELIVERY_MODE = "heat_delivery_mode"
+CONF_HEAT_DELIVERY_ACTUATOR_ENTITY_ID = "heat_delivery_actuator_entity_id"
+CONF_HEAT_DELIVERY_OWNERSHIP = "heat_delivery_ownership"
+CONF_HEAT_DELIVERY_ASSIST_POLICY = "heat_delivery_assist_policy"
+CONF_HEAT_DELIVERY_ASSIST_TARGET = "heat_delivery_assist_target"
+
+HEAT_DELIVERY_MODE_UNMANAGED = "unmanaged"
+HEAT_DELIVERY_MODE_SETPOINT_ASSIST = "setpoint_assist"
+HEAT_DELIVERY_OWNERSHIP_DEVICE = "device_owned"
+HEAT_DELIVERY_OWNERSHIP_CONTROLEL = "controlel_owned"
+HEAT_DELIVERY_ASSIST_NONE = "no_assist"
+HEAT_DELIVERY_ASSIST_ALWAYS = "always_assist_while_heating"
+DEFAULT_HEAT_DELIVERY_ASSIST_TARGET = 30.0
 
 DEFAULT_TARGET_TEMPERATURE = 21.0
 DEFAULT_HEATING_TURN_ON_DIFFERENTIAL = 0.3
