@@ -32,6 +32,17 @@ fatal behavior remain equivalent to core 0.3.0/integration 0.6.0. Phase C sets
 the integration manifest to `0.7.0`, pins `controlel==0.4.0`, and validates
 both local-source and public-PyPI framework compositions.
 
+Milestone 28 is complete. Milestone 29 prepares core `0.5.0` with multi-zone heat-demand
+aggregation: zone-local hysteresis and confirmation feed a deterministic,
+unweighted any-zone building demand while the existing shared-source control
+and safety policies remain global. The current Home Assistant `0.7.0` adapter
+continues exposing its released one-zone configuration contract during this
+core Phase A work. No priorities, weights, or source duplication are included.
+
+Milestone 30 will coordinate zone valve/TRV outputs separately from building
+demand and shared-source protection. It will not retroactively make valves part
+of the Milestone 29 aggregation rule.
+
 ## Milestone 23: Home Assistant one-zone host vertical slice
 
 The first host integration proves:
@@ -113,7 +124,9 @@ allowlisted configuration-change logging, clearer entity presentation, and
 truthful grace countdown and deadline visibility. Core behavior remains
 unchanged at `0.1.0`.
 
-Milestone 26 and later retain multiple zones or sensors, persistence,
-climate/number/select entities, physical output feedback, automatic retry,
-heating curves, modulation, DHW, learning, and dashboard work. Versions `0.3.0`
-and `0.3.1` are the published integration line preceding Milestone 26.
+The Home Assistant configuration UI still defers multiple zones or sensors,
+persistence, climate/number/select entities, physical output feedback,
+automatic retry, heating curves, modulation, DHW, learning, and dashboard work.
+Core Milestone 29 supplies the multi-zone demand architecture before that UI is
+introduced. Versions `0.3.0` and `0.3.1` are the published integration line
+preceding Milestone 26.

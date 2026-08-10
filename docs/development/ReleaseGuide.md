@@ -1,5 +1,14 @@
 # Release guide
 
+## Milestone 29 Phase A boundary
+
+Milestone 29 Phase A prepares unpublished core candidate `0.5.0` with
+multi-zone building-demand aggregation. Integration `0.7.0` remains unchanged
+and continues to require immutable public `controlel==0.4.0`. The manifest must
+not move to `0.5.0` until that core release has been separately published and
+verified. Phase A creates validation artifacts only; it does not tag, upload,
+publish, or release them.
+
 ## Milestone 28 sequencing
 
 Phase A prepared core `0.4.0` while retaining the integration's public

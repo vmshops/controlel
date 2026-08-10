@@ -93,7 +93,7 @@ def test_no_demands_and_disabled_zone_are_still_missing_participants():
     result = aggregator.evaluate()
 
     assert result.status is BuildingHeatDemandStatus.INDETERMINATE
-    assert result.missing_zone_ids == (living_room.zone_id, bedroom.zone_id)
+    assert result.missing_zone_ids == (bedroom.zone_id, living_room.zone_id)
 
 
 def test_eligible_true_overrides_missing_expired_future_and_false_demands():
@@ -116,7 +116,7 @@ def test_eligible_true_overrides_missing_expired_future_and_false_demands():
     result = aggregator.evaluate()
 
     assert result.status is BuildingHeatDemandStatus.HEAT_REQUIRED
-    assert result.eligible_demands == (demands[0], demands[3])
+    assert result.eligible_demands == (demands[3], demands[0])
     assert result.missing_zone_ids == (missing_zone.zone_id,)
     assert result.expired_zone_ids == (expired_zone.zone_id,)
     assert result.future_dated_zone_ids == (future_zone.zone_id,)
@@ -131,11 +131,11 @@ def test_all_eligible_false_is_no_heat_required():
     result = aggregator.evaluate()
 
     assert result.status is BuildingHeatDemandStatus.NO_HEAT_REQUIRED
-    assert result.eligible_demands == tuple(demands)
+    assert result.eligible_demands == (demands[1], demands[0])
 
 
 @pytest.mark.parametrize("requires_heat", [True, False])
-def test_expired_demand_plus_fresh_false_is_indeterminate(requires_heat):
+def test_expired_demand_plus_fresh_false_uses_valid_no_heat(requires_heat):
     old_zone = create_zone("old_zone")
     fresh_zone = create_zone("fresh_zone")
     aggregator, _, _ = create_aggregator(
@@ -146,7 +146,7 @@ def test_expired_demand_plus_fresh_false_is_indeterminate(requires_heat):
         ],
     )
 
-    assert aggregator.evaluate().status is BuildingHeatDemandStatus.INDETERMINATE
+    assert aggregator.evaluate().status is BuildingHeatDemandStatus.NO_HEAT_REQUIRED
 
 
 @pytest.mark.parametrize(
