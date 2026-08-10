@@ -26,6 +26,7 @@ from custom_components.controlel.const import (
     CONF_ENABLE_SERVICE_DOMAIN,
     CONF_ENABLE_SERVICE_NAME,
     CONF_ENABLE_TARGET_ENTITY_ID,
+    CONF_HEAT_DEMAND_CONFIRMATION_DURATION,
     CONF_HEAT_SOURCE_CONTROL_MODE,
     CONF_HEATING_TURN_OFF_DIFFERENTIAL,
     CONF_HEATING_TURN_ON_DIFFERENTIAL,
@@ -45,12 +46,15 @@ from custom_components.controlel.const import (
     CONTROL_MODE_SIMPLE,
     DEFAULT_DEBUG_DURATION,
     DEFAULT_DIAGNOSTIC_PROFILE,
+    DEFAULT_HEAT_DEMAND_CONFIRMATION_DURATION,
     DEFAULT_INDETERMINATE_GRACE_PERIOD,
     DEFAULT_INDETERMINATE_TIMEOUT_ACTION,
     DEFAULT_MAX_FUTURE_SKEW,
     DEFAULT_PRIMARY_MEASUREMENT_MAX_AGE,
     DEFAULT_TARGET_TEMPERATURE,
     LEGACY_DIAGNOSTIC_PROFILE,
+    LEGACY_HEAT_DEMAND_CONFIRMATION_DURATION,
+    MAX_HEAT_DEMAND_CONFIRMATION_DURATION,
 )
 
 
@@ -96,6 +100,7 @@ def test_legacy_031_entry_missing_protection_settings_retains_zero_behavior():
     assert config.heating_turn_off_differential == 0.0
     assert config.minimum_heating_on_time == timedelta(0)
     assert config.minimum_heating_off_time == timedelta(0)
+    assert config.heat_demand_confirmation_duration == timedelta(0)
     assert config.diagnostic_profile == "detailed"
     assert config.debug_duration == timedelta(minutes=60)
     assert config.configured_debug_duration == timedelta(minutes=60)
@@ -112,6 +117,7 @@ def test_reconstructs_explicit_hysteresis_and_anti_cycling_configuration():
             CONF_HEATING_TURN_OFF_DIFFERENTIAL: 0.1,
             CONF_MINIMUM_HEATING_ON_TIME: 600,
             CONF_MINIMUM_HEATING_OFF_TIME: 300,
+            CONF_HEAT_DEMAND_CONFIRMATION_DURATION: 120,
         }
     )
 
@@ -121,6 +127,7 @@ def test_reconstructs_explicit_hysteresis_and_anti_cycling_configuration():
     assert config.heating_turn_off_differential == 0.1
     assert config.minimum_heating_on_time == timedelta(minutes=10)
     assert config.minimum_heating_off_time == timedelta(minutes=5)
+    assert config.heat_demand_confirmation_duration == timedelta(minutes=2)
 
 
 @pytest.mark.parametrize(
@@ -136,6 +143,12 @@ def test_reconstructs_explicit_hysteresis_and_anti_cycling_configuration():
         (CONF_HEATING_TURN_OFF_DIFFERENTIAL, nan),
         (CONF_MINIMUM_HEATING_ON_TIME, -1),
         (CONF_MINIMUM_HEATING_OFF_TIME, inf),
+        (CONF_HEAT_DEMAND_CONFIRMATION_DURATION, nan),
+        (CONF_HEAT_DEMAND_CONFIRMATION_DURATION, -1),
+        (
+            CONF_HEAT_DEMAND_CONFIRMATION_DURATION,
+            MAX_HEAT_DEMAND_CONFIRMATION_DURATION + 1,
+        ),
     ],
 )
 def test_rejects_invalid_durations_and_non_finite_values(field: str, value: object):
@@ -246,6 +259,8 @@ def test_defaults_are_safe_and_expressed_in_runtime_seconds():
     assert DEFAULT_MAX_FUTURE_SKEW == 30.0
     assert DEFAULT_INDETERMINATE_GRACE_PERIOD == 120.0
     assert DEFAULT_INDETERMINATE_TIMEOUT_ACTION == "disable_heating"
+    assert DEFAULT_HEAT_DEMAND_CONFIRMATION_DURATION == 120.0
+    assert LEGACY_HEAT_DEMAND_CONFIRMATION_DURATION == 0.0
     assert DEFAULT_DIAGNOSTIC_PROFILE == "basic"
     assert LEGACY_DIAGNOSTIC_PROFILE == "detailed"
     assert DEFAULT_DEBUG_DURATION == 3600.0
@@ -351,6 +366,7 @@ def test_normalized_zone_and_heat_source_groups_preserve_flat_entry_contract():
     data[CONF_HEATING_TURN_OFF_DIFFERENTIAL] = 0.1
     data[CONF_MINIMUM_HEATING_ON_TIME] = 600.0
     data[CONF_MINIMUM_HEATING_OFF_TIME] = 300.0
+    data[CONF_HEAT_DEMAND_CONFIRMATION_DURATION] = 92.5
 
     config = integration_config_from_entry_data(data)
     zone = config.zone_control
@@ -361,6 +377,7 @@ def test_normalized_zone_and_heat_source_groups_preserve_flat_entry_contract():
     assert zone.target_temperature is config.target_temperature
     assert zone.heating_turn_on_differential == 0.3
     assert zone.heating_turn_off_differential == 0.1
+    assert zone.heat_demand_confirmation_duration == timedelta(seconds=92.5)
     assert source.binding is config.heat_source
     assert source.minimum_heating_on_time == timedelta(minutes=10)
     assert source.minimum_heating_off_time == timedelta(minutes=5)

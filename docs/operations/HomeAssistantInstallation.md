@@ -17,11 +17,23 @@ Protection history is not persisted. After restart or reload, Controlel reads
 the current sensor value deterministically but does not infer prior command
 history or lockout state from the switch.
 
-Controlel `0.5.0` is the current development candidate for one heating zone,
+Controlel `0.6.0` is the current development candidate for one heating zone,
 one primary temperature sensor, and one shared heat source. It requires the
-public core package `controlel==0.2.0`.
+public core package `controlel==0.3.0`.
 
-Candidate `0.5.0` is not published; use the latest published release for HACS
+Candidate `0.6.0` is not published; use the latest published release for HACS
+
+Milestone 27 adds **Heat-demand confirmation time** to the zone settings.
+New entries default to 2 minutes. Entries created by 0.5.0 or older that lack
+the stored field resolve to 0 seconds and retain immediate heat-demand
+handoff. Fractional minutes are preserved as exact runtime seconds. The value
+must be finite, non-negative, and no greater than 24 hours.
+
+The interval filters brief drops below the hysteresis threshold. It is not the
+heat source minimum-off time and does not detect open windows. An unavailable,
+unknown, invalid, stale, or future-dated measurement resets a pending interval.
+Reload and restart also begin a fresh interval; confirmation history is not
+persisted.
 custom-repository installation. Controlel is not listed in the default HACS
 store.
 
@@ -51,7 +63,7 @@ custom integration.
 
 HACS downloads the release asset into
 `config/custom_components/controlel/`. During integration setup, Home
-Assistant reads the manifest and installs `controlel==0.2.0` from PyPI.
+Assistant reads the manifest and installs `controlel==0.3.0` from PyPI.
 Manual core installation is neither required nor supported for normal use.
 
 ## Manual installation fallback
@@ -107,7 +119,7 @@ mutable settings, updates the entry title from the zone name, and reloads the
 entry. Existing entries need no migration and no delete/recreate cycle.
 
 Diagnostic profiles have stable stored values `basic`, `detailed`, and `debug`.
-New 0.5.0 entries default to Basic. Entries upgraded from 0.4.0 or older that
+New 0.5.0 and later entries default to Basic. Entries upgraded from 0.4.0 or older that
 have no stored profile resolve to Detailed so their periodic timing visibility
 continues. This fallback is read-time compatibility behavior and does not write
 migration data during setup. Saving the unchanged Options Flow stores the
@@ -196,7 +208,7 @@ structure must provide an explicit migration.
 3. Restart Home Assistant.
 
 HACS removes the integration directory but does not uninstall Python packages
-or related Home Assistant data automatically. The `controlel==0.2.0` package
+or related Home Assistant data automatically. The `controlel==0.3.0` package
 may remain in Home Assistant's managed Python environment and must not be
 manually removed.
 

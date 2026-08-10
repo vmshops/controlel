@@ -25,6 +25,7 @@ from .const import (
     CONF_ENABLE_SERVICE_DOMAIN,
     CONF_ENABLE_SERVICE_NAME,
     CONF_ENABLE_TARGET_ENTITY_ID,
+    CONF_HEAT_DEMAND_CONFIRMATION_DURATION,
     CONF_HEAT_SOURCE_CONTROL_MODE,
     CONF_HEATING_TURN_OFF_DIFFERENTIAL,
     CONF_HEATING_TURN_ON_DIFFERENTIAL,
@@ -50,10 +51,12 @@ from .const import (
     DIAGNOSTIC_PROFILE_DETAILED,
     DOMAIN,
     LEGACY_DIAGNOSTIC_PROFILE,
+    LEGACY_HEAT_DEMAND_CONFIRMATION_DURATION,
     LEGACY_HEATING_TURN_OFF_DIFFERENTIAL,
     LEGACY_HEATING_TURN_ON_DIFFERENTIAL,
     LEGACY_MINIMUM_HEATING_OFF_TIME,
     LEGACY_MINIMUM_HEATING_ON_TIME,
+    MAX_HEAT_DEMAND_CONFIRMATION_DURATION,
 )
 
 _IDENTIFIER_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -105,6 +108,7 @@ class ZoneControlConfiguration:
     target_temperature: Temperature
     heating_turn_on_differential: float
     heating_turn_off_differential: float
+    heat_demand_confirmation_duration: timedelta
     primary_measurement_max_age: timedelta
 
 
@@ -148,6 +152,7 @@ class HomeAssistantIntegrationConfig:
     debug_duration: timedelta | None
     configured_debug_duration: timedelta
     diagnostic_profile_before_debug: str
+    heat_demand_confirmation_duration: timedelta = timedelta(0)
 
     def __post_init__(self) -> None:
         _validate_nonempty(self.sensor_name, "sensor name")
@@ -169,6 +174,10 @@ class HomeAssistantIntegrationConfig:
             raise HomeAssistantConfigurationError("minimum heating-on time must not be negative")
         if self.minimum_heating_off_time < timedelta(0):
             raise HomeAssistantConfigurationError("minimum heating-off time must not be negative")
+        if self.heat_demand_confirmation_duration < timedelta(0):
+            raise HomeAssistantConfigurationError("heat demand confirmation duration must not be negative")
+        if self.heat_demand_confirmation_duration > timedelta(seconds=MAX_HEAT_DEMAND_CONFIRMATION_DURATION):
+            raise HomeAssistantConfigurationError("heat demand confirmation duration must not exceed 24 hours")
         if self.heat_source_control_mode not in {
             CONTROL_MODE_SIMPLE,
             CONTROL_MODE_CUSTOM,
@@ -208,6 +217,7 @@ class HomeAssistantIntegrationConfig:
             target_temperature=self.target_temperature,
             heating_turn_on_differential=self.heating_turn_on_differential,
             heating_turn_off_differential=self.heating_turn_off_differential,
+            heat_demand_confirmation_duration=(self.heat_demand_confirmation_duration),
             primary_measurement_max_age=self.primary_measurement_max_age,
         )
 
@@ -267,6 +277,13 @@ def integration_config_from_entry_data(
                 LEGACY_MINIMUM_HEATING_OFF_TIME,
             )
         )
+        confirmation_duration = timedelta(
+            seconds=_finite_optional_duration(
+                data,
+                CONF_HEAT_DEMAND_CONFIRMATION_DURATION,
+                LEGACY_HEAT_DEMAND_CONFIRMATION_DURATION,
+            )
+        )
         primary_max_age = timedelta(seconds=_finite_duration(data, CONF_PRIMARY_MEASUREMENT_MAX_AGE, positive=True))
         max_future_skew = timedelta(seconds=_finite_duration(data, CONF_MAX_FUTURE_SKEW))
         grace_period = timedelta(seconds=_finite_duration(data, CONF_INDETERMINATE_GRACE_PERIOD))
@@ -324,6 +341,7 @@ def integration_config_from_entry_data(
             target_temperature=target_temperature,
             heating_turn_on_differential=turn_on_differential,
             heating_turn_off_differential=turn_off_differential,
+            heat_demand_confirmation_duration=confirmation_duration,
             minimum_heating_on_time=minimum_on_time,
             minimum_heating_off_time=minimum_off_time,
             primary_measurement_max_age=primary_max_age,

@@ -115,6 +115,7 @@ async def async_setup_entry(
             indeterminate_timeout_action=config.indeterminate_timeout_action,
             heating_turn_on_differential=zone_control.heating_turn_on_differential,
             heating_turn_off_differential=zone_control.heating_turn_off_differential,
+            heat_demand_confirmation_duration=(zone_control.heat_demand_confirmation_duration),
             minimum_heating_on_time=heat_source_configuration.minimum_heating_on_time,
             minimum_heating_off_time=heat_source_configuration.minimum_heating_off_time,
         )

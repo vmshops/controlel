@@ -13,11 +13,15 @@ allowlisted observability diagnostics; and one lifecycle-owned active-countdown
 refresh scheduler. It does not change core decisions or claim physical
 heat-source feedback.
 
-Milestone 27 prepares core `0.3.0`. It adds a zone-owned, continuously valid
-heat-demand confirmation interval between hysteresis and demand arbitration.
-Zero duration preserves immediate legacy behavior. Pending state is not
-persisted, and this filter is explicitly distinct from both shared-source
-minimum-off protection and future open-window detection.
+Milestone 27 prepares core `0.3.0` and integration `0.6.0`. It adds a
+zone-owned, continuously valid heat-demand confirmation interval between
+hysteresis and demand arbitration. Existing entries default to immediate
+zero-duration behavior; new entries default to two minutes. Pending state is
+not persisted, and this filter is explicitly distinct from both shared-source
+minimum-off protection and future open-window detection. Phase A kept the
+manifest pinned to `controlel==0.2.0`; after the separately approved public
+core `0.3.0` release, Phase C pins the integration to `controlel==0.3.0` and
+validates both local-source and public-package compositions.
 
 ## Milestone 23: Home Assistant one-zone host vertical slice
 

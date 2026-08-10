@@ -53,6 +53,7 @@ from .operational import (
     TRACE_LIMITS,
     ActiveLockoutType,
     CommandOutcome,
+    ConfirmationState,
     DecisionCode,
     DecisionReason,
     DecisionTraceRecord,
@@ -131,6 +132,7 @@ class HomeAssistantControlelHost:
                 target_temperature=config.target_temperature.value,
                 heating_turn_on_differential=config.heating_turn_on_differential,
                 heating_turn_off_differential=config.heating_turn_off_differential,
+                heat_demand_confirmation_duration_seconds=(config.heat_demand_confirmation_duration.total_seconds()),
                 primary_measurement_max_age_seconds=config.primary_measurement_max_age.total_seconds(),
                 sensor_failure_grace_period_seconds=config.indeterminate_grace_period.total_seconds(),
                 minimum_heating_on_time_seconds=config.minimum_heating_on_time.total_seconds(),
@@ -290,6 +292,9 @@ class HomeAssistantControlelHost:
             runtime_status=RuntimeStatus.FATAL_ERROR,
             safety_state=SafetyState.FATAL_ERROR,
             source_control_state=SourceControlState.FATAL_ERROR,
+            confirmation_state=ConfirmationState.FATAL_ERROR,
+            confirmation_started_at=None,
+            confirmation_deadline=None,
             minimum_on_deadline=None,
             minimum_off_deadline=None,
             active_lockout_type=None,
@@ -400,6 +405,9 @@ class HomeAssistantControlelHost:
             runtime_status=RuntimeStatus.FATAL_ERROR,
             safety_state=SafetyState.FATAL_ERROR,
             source_control_state=SourceControlState.FATAL_ERROR,
+            confirmation_state=ConfirmationState.FATAL_ERROR,
+            confirmation_started_at=None,
+            confirmation_deadline=None,
             minimum_on_deadline=None,
             minimum_off_deadline=None,
             active_lockout_type=None,
@@ -494,6 +502,9 @@ class HomeAssistantControlelHost:
                     now=now,
                     runtime_status=RuntimeStatus.STOPPED,
                     safety_state=SafetyState.STOPPED,
+                    confirmation_state=ConfirmationState.STOPPED,
+                    confirmation_started_at=None,
+                    confirmation_deadline=None,
                     grace_deadline=None,
                     trace_record=self._trace_record(
                         code=DecisionCode.RUNTIME_STOPPED,
@@ -550,6 +561,9 @@ class HomeAssistantControlelHost:
         mapping = self._measurement_mapper.map_state(state)
         if mapping.measurement is None:
             self._observe_rejected_state(state, mapping.rejection_reason)
+            result = await self._executor.async_submit(self._runtime.mark_measurement_indeterminate)
+            if isinstance(result, HeatDemandEvaluationResult):
+                self._observe_evaluation_result(result)
             self._logger.debug(
                 "Rejected Home Assistant temperature state reason=%s",
                 mapping.rejection_reason,
@@ -575,6 +589,13 @@ class HomeAssistantControlelHost:
             raise
 
         self._observe_processing_result(result, mapping.measurement)
+        if result.status is RuntimeProcessingStatus.NO_DECISION and result.reason in {
+            TemperatureNoDecisionReason.TIMESTAMP_ADMISSION_REJECTED,
+            TemperatureNoDecisionReason.PRIMARY_MEASUREMENT_EXPIRED,
+            TemperatureNoDecisionReason.PRIMARY_MEASUREMENT_FUTURE_DATED,
+        }:
+            indeterminate = await self._executor.async_submit(self._runtime.mark_measurement_indeterminate)
+            self._observe_evaluation_result(indeterminate)
         self._logger.debug(
             "Accepted Controlel measurement timestamp=%s processing_status=%s",
             mapping.measurement.timestamp,
@@ -827,7 +848,6 @@ class HomeAssistantControlelHost:
             hysteresis_reason = DecisionReason(hysteresis.reason.value)
             changes.update(
                 raw_zone_heat_demand=raw_demand,
-                zone_heat_demand=filtered_demand,
                 hysteresis_demand=filtered_demand,
                 heating_enable_threshold=hysteresis.enable_threshold,
                 heating_disable_threshold=hysteresis.disable_threshold,
@@ -836,6 +856,27 @@ class HomeAssistantControlelHost:
             )
             demand = filtered_demand
             reason = hysteresis_reason
+        confirmation = result.confirmation_assessment
+        if confirmation is not None:
+            confirmation_state = confirmation.state
+            confirmed_demand = HeatDemandState(confirmation.output_demand.value)
+            confirmation_reason = confirmation_state.last_reason.value
+            changes.update(
+                confirmed_zone_heat_demand=confirmed_demand,
+                zone_heat_demand=confirmed_demand,
+                confirmation_state=ConfirmationState(confirmation_state.phase.value),
+                confirmation_started_at=(confirmation_state.confirmation_started_at),
+                confirmation_deadline=confirmation_state.confirmation_deadline,
+                confirmation_reason=confirmation_reason,
+            )
+            reason = DecisionReason(confirmation_reason)
+            changes.update(
+                demand_reason=reason,
+                active_demand_cause=reason,
+            )
+            demand = confirmed_demand
+            if confirmation_reason in {item.value for item in DecisionCode}:
+                code = DecisionCode(confirmation_reason)
         source = result.source_control_assessment
         if source is not None:
             state = source.state
@@ -876,6 +917,9 @@ class HomeAssistantControlelHost:
             trace,
             raw_demand=changes.get("raw_zone_heat_demand"),
             hysteresis_demand=changes.get("hysteresis_demand"),
+            confirmed_zone_demand=changes.get("confirmed_zone_heat_demand"),
+            confirmation_state=changes.get("confirmation_state"),
+            confirmation_reason=changes.get("confirmation_reason"),
             source_control_state=changes.get("source_control_state"),
             deferred_reason=changes.get("deferred_reason"),
             safety_bypassed_lockout=changes.get("safety_bypassed_lockout", False),
@@ -991,6 +1035,22 @@ class HomeAssistantControlelHost:
             "safety_state": safety_state,
             "grace_deadline": deadline if safety_state is SafetyState.INDETERMINATE_GRACE else None,
         }
+        confirmation = self._runtime.zone_heat_demand_confirmation_state
+        if confirmation is not None:
+            confirmed_demand = (
+                HeatDemandState.INDETERMINATE
+                if confirmation.hysteresis_demand is BuildingHeatDemandStatus.INDETERMINATE
+                else HeatDemandState(confirmation.confirmed_demand.value)
+            )
+            changes.update(
+                hysteresis_demand=HeatDemandState(confirmation.hysteresis_demand.value),
+                confirmed_zone_heat_demand=confirmed_demand,
+                zone_heat_demand=confirmed_demand,
+                confirmation_state=ConfirmationState(confirmation.phase.value),
+                confirmation_started_at=confirmation.confirmation_started_at,
+                confirmation_deadline=confirmation.confirmation_deadline,
+                confirmation_reason=confirmation.last_reason.value,
+            )
         source = self._runtime.source_control_assessment
         if source is not None:
             state = source.state
@@ -1007,6 +1067,36 @@ class HomeAssistantControlelHost:
                 safety_bypassed_lockout=source.safety_bypassed_lockout,
             )
         trace: DecisionTraceRecord | None = None
+        if confirmation is not None and confirmation.last_reason.value == "heat_demand_confirmation_completed":
+            source_assessment = self._runtime.source_control_assessment
+            requested = HeatingAction.ENABLE_HEATING.value
+            if source_assessment is not None and source_assessment.outcome.value == "defer":
+                outcome = CommandOutcome.DEFERRED
+            elif source_assessment is not None and source_assessment.outcome.value == "suppress_duplicate":
+                outcome = CommandOutcome.SUPPRESSED_DUPLICATE
+            elif (
+                self._failure_sink.last_failure is not None and self._failure_sink.last_failure is not previous_failure
+            ):
+                outcome = CommandOutcome.FAILED_RECOVERABLE
+            else:
+                outcome = CommandOutcome.DISPATCHED
+            changes.update(
+                last_requested_command=requested,
+                last_command_outcome=outcome,
+                last_command_timestamp=now,
+                demand_reason=DecisionReason.HEAT_DEMAND_CONFIRMATION_COMPLETED,
+                active_demand_cause=(DecisionReason.HEAT_DEMAND_CONFIRMATION_COMPLETED),
+            )
+            trace = self._trace_record(
+                code=DecisionCode.HEAT_DEMAND_CONFIRMATION_COMPLETED,
+                reason=DecisionReason.HEAT_DEMAND_CONFIRMATION_COMPLETED,
+                timestamp=now,
+                measured=measured,
+                demand=HeatDemandState.HEAT_REQUIRED,
+                requested=requested,
+                outcome=outcome,
+                safety=safety_state,
+            )
         if safety_state is SafetyState.INDETERMINATE_GRACE:
             if current.safety_state is not SafetyState.INDETERMINATE_GRACE:
                 trace = self._trace_record(

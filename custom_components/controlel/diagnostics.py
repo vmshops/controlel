@@ -24,6 +24,7 @@ from .const import (
     CONF_ENABLE_SERVICE_DOMAIN,
     CONF_ENABLE_SERVICE_NAME,
     CONF_ENABLE_TARGET_ENTITY_ID,
+    CONF_HEAT_DEMAND_CONFIRMATION_DURATION,
     CONF_HEAT_SOURCE_CONTROL_MODE,
     CONF_HEATING_TURN_OFF_DIFFERENTIAL,
     CONF_HEATING_TURN_ON_DIFFERENTIAL,
@@ -102,6 +103,7 @@ def _normalized_config(config: HomeAssistantIntegrationConfig) -> dict[str, Any]
         "target_temperature": config.target_temperature.value,
         "heating_turn_on_differential": config.heating_turn_on_differential,
         "heating_turn_off_differential": config.heating_turn_off_differential,
+        "heat_demand_confirmation_duration_seconds": (config.heat_demand_confirmation_duration.total_seconds()),
         "heating_enable_threshold": (config.target_temperature.value - config.heating_turn_on_differential),
         "heating_disable_threshold": (config.target_temperature.value + config.heating_turn_off_differential),
         "minimum_heating_on_time_seconds": config.minimum_heating_on_time.total_seconds(),
@@ -158,6 +160,10 @@ def _configuration_provenance(
                 "value": config.minimum_heating_off_time.total_seconds() / 60,
                 "unit": "minutes",
             },
+            "heat_demand_confirmation_duration_minutes": {
+                "value": (config.heat_demand_confirmation_duration.total_seconds() / 60),
+                "unit": "minutes",
+            },
             "debug_duration_minutes": {
                 "value": config.configured_debug_duration.total_seconds() / 60,
                 "unit": "minutes",
@@ -197,6 +203,7 @@ def _precedence_source(
     if key in {
         CONF_HEATING_TURN_ON_DIFFERENTIAL,
         CONF_HEATING_TURN_OFF_DIFFERENTIAL,
+        CONF_HEAT_DEMAND_CONFIRMATION_DURATION,
         CONF_MINIMUM_HEATING_ON_TIME,
         CONF_MINIMUM_HEATING_OFF_TIME,
         CONF_DIAGNOSTIC_PROFILE,

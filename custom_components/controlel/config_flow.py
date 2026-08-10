@@ -35,6 +35,8 @@ from .const import (
     CONF_ENABLE_SERVICE_DOMAIN,
     CONF_ENABLE_SERVICE_NAME,
     CONF_ENABLE_TARGET_ENTITY_ID,
+    CONF_HEAT_DEMAND_CONFIRMATION_DURATION,
+    CONF_HEAT_DEMAND_CONFIRMATION_DURATION_MINUTES,
     CONF_HEAT_SOURCE_CONTROL_MODE,
     CONF_HEATING_TURN_OFF_DIFFERENTIAL,
     CONF_HEATING_TURN_ON_DIFFERENTIAL,
@@ -62,6 +64,7 @@ from .const import (
     DEFAULT_DEBUG_UNTIL_CHANGED,
     DEFAULT_DIAGNOSTIC_PROFILE,
     DEFAULT_DIAGNOSTIC_PROFILE_BEFORE_DEBUG,
+    DEFAULT_HEAT_DEMAND_CONFIRMATION_DURATION,
     DEFAULT_HEATING_TURN_OFF_DIFFERENTIAL,
     DEFAULT_HEATING_TURN_ON_DIFFERENTIAL,
     DEFAULT_INDETERMINATE_GRACE_PERIOD,
@@ -76,10 +79,12 @@ from .const import (
     DIAGNOSTIC_PROFILE_DETAILED,
     DOMAIN,
     LEGACY_DIAGNOSTIC_PROFILE,
+    LEGACY_HEAT_DEMAND_CONFIRMATION_DURATION,
     LEGACY_HEATING_TURN_OFF_DIFFERENTIAL,
     LEGACY_HEATING_TURN_ON_DIFFERENTIAL,
     LEGACY_MINIMUM_HEATING_OFF_TIME,
     LEGACY_MINIMUM_HEATING_ON_TIME,
+    MAX_HEAT_DEMAND_CONFIRMATION_DURATION,
     STATE_UNAVAILABLE,
     STATE_UNKNOWN,
     UNIT_CELSIUS,
@@ -93,6 +98,7 @@ _MUTABLE_COMMON_KEYS = (
     CONF_TARGET_TEMPERATURE,
     CONF_HEATING_TURN_ON_DIFFERENTIAL,
     CONF_HEATING_TURN_OFF_DIFFERENTIAL,
+    CONF_HEAT_DEMAND_CONFIRMATION_DURATION,
     CONF_MINIMUM_HEATING_ON_TIME,
     CONF_MINIMUM_HEATING_OFF_TIME,
     CONF_PRIMARY_MEASUREMENT_MAX_AGE,
@@ -125,6 +131,10 @@ _SEMANTIC_LOG_FIELDS = (
     (
         "heating_turn_off_differential",
         lambda config: config.heating_turn_off_differential,
+    ),
+    (
+        "heat_demand_confirmation_duration_seconds",
+        lambda config: config.heat_demand_confirmation_duration.total_seconds(),
     ),
     (
         "minimum_heating_on_time_seconds",
@@ -348,7 +358,7 @@ class ControlelOptionsFlow(OptionsFlow):
             )
             _preserve_unchanged_seconds(
                 configuration,
-                advanced_values,
+                {**advanced_values, **self._pending_basic},
                 current,
             )
             errors.update(_configuration_errors(configuration))
@@ -436,6 +446,23 @@ def _basic_schema(
                 min=0,
                 mode=selector.NumberSelectorMode.BOX,
                 unit_of_measurement=UNIT_CELSIUS,
+            )
+        ),
+        vol.Required(
+            CONF_HEAT_DEMAND_CONFIRMATION_DURATION_MINUTES,
+            default=float(
+                values.get(
+                    CONF_HEAT_DEMAND_CONFIRMATION_DURATION,
+                    DEFAULT_HEAT_DEMAND_CONFIRMATION_DURATION,
+                )
+            )
+            / 60,
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=0,
+                max=MAX_HEAT_DEMAND_CONFIRMATION_DURATION / 60,
+                mode=selector.NumberSelectorMode.BOX,
+                unit_of_measurement="min",
             )
         ),
         vol.Required(
@@ -704,6 +731,13 @@ def _configuration_from_steps(
             CONF_HEATING_TURN_OFF_DIFFERENTIAL,
             DEFAULT_HEATING_TURN_OFF_DIFFERENTIAL,
         ),
+        CONF_HEAT_DEMAND_CONFIRMATION_DURATION: float(
+            basic.get(
+                CONF_HEAT_DEMAND_CONFIRMATION_DURATION_MINUTES,
+                DEFAULT_HEAT_DEMAND_CONFIRMATION_DURATION / 60,
+            )
+        )
+        * 60,
         CONF_MINIMUM_HEATING_ON_TIME: float(
             advanced.get(
                 CONF_MINIMUM_HEATING_ON_TIME_MINUTES,
@@ -808,6 +842,10 @@ def _preserve_unchanged_seconds(
             CONF_DEBUG_DURATION_MINUTES,
             CONF_DEBUG_DURATION,
         ),
+        (
+            CONF_HEAT_DEMAND_CONFIRMATION_DURATION_MINUTES,
+            CONF_HEAT_DEMAND_CONFIRMATION_DURATION,
+        ),
     ):
         current_seconds = current[seconds_key]
         if float(advanced_input[minutes_key]) == float(current_seconds) / 60:
@@ -828,6 +866,10 @@ def _apply_legacy_defaults(configuration: dict[str, Any]) -> None:
     configuration.setdefault(
         CONF_MINIMUM_HEATING_ON_TIME,
         LEGACY_MINIMUM_HEATING_ON_TIME,
+    )
+    configuration.setdefault(
+        CONF_HEAT_DEMAND_CONFIRMATION_DURATION,
+        LEGACY_HEAT_DEMAND_CONFIRMATION_DURATION,
     )
     configuration.setdefault(
         CONF_MINIMUM_HEATING_OFF_TIME,
@@ -932,6 +974,7 @@ def _configuration_errors(
             CONF_INDETERMINATE_TIMEOUT_ACTION,
             CONF_HEATING_TURN_ON_DIFFERENTIAL,
             CONF_HEATING_TURN_OFF_DIFFERENTIAL,
+            CONF_HEAT_DEMAND_CONFIRMATION_DURATION,
             CONF_MINIMUM_HEATING_ON_TIME,
             CONF_MINIMUM_HEATING_OFF_TIME,
             CONF_DIAGNOSTIC_PROFILE,

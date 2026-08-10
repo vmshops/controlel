@@ -24,6 +24,8 @@ from custom_components.controlel.const import (
     CONF_ENABLE_SERVICE_DOMAIN,
     CONF_ENABLE_SERVICE_NAME,
     CONF_ENABLE_TARGET_ENTITY_ID,
+    CONF_HEAT_DEMAND_CONFIRMATION_DURATION,
+    CONF_HEAT_DEMAND_CONFIRMATION_DURATION_MINUTES,
     CONF_HEAT_SOURCE_CONTROL_MODE,
     CONF_HEATING_TURN_OFF_DIFFERENTIAL,
     CONF_HEATING_TURN_ON_DIFFERENTIAL,
@@ -46,6 +48,7 @@ from custom_components.controlel.const import (
     CONF_ZONE_NAME,
     CONTROL_MODE_CUSTOM,
     CONTROL_MODE_SIMPLE,
+    DEFAULT_HEAT_DEMAND_CONFIRMATION_DURATION,
     DIAGNOSTIC_PROFILE_BASIC,
     DIAGNOSTIC_PROFILE_DETAILED,
     DOMAIN,
@@ -73,6 +76,13 @@ def _basic_input(entry_data, **updates) -> dict[str, object]:
         CONF_SENSOR_NAME: entry_data[CONF_SENSOR_NAME],
         CONF_TEMPERATURE_ENTITY_ID: entry_data[CONF_TEMPERATURE_ENTITY_ID],
         CONF_TARGET_TEMPERATURE: entry_data[CONF_TARGET_TEMPERATURE],
+        CONF_HEAT_DEMAND_CONFIRMATION_DURATION_MINUTES: (
+            entry_data.get(
+                CONF_HEAT_DEMAND_CONFIRMATION_DURATION,
+                DEFAULT_HEAT_DEMAND_CONFIRMATION_DURATION,
+            )
+            / 60
+        ),
         CONF_HEAT_SOURCE_CONTROL_MODE: CONTROL_MODE_SIMPLE,
         CONF_CONTROLLED_ENTITY_ID: entry_data[CONF_ENABLE_TARGET_ENTITY_ID],
         CONF_SHOW_ADVANCED: False,
@@ -94,6 +104,9 @@ def _advanced_input(entry_data, **updates) -> dict[str, object]:
 
 def _options_basic_input(entry_data, **updates) -> dict[str, object]:
     result = _basic_input(entry_data, **updates)
+    result[CONF_HEAT_DEMAND_CONFIRMATION_DURATION_MINUTES] = (
+        entry_data.get(CONF_HEAT_DEMAND_CONFIRMATION_DURATION, 0.0) / 60
+    )
     result.pop(CONF_SHOW_ADVANCED)
     return result
 
@@ -125,6 +138,7 @@ async def test_user_step_has_basic_defaults_and_filtered_selectors(hass) -> None
         CONF_TARGET_TEMPERATURE,
         CONF_HEATING_TURN_ON_DIFFERENTIAL,
         CONF_HEATING_TURN_OFF_DIFFERENTIAL,
+        CONF_HEAT_DEMAND_CONFIRMATION_DURATION_MINUTES,
         CONF_HEAT_SOURCE_CONTROL_MODE,
         CONF_CONTROLLED_ENTITY_ID,
         CONF_SHOW_ADVANCED,
@@ -139,6 +153,7 @@ async def test_user_step_has_basic_defaults_and_filtered_selectors(hass) -> None
     assert defaults[CONF_TARGET_TEMPERATURE] == 21.0
     assert defaults[CONF_HEATING_TURN_ON_DIFFERENTIAL] == 0.3
     assert defaults[CONF_HEATING_TURN_OFF_DIFFERENTIAL] == 0.1
+    assert defaults[CONF_HEAT_DEMAND_CONFIRMATION_DURATION_MINUTES] == 2.0
     assert defaults[CONF_HEAT_SOURCE_CONTROL_MODE] == CONTROL_MODE_SIMPLE
     assert defaults[CONF_SHOW_ADVANCED] is False
 
@@ -172,6 +187,7 @@ async def test_basic_input_generates_ids_and_stores_mutable_options(hass, entry_
     assert result["options"][CONF_HEATING_TURN_OFF_DIFFERENTIAL] == 0.1
     assert result["options"][CONF_MINIMUM_HEATING_ON_TIME] == 600.0
     assert result["options"][CONF_MINIMUM_HEATING_OFF_TIME] == 300.0
+    assert result["options"][CONF_HEAT_DEMAND_CONFIRMATION_DURATION] == 120.0
     assert result["options"][CONF_DIAGNOSTIC_PROFILE] == DIAGNOSTIC_PROFILE_BASIC
     assert result["options"][CONF_DEBUG_DURATION] == 3600.0
     assert result["options"][CONF_DEBUG_UNTIL_CHANGED] is False
@@ -474,6 +490,7 @@ async def test_options_prefill_legacy_entry_and_preserve_ids_after_rename(
     assert defaults[CONF_CONTROLLED_ENTITY_ID] == "switch.boiler"
     assert defaults[CONF_HEATING_TURN_ON_DIFFERENTIAL] == 0.0
     assert defaults[CONF_HEATING_TURN_OFF_DIFFERENTIAL] == 0.0
+    assert defaults[CONF_HEAT_DEMAND_CONFIRMATION_DURATION_MINUTES] == 0.0
 
     advanced = await hass.config_entries.options.async_configure(
         initial["flow_id"],
@@ -500,6 +517,7 @@ async def test_options_prefill_legacy_entry_and_preserve_ids_after_rename(
     assert entry.options[CONF_INDETERMINATE_GRACE_PERIOD] == 11.0
     assert entry.options[CONF_MINIMUM_HEATING_ON_TIME] == 0.0
     assert entry.options[CONF_MINIMUM_HEATING_OFF_TIME] == 0.0
+    assert entry.options[CONF_HEAT_DEMAND_CONFIRMATION_DURATION] == 0.0
     assert entry.options[CONF_DIAGNOSTIC_PROFILE] == DIAGNOSTIC_PROFILE_DETAILED
 
 
@@ -515,6 +533,7 @@ async def test_options_unchanged_timing_round_trip_preserves_exact_seconds(
     effective = dict(entry_data)
     effective[CONF_PRIMARY_MEASUREMENT_MAX_AGE] = seconds
     effective[CONF_INDETERMINATE_GRACE_PERIOD] = seconds
+    effective[CONF_HEAT_DEMAND_CONFIRMATION_DURATION] = seconds
     if storage_layout == "legacy_data":
         data = dict(effective)
         options = {}
@@ -528,9 +547,11 @@ async def test_options_unchanged_timing_round_trip_preserves_exact_seconds(
         data = dict(effective)
         data[CONF_PRIMARY_MEASUREMENT_MAX_AGE] = seconds + 1
         data[CONF_INDETERMINATE_GRACE_PERIOD] = seconds + 1
+        data[CONF_HEAT_DEMAND_CONFIRMATION_DURATION] = seconds + 1
         options = {
             CONF_PRIMARY_MEASUREMENT_MAX_AGE: seconds,
             CONF_INDETERMINATE_GRACE_PERIOD: seconds,
+            CONF_HEAT_DEMAND_CONFIRMATION_DURATION: seconds,
         }
 
     entry = MockConfigEntry(
@@ -565,6 +586,7 @@ async def test_options_unchanged_timing_round_trip_preserves_exact_seconds(
     assert result["type"] is data_entry_flow.FlowResultType.CREATE_ENTRY
     assert entry.options[CONF_PRIMARY_MEASUREMENT_MAX_AGE] == seconds
     assert entry.options[CONF_INDETERMINATE_GRACE_PERIOD] == seconds
+    assert entry.options[CONF_HEAT_DEMAND_CONFIRMATION_DURATION] == seconds
 
 
 @pytest.mark.asyncio

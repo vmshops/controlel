@@ -79,6 +79,15 @@ class RecordingRuntime:
         finally:
             self.active = False
 
+    def mark_measurement_indeterminate(self):
+        assert self.active is False
+        self.threads.append(get_ident())
+        self.operations.append(("indeterminate", None))
+        return SimpleNamespace(
+            status=HeatDemandEvaluationStatus.INDETERMINATE_GRACE,
+            next_evaluation_at=NOW,
+        )
+
     def stop(self) -> None:
         assert self.active is False
         self.threads.append(get_ident())
@@ -113,6 +122,7 @@ def make_host(hass, runtime: RecordingRuntime) -> HomeAssistantControlelHost:
             target_temperature=Temperature(21),
             heating_turn_on_differential=0.0,
             heating_turn_off_differential=0.0,
+            heat_demand_confirmation_duration=timedelta(0),
             primary_measurement_max_age=timedelta(minutes=5),
             indeterminate_grace_period=timedelta(minutes=1),
             minimum_heating_on_time=timedelta(0),
@@ -125,7 +135,7 @@ def make_host(hass, runtime: RecordingRuntime) -> HomeAssistantControlelHost:
                 profile_before_debug="detailed",
             ),
         ),
-        core_version="0.2.0",
+        core_version="0.3.0",
         logger=logging.getLogger(__name__),
     )
     sink.bind_fatal_handler(host.request_fatal_shutdown)

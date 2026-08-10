@@ -41,6 +41,9 @@ _DETAILED_LOG_FIELDS = (
     *_BASIC_LOG_FIELDS,
     "raw_zone_heat_demand",
     "hysteresis_demand",
+    "confirmed_zone_heat_demand",
+    "confirmation_state",
+    "confirmation_reason",
     "zone_heat_demand",
     "source_control_state",
     "active_lockout_type",
@@ -165,18 +168,21 @@ class ObservabilityController:
                 "sensor_failure_grace": snapshot.sensor_failure_grace_period_seconds,
                 "minimum_heating_on": snapshot.minimum_heating_on_time_seconds,
                 "minimum_heating_off": snapshot.minimum_heating_off_time_seconds,
+                "heat_demand_confirmation": (snapshot.heat_demand_confirmation_duration_seconds),
             },
             "deadlines": {
                 "measurement_maximum_age": _iso(snapshot.measurement_stale_deadline),
                 "sensor_failure_grace": _iso(snapshot.grace_deadline),
                 "minimum_heating_on": _iso(snapshot.minimum_on_deadline),
                 "minimum_heating_off": _iso(snapshot.minimum_off_deadline),
+                "heat_demand_confirmation": _iso(snapshot.confirmation_deadline),
                 "debug_profile_expiry": _iso(snapshot.debug_expiry_deadline),
             },
             "remaining_durations_seconds": {
                 "measurement_maximum_age": snapshot.measurement_stale_remaining_seconds,
                 "sensor_failure_grace": snapshot.grace_remaining_seconds,
                 "minimum_heating_on_or_off": snapshot.lockout_remaining_seconds,
+                "heat_demand_confirmation": (snapshot.confirmation_remaining_seconds),
                 "debug_profile_expiry": snapshot.debug_expiry_remaining_seconds,
             },
             "countdowns": _countdown_evidence(snapshot),
@@ -303,6 +309,13 @@ def _countdown_evidence(snapshot: OperationalSnapshot) -> dict[str, dict[str, ob
         and snapshot.lockout_remaining_seconds is not None
     )
     return {
+        "heat_demand_confirmation": _countdown(
+            snapshot.heat_demand_confirmation_duration_seconds,
+            snapshot.confirmation_deadline,
+            snapshot.confirmation_remaining_seconds,
+            reason=snapshot.confirmation_reason or "no_confirmation_active",
+            expiry_action="reevaluate_current_hysteresis_demand",
+        ),
         "measurement_maximum_age": _countdown(
             snapshot.primary_measurement_max_age_seconds,
             snapshot.measurement_stale_deadline,

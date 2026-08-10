@@ -41,6 +41,7 @@ def host_config():
         target_temperature=Temperature(21),
         heating_turn_on_differential=0.3,
         heating_turn_off_differential=0.1,
+        heat_demand_confirmation_duration=timedelta(minutes=2),
         primary_measurement_max_age=timedelta(minutes=5),
         indeterminate_grace_period=timedelta(minutes=1),
         minimum_heating_on_time=timedelta(minutes=10),
@@ -110,6 +111,14 @@ class FakeRuntime:
             next_evaluation_at=NOW,
         )
 
+    def mark_measurement_indeterminate(self):
+        self.worker_threads.append(get_ident())
+        self.operations.append(("indeterminate", None))
+        return SimpleNamespace(
+            status=HeatDemandEvaluationStatus.INDETERMINATE_GRACE,
+            next_evaluation_at=NOW,
+        )
+
     def stop(self):
         self.worker_threads.append(get_ident())
         self.operations.append(("stop", None))
@@ -152,7 +161,7 @@ def test_snapshot_buffer_start_live_and_stop_ordering():
             ),
             failure_sink=failure_sink,
             config=host_config(),
-            core_version="0.2.0",
+            core_version="0.3.0",
             logger=logging.getLogger(__name__),
             state_subscriber=subscribe,
             state_getter=lambda entity_id: FakeState("19", NOW),
@@ -236,7 +245,7 @@ def test_unavailable_snapshot_reaches_start_without_synthetic_measurement():
             ),
             failure_sink=failure_sink,
             config=host_config(),
-            core_version="0.2.0",
+            core_version="0.3.0",
             logger=logging.getLogger(__name__),
             state_subscriber=lambda hass, entity_id, listener: lambda: None,
             state_getter=lambda entity_id: FakeState("unavailable", NOW),
@@ -248,4 +257,8 @@ def test_unavailable_snapshot_reaches_start_without_synthetic_measurement():
         await host.async_stop()
         return runtime.operations
 
-    assert asyncio.run(scenario()) == [("start", None), ("stop", None)]
+    assert asyncio.run(scenario()) == [
+        ("indeterminate", None),
+        ("start", None),
+        ("stop", None),
+    ]
