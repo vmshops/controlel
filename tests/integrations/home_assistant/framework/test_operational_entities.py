@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
@@ -33,6 +34,8 @@ from custom_components.controlel.operational import SafetyState
 EXPECTED_SENSOR_KEYS = {
     "active_demand_cause",
     "active_lockout_type",
+    "active_lockout_deadline",
+    "active_lockout_remaining",
     "core_version",
     "current_temperature",
     "debug_expiry_deadline",
@@ -40,7 +43,10 @@ EXPECTED_SENSOR_KEYS = {
     "debug_profile_duration",
     "decision_trace_capacity",
     "deferred_command",
+    "deferred_deadline",
     "deferred_reason",
+    "deferred_remaining",
+    "deferred_since",
     "diagnostic_profile",
     "duplicate_commands_suppressed",
     "emergency_disable_outcome",
@@ -58,12 +64,16 @@ EXPECTED_SENSOR_KEYS = {
     "hysteresis_demand",
     "confirmed_zone_heat_demand",
     "integration_version",
+    "earliest_next_disable_time",
+    "earliest_next_enable_time",
     "last_command_outcome",
     "last_command_time",
     "last_decision",
     "last_decision_reason",
     "last_meaningful_event",
     "last_requested_command",
+    "last_successful_disable_dispatch",
+    "last_successful_enable_dispatch",
     "measurement_age",
     "measurement_maximum_age",
     "measurement_stale_deadline",
@@ -81,6 +91,7 @@ EXPECTED_SENSOR_KEYS = {
     "safety_state",
     "sensor_failure_grace_period",
     "source_control_state",
+    "source_control_summary",
     "target_temperature",
     "timeout_action",
 }
@@ -161,7 +172,7 @@ async def test_device_entities_states_unique_ids_and_unload(
     assert hass.states.get(by_key["heat_demand"].entity_id).state == "heat_required"
     assert hass.states.get(by_key["heat_required"].entity_id).state == "on"
     assert hass.states.get(by_key["runtime_active"].entity_id).state == "on"
-    assert hass.states.get(by_key["integration_version"].entity_id).state == "0.6.0"
+    assert hass.states.get(by_key["integration_version"].entity_id).state == "0.7.0"
     assert hass.states.get(by_key["core_version"].entity_id).state == expected_framework_core_version
     assert hass.states.get(by_key["diagnostic_profile"].entity_id).state == (DIAGNOSTIC_PROFILE_DETAILED)
     assert hass.states.get(by_key["grace_remaining"].entity_id).state == "unavailable"
@@ -322,13 +333,16 @@ async def test_hysteresis_hold_and_minimum_on_deferred_command_are_visible(
         await hass.async_block_till_done()
         deferred = host.snapshot_source.current
         assert deferred.hysteresis_demand.value == "no_heat_required"
-        assert deferred.source_control_state.value == "deferred_disable"
+        assert deferred.source_control_state.value == "heating_not_requested_waiting_minimum_on"
         assert deferred.active_lockout_type.value == "minimum_on"
         assert deferred.deferred_command == "disable_heating"
+        assert deferred.active_lockout_deadline == deferred.deferred_deadline
+        assert deferred.deferred_since is not None
+        assert deferred.active_lockout_remaining_seconds == deferred.deferred_remaining_seconds
         assert deferred.lockout_remaining_seconds is not None
         assert 0 < deferred.lockout_remaining_seconds <= 121
 
-        clock.current = deferred.minimum_on_deadline
+        clock.current = deferred.active_lockout_deadline
         await host.async_reevaluate()
         await hass.async_block_till_done()
         assert [service for service, _ in service_calls] == ["turn_on", "turn_off"]
@@ -458,14 +472,30 @@ async def test_diagnostics_are_allowlisted_json_safe_and_redact_unknown_entry_da
     entry = await _setup_entry(hass, entry_data)
 
     diagnostics = await async_get_config_entry_diagnostics(hass, entry)
-    serialized = repr(diagnostics)
+    serialized = json.dumps(diagnostics, sort_keys=True)
 
     assert diagnostics["versions"] == {
-        "integration": "0.6.0",
+        "integration": "0.7.0",
         "core": expected_framework_core_version,
     }
     assert diagnostics["operational_snapshot"]["runtime_status"] == "active"
     assert diagnostics["operational_snapshot"]["safety_state"] == "normal"
+    assert {
+        "source_control_state",
+        "source_control_summary",
+        "earliest_next_enable_time",
+        "earliest_next_disable_time",
+        "active_lockout_type",
+        "active_lockout_deadline",
+        "active_lockout_remaining_seconds",
+        "deferred_command",
+        "deferred_reason",
+        "deferred_since",
+        "deferred_deadline",
+        "deferred_remaining_seconds",
+        "last_successful_enable_dispatch",
+        "last_successful_disable_dispatch",
+    } <= diagnostics["operational_snapshot"].keys()
     assert len(diagnostics["entity_ids"]) == len(EXPECTED_SENSOR_KEYS | EXPECTED_BINARY_SENSOR_KEYS)
     assert diagnostics["decision_trace"]
     assert diagnostics["active_issue_ids"] == []

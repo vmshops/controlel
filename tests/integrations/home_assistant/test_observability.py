@@ -42,8 +42,8 @@ def source() -> OperationalSnapshotSource:
             debug_expiry_deadline=None,
             debug_profile_duration_seconds=3600.0,
             trace_capacity=20,
-            integration_version="0.6.0",
-            core_version="0.3.0",
+            integration_version="0.7.0",
+            core_version="0.4.0",
         )
     )
 
@@ -123,6 +123,7 @@ def test_only_active_countdowns_install_debug_refresh() -> None:
     snapshots.update(
         now=NOW,
         active_lockout_type=ActiveLockoutType.MINIMUM_OFF,
+        active_lockout_deadline=NOW + timedelta(seconds=30),
         minimum_off_deadline=NOW + timedelta(seconds=30),
     )
 
@@ -150,6 +151,19 @@ def test_detailed_refresh_uses_ten_seconds_and_basic_never_installs() -> None:
         grace_deadline=NOW + timedelta(seconds=60),
     )
     assert basic_intervals.installed == []
+
+
+def test_passive_boundaries_never_install_periodic_refresh() -> None:
+    for profile in ("basic", "detailed", "debug"):
+        profile_controller, snapshots, intervals = controller(profile, debug_duration=None)
+        profile_controller.start()
+        snapshots.update(
+            now=NOW,
+            earliest_next_enable_time=NOW + timedelta(seconds=30),
+            minimum_off_deadline=NOW + timedelta(seconds=30),
+        )
+
+        assert intervals.installed == []
 
 
 def test_debug_expiry_returns_to_previous_profile_without_reload() -> None:
@@ -235,7 +249,10 @@ def test_diagnostics_explain_configured_and_inactive_countdowns() -> None:
     ("state", "deadline_field", "name"),
     [
         (
-            {"active_lockout_type": ActiveLockoutType.MINIMUM_OFF},
+            {
+                "active_lockout_type": ActiveLockoutType.MINIMUM_OFF,
+                "active_lockout_deadline": NOW + timedelta(seconds=30),
+            },
             "minimum_off_deadline",
             "minimum_heating_off",
         ),

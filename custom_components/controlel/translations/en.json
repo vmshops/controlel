@@ -175,17 +175,20 @@
           "sensor_failure_grace": "The temperature measurement is unavailable; sensor failure grace is active.",
           "safety_timeout_disable_requested": "Sensor failure grace expired and a heating-off command was requested.",
           "safety_timeout_enable_requested": "Sensor failure grace expired and a heating-on command was requested.",
-          "heat_deferred_minimum_off": "The zone requests heating, but minimum off time is active.",
-          "no_heat_deferred_minimum_on": "The zone no longer requests heating, but minimum on time is active.",
+          "heat_deferred_minimum_off": "Heating requested; waiting for minimum-off protection.",
+          "no_heat_deferred_minimum_on": "Heating no longer requested; waiting for minimum-on protection.",
+          "no_heat_enable_boundary": "No heating requested; see Earliest next enable time for the passive protection boundary.",
+          "safety_disable_bypassed_lockout": "Safety disable bypassed minimum-on protection.",
           "heat_command_failed": "The zone requests heating, but the requested command failed.",
           "no_heat_command_failed": "Heating is not requested, but the requested command failed.",
-          "heat_requested": "The zone requests heating and the heat source may start.",
-          "no_heat_requested": "Heating is not currently requested.",
-          "demand_indeterminate": "Heating demand is indeterminate."
+          "heat_requested": "Heating request active.",
+          "no_heat_requested": "No heating requested.",
+          "demand_indeterminate": "Source state indeterminate."
           ,"heat_confirmation_pending": "The zone requests heating; confirmation is pending."
           ,"heat_confirmation_cancelled": "The temporary heating request ended before confirmation."
         }
       },
+      "source_control_summary": {"name": "Source-control summary"},
       "heating_turn_on_differential": {"name": "Configured heating turn-on differential"},
       "heating_turn_off_differential": {"name": "Configured heating turn-off differential"},
       "heat_demand_confirmation_duration": {"name": "Configured heat-demand confirmation time"},
@@ -352,11 +355,13 @@
       "source_control_state": {
         "name": "Source-control state",
         "state": {
-          "idle": "Idle",
-          "heating_requested": "Heating requested",
+          "indeterminate": "Indeterminate",
           "heating_not_requested": "Heating not requested",
-          "deferred_enable": "Enable deferred",
-          "deferred_disable": "Disable deferred",
+          "heating_requested_and_allowed": "Heating requested and enable allowed",
+          "heating_requested_waiting_minimum_off": "Heating requested, waiting for minimum-off protection",
+          "heating_active_request": "Heating request remains active",
+          "heating_not_requested_waiting_minimum_on": "Heating not requested, waiting for minimum-on protection",
+          "safety_override": "Safety override",
           "stopped": "Stopped",
           "fatal_error": "Fatal error"
         }
@@ -368,6 +373,10 @@
           "minimum_off": "Minimum off time"
         }
       },
+      "earliest_next_enable_time": {"name": "Earliest next enable time"},
+      "earliest_next_disable_time": {"name": "Earliest next disable time"},
+      "active_lockout_deadline": {"name": "Active lockout deadline"},
+      "active_lockout_remaining": {"name": "Active lockout time remaining"},
       "lockout_remaining": {"name": "Lockout time remaining"},
       "deferred_command": {
         "name": "Deferred command",
@@ -376,6 +385,11 @@
           "disable_heating": "Disable heating"
         }
       },
+      "deferred_since": {"name": "Deferred since"},
+      "deferred_deadline": {"name": "Deferred deadline"},
+      "deferred_remaining": {"name": "Deferred time remaining"},
+      "last_successful_enable_dispatch": {"name": "Last successful enable dispatch"},
+      "last_successful_disable_dispatch": {"name": "Last successful disable dispatch"},
       "minimum_on_deadline": {"name": "Minimum on deadline"},
       "minimum_off_deadline": {"name": "Minimum off deadline"},
       "safety_state": {

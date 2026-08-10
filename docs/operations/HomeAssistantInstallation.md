@@ -17,11 +17,39 @@ Protection history is not persisted. After restart or reload, Controlel reads
 the current sensor value deterministically but does not infer prior command
 history or lockout state from the switch.
 
-Controlel `0.6.0` is the current development candidate for one heating zone,
+Controlel `0.7.0` is the current development candidate for one heating zone,
 one primary temperature sensor, and one shared heat source. It requires the
-public core package `controlel==0.3.0`.
+public core package `controlel==0.4.0`.
 
-Candidate `0.6.0` is not published; use the latest published release for HACS
+Milestone 28 Phase C uses the published immutable core `0.4.0`. The integration
+candidate is `0.7.0` and its manifest pins `controlel==0.4.0`.
+
+### Heat-source timing observations
+
+- **Earliest next enable/disable** is a passive timestamp calculated from the
+  last successful opposite command. Its presence does not mean a command is
+  blocked.
+- **Active lockout** appears only when current aggregate demand requests a
+  command before its passive boundary. Type, deadline, and remaining time then
+  identify the protection that is actually blocking it.
+- **Deferred command** exists only for that blocked request. Its reason, start,
+  deadline, and remaining time clear if demand changes or after deadline
+  reevaluation.
+- **Confirmed zone demand** is the output of the zone confirmation filter. It
+  remains independent of source minimum-off protection.
+- **Successful dispatch** means the configured Home Assistant service call
+  returned successfully. It is not physical boiler or burner feedback.
+
+Basic is event-driven and does not refresh passive timestamps. Detailed and
+Debug refresh active lockout/deferred remaining-time entities every 10 seconds
+and 1 second respectively, using the existing observability scheduler.
+High-frequency remaining-time entities may be excluded from Recorder if their
+history is not useful. Passive timestamp entities are low-churn. Controlel does
+not modify Recorder configuration automatically.
+
+Candidate `0.7.0` is not published; use the latest published release for HACS
+custom-repository installation. Controlel is not listed in the default HACS
+store.
 
 Milestone 27 adds **Heat-demand confirmation time** to the zone settings.
 New entries default to 2 minutes. Entries created by 0.5.0 or older that lack
@@ -34,8 +62,6 @@ heat source minimum-off time and does not detect open windows. An unavailable,
 unknown, invalid, stale, or future-dated measurement resets a pending interval.
 Reload and restart also begin a fresh interval; confirmation history is not
 persisted.
-custom-repository installation. Controlel is not listed in the default HACS
-store.
 
 ## Prerequisites
 
@@ -63,7 +89,7 @@ custom integration.
 
 HACS downloads the release asset into
 `config/custom_components/controlel/`. During integration setup, Home
-Assistant reads the manifest and installs `controlel==0.3.0` from PyPI.
+Assistant reads the manifest and installs `controlel==0.4.0` from PyPI.
 Manual core installation is neither required nor supported for normal use.
 
 ## Manual installation fallback
@@ -208,7 +234,7 @@ structure must provide an explicit migration.
 3. Restart Home Assistant.
 
 HACS removes the integration directory but does not uninstall Python packages
-or related Home Assistant data automatically. The `controlel==0.3.0` package
+or related Home Assistant data automatically. The `controlel==0.4.0` package
 may remain in Home Assistant's managed Python environment and must not be
 manually removed.
 
