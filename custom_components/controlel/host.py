@@ -172,6 +172,7 @@ class HomeAssistantControlelHost:
         self._unsubscribe_shutdown: Unsubscribe | None = None
         self._live_drain_task: asyncio.Task[Any] | None = None
         self._accepted_callback_tasks: set[asyncio.Task[Any]] = set()
+        self._shadow_assessment_tasks: set[asyncio.Task[Any]] = set()
         self._fatal_shutdown_task: asyncio.Task[Any] | None = None
         self._fatal_error: Exception | None = None
         self._last_state_version: StateVersion | None = None
@@ -213,7 +214,7 @@ class HomeAssistantControlelHost:
             snapshot = self._state_getter(self._temperature_entity_id)
 
             try:
-                startup_result = await self._executor.async_submit(self._runtime.start)
+                startup_result = await self._async_submit_runtime(self._runtime.start)
             except HomeAssistantServiceCallError as error:
                 self._handle_synchronous_failure(error)
             except Exception as error:
@@ -261,7 +262,7 @@ class HomeAssistantControlelHost:
         if not self._accepting:
             raise RuntimeStoppedError("Controlel host is not accepting work")
         try:
-            result = await self._executor.async_submit(self._runtime.reevaluate_heat_demand)
+            result = await self._async_submit_runtime(self._runtime.reevaluate_heat_demand)
         except Exception as error:
             self._handle_synchronous_failure(error)
             raise
@@ -357,7 +358,7 @@ class HomeAssistantControlelHost:
             )
         else:
             try:
-                result = await self._executor.async_submit(
+                result = await self._async_submit_runtime(
                     fatal_shutdown,
                     failed_action,
                     requested_at,
@@ -502,13 +503,14 @@ class HomeAssistantControlelHost:
 
             if not self._executor.closed:
                 try:
-                    await self._executor.async_submit(self._runtime.stop)
+                    await self._async_submit_runtime(self._runtime.stop)
                 except RuntimeExecutorClosedError:
                     pass
                 except Exception as error:
                     self._logger.exception("Controlel runtime stop failed; continuing cleanup")
                     self._failure_sink.handle_synchronous_failure(error)
                 finally:
+                    await self._async_wait_for_shadow_assessments()
                     await self._executor.async_close()
 
             self._buffer.clear()
@@ -591,7 +593,7 @@ class HomeAssistantControlelHost:
         mapping = self._measurement_mapper.map_state(state)
         if mapping.measurement is None:
             self._observe_rejected_state(state, mapping.rejection_reason)
-            result = await self._executor.async_submit(self._runtime.mark_measurement_indeterminate)
+            result = await self._async_submit_runtime(self._runtime.mark_measurement_indeterminate)
             if isinstance(result, HeatDemandEvaluationResult):
                 self._observe_evaluation_result(result)
             self._logger.debug(
@@ -601,7 +603,7 @@ class HomeAssistantControlelHost:
             return None
 
         try:
-            result = await self._executor.async_submit(
+            result = await self._async_submit_runtime(
                 self._runtime.process_temperature,
                 mapping.measurement,
             )
@@ -624,7 +626,7 @@ class HomeAssistantControlelHost:
             TemperatureNoDecisionReason.PRIMARY_MEASUREMENT_EXPIRED,
             TemperatureNoDecisionReason.PRIMARY_MEASUREMENT_FUTURE_DATED,
         }:
-            indeterminate = await self._executor.async_submit(self._runtime.mark_measurement_indeterminate)
+            indeterminate = await self._async_submit_runtime(self._runtime.mark_measurement_indeterminate)
             self._observe_evaluation_result(indeterminate)
         self._logger.debug(
             "Accepted Controlel measurement timestamp=%s processing_status=%s",
@@ -644,13 +646,55 @@ class HomeAssistantControlelHost:
         previous_state = heat_source_state_store.get() if heat_source_state_store is not None else None
         previous_failure = self._failure_sink.last_failure
         try:
-            await self._executor.async_submit(callback)
+            await self._async_submit_runtime(callback)
         except RuntimeExecutorClosedError:
             if not self._stopping and not self._stopped:
                 raise
         else:
             if heat_source_state_store is not None:
                 self._observe_scheduled_state(previous_state, previous_failure)
+
+    async def _async_submit_runtime(
+        self,
+        operation: Callable[..., Any],
+        *args: object,
+    ) -> Any:
+        """Run one serialized control operation, then schedule shadow work."""
+
+        try:
+            return await self._executor.async_submit(operation, *args)
+        finally:
+            self._schedule_shadow_assessment_drain()
+
+    def _schedule_shadow_assessment_drain(self) -> None:
+        monitor = getattr(self._runtime, "heating_performance_monitor", None)
+        assess_pending = getattr(monitor, "assess_pending", None)
+        pending_count = getattr(monitor, "pending_episode_count", 0)
+        if not callable(assess_pending) or not pending_count:
+            return
+        task = self._create_task(
+            self._async_drain_shadow_assessments(assess_pending),
+            "Controlel shadow heating assessment",
+        )
+        self._shadow_assessment_tasks.add(task)
+        task.add_done_callback(self._shadow_assessment_tasks.discard)
+
+    async def _async_drain_shadow_assessments(
+        self,
+        assess_pending: Callable[[], object],
+    ) -> None:
+        try:
+            await asyncio.to_thread(assess_pending)
+        except Exception:
+            self._logger.exception("Controlel shadow heating assessment failed")
+
+    async def _async_wait_for_shadow_assessments(self) -> None:
+        while self._shadow_assessment_tasks:
+            tasks = [task for task in self._shadow_assessment_tasks if task is not asyncio.current_task()]
+            if not tasks:
+                return
+            await asyncio.gather(*tasks, return_exceptions=True)
+            self._shadow_assessment_tasks.difference_update(tasks)
 
     def _handle_synchronous_failure(self, error: Exception) -> None:
         self._failure_sink.handle_synchronous_failure(error)

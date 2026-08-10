@@ -94,6 +94,8 @@ class HeatingEpisodeObserver:
                         changed_at=captured_at,
                     ),
                 ),
+                total_sample_count=1,
+                samples_truncated=False,
                 samples=(sample,),
             )
             self._active[zone_id] = active
@@ -113,6 +115,8 @@ class HeatingEpisodeObserver:
                 trusted_temperature if trusted_temperature is not None else active.current_temperature
             ),
             demand_transitions=transitions,
+            total_sample_count=active.total_sample_count + 1,
+            samples_truncated=(active.samples_truncated or len(active.samples) + 1 > self._max_samples_per_episode),
             samples=samples,
         )
         if confirmed_demand is BuildingHeatDemandStatus.HEAT_REQUIRED:

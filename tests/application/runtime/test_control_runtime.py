@@ -1,9 +1,12 @@
 from datetime import UTC, datetime, timedelta
 from inspect import signature
+from threading import Event, Thread
 
 from controlel.application.runtime.control_runtime import ControlRuntime
 from controlel.application.runtime.runtime_processing_result import RuntimeProcessingStatus
 from controlel.application.services.heating_episode_observer import HeatingEpisodeObserver
+from controlel.application.services.heating_performance_assessor import HeatingPerformanceAssessor
+from controlel.application.services.shadow_heating_performance_monitor import ShadowHeatingPerformanceMonitor
 from controlel.application.services.source_control_policy import SourceControlOutcome
 from controlel.application.services.zone_heat_delivery_controller import ZoneHeatDeliveryController
 from controlel.domain.commands.heat_source_command import HeatSourceCommand
@@ -179,7 +182,30 @@ class SelectivelyFailingObserver(HeatingEpisodeObserver):
         return super().observe(**kwargs)
 
 
-def create_heat_delivery_runtime() -> tuple[
+class FailingPerformanceAssessor:
+    def assess(self, episode):
+        raise RuntimeError(f"assessment failed for {episode.zone_id.value}")
+
+
+class BlockingPerformanceAssessor:
+    def __init__(self) -> None:
+        self.entered = Event()
+        self.release = Event()
+        self._delegate = HeatingPerformanceAssessor()
+
+    def assess(self, episode):
+        self.entered.set()
+        if not self.release.wait(timeout=5):
+            raise TimeoutError("assessment was not released")
+        return self._delegate.assess(episode)
+
+
+def create_heat_delivery_runtime(
+    *,
+    indeterminate_grace_period: timedelta = timedelta(minutes=1),
+    minimum_heating_on_time: timedelta = timedelta(0),
+    minimum_heating_off_time: timedelta = timedelta(0),
+) -> tuple[
     ControlRuntime,
     NoOpHeatSource,
     RecordingHeatDeliveryPort,
@@ -225,8 +251,10 @@ def create_heat_delivery_runtime() -> tuple[
         NoOpScheduler(),
         NoOpScheduledFailureSink(),
         timedelta(0),
-        timedelta(minutes=1),
+        indeterminate_grace_period,
         HeatingAction.DISABLE_HEATING,
+        minimum_heating_on_time=minimum_heating_on_time,
+        minimum_heating_off_time=minimum_heating_off_time,
         heat_delivery_controller=controller,
     )
     return runtime, source, delivery_port, sensor_id, zone_id
@@ -285,6 +313,186 @@ def test_one_zone_observation_failure_does_not_skip_remaining_zones() -> None:
     assert runtime.heating_episode_observation_errors == {failed_zone_id: "RuntimeError: observation failed"}
     assert [episode.zone_id for episode in observer.active_episodes] == [remaining_zone_id]
     assert source.commands == []
+
+
+def run_heat_delivery_cycle(runtime: ControlRuntime, sensor_id: SensorId):
+    heating = runtime.process_temperature(Measurement(sensor_id=sensor_id, value=Temperature(20), timestamp=NOW))
+    clearing = runtime.process_temperature(Measurement(sensor_id=sensor_id, value=Temperature(23), timestamp=NOW))
+    return heating, clearing
+
+
+def control_trace(runtime, source, delivery_port, evaluations):
+    return (
+        tuple(
+            (
+                evaluation.trigger,
+                evaluation.status,
+                evaluation.building_heat_demand,
+                evaluation.safety_assessment,
+                evaluation.next_evaluation_at,
+                evaluation.hysteresis_assessment,
+                evaluation.confirmation_assessment,
+                evaluation.source_control_assessment,
+                None if evaluation.command is None else (evaluation.command.command_type, evaluation.command.action),
+            )
+            for evaluation in evaluations
+        ),
+        tuple((command.command_type, command.action) for command in source.commands),
+        tuple(
+            (
+                command.actuator_id,
+                command.zone_id,
+                command.kind,
+                command.value,
+                command.requested_at,
+            )
+            for command in delivery_port.commands
+        ),
+        runtime.source_control_state,
+        runtime.zone_heat_demand_confirmation_states,
+    )
+
+
+def run_non_interference_scenario(
+    *,
+    monitor,
+    temperatures,
+    indeterminate_grace_period=timedelta(minutes=1),
+    minimum_heating_on_time=timedelta(0),
+    minimum_heating_off_time=timedelta(0),
+    mark_indeterminate=False,
+    reevaluate=False,
+):
+    runtime, source, delivery_port, sensor_id, _ = create_heat_delivery_runtime(
+        indeterminate_grace_period=indeterminate_grace_period,
+        minimum_heating_on_time=minimum_heating_on_time,
+        minimum_heating_off_time=minimum_heating_off_time,
+    )
+    runtime.heating_performance_monitor = monitor
+    evaluations = []
+    for temperature in temperatures:
+        result = runtime.process_temperature(
+            Measurement(sensor_id=sensor_id, value=Temperature(temperature), timestamp=NOW)
+        )
+        evaluations.append(result.heat_demand_evaluation)
+    if reevaluate:
+        evaluations.append(runtime.reevaluate_heat_demand())
+    if mark_indeterminate:
+        evaluations.append(runtime.mark_measurement_indeterminate())
+    return control_trace(runtime, source, delivery_port, evaluations)
+
+
+def test_shadow_assessment_enabled_disabled_and_failed_have_identical_commands() -> None:
+    traces = []
+    runtimes = []
+    monitors = (
+        ShadowHeatingPerformanceMonitor(enabled=True),
+        ShadowHeatingPerformanceMonitor(enabled=False),
+        ShadowHeatingPerformanceMonitor(assessor=FailingPerformanceAssessor()),
+    )
+    for monitor in monitors:
+        runtime, source, delivery_port, sensor_id, _ = create_heat_delivery_runtime()
+        runtime.heating_performance_monitor = monitor
+        results = run_heat_delivery_cycle(runtime, sensor_id)
+        traces.append(
+            (
+                tuple((command.command_type, command.action) for command in source.commands),
+                tuple(
+                    (
+                        command.actuator_id,
+                        command.zone_id,
+                        command.kind,
+                        command.value,
+                        command.requested_at,
+                    )
+                    for command in delivery_port.commands
+                ),
+                tuple(result.status for result in results),
+            )
+        )
+        runtimes.append(runtime)
+
+    assert traces[0] == traces[1] == traces[2]
+    assert monitors[0].pending_episode_count == 1
+    assert monitors[1].pending_episode_count == 0
+    assert monitors[2].pending_episode_count == 1
+    for monitor in monitors:
+        monitor.assess_pending()
+    assert len(monitors[0].assessments) == 1
+    assert monitors[1].assessments == ()
+    assert monitors[2].errors == {ZoneId("bedroom"): "RuntimeError: assessment failed for bedroom"}
+    assert all(runtime.heating_episode_observation_error is None for runtime in runtimes)
+
+
+def test_shadow_assessment_enabled_and_disabled_have_identical_full_control_contracts() -> None:
+    scenarios = (
+        {"temperatures": (20, 23), "reevaluate": True},
+        {
+            "temperatures": (20, 23),
+            "minimum_heating_on_time": timedelta(minutes=5),
+        },
+        {
+            "temperatures": (23, 20),
+            "minimum_heating_off_time": timedelta(minutes=5),
+        },
+        {
+            "temperatures": (20,),
+            "indeterminate_grace_period": timedelta(0),
+            "minimum_heating_on_time": timedelta(minutes=5),
+            "mark_indeterminate": True,
+        },
+    )
+
+    for scenario in scenarios:
+        enabled_trace = run_non_interference_scenario(
+            monitor=ShadowHeatingPerformanceMonitor(enabled=True),
+            **scenario,
+        )
+        disabled_trace = run_non_interference_scenario(
+            monitor=ShadowHeatingPerformanceMonitor(enabled=False),
+            **scenario,
+        )
+
+        assert enabled_trace == disabled_trace
+
+
+def test_blocking_assessment_begins_only_after_control_commands_execute() -> None:
+    runtime, source, delivery_port, sensor_id, _ = create_heat_delivery_runtime()
+    blocking_assessor = BlockingPerformanceAssessor()
+    monitor = ShadowHeatingPerformanceMonitor(assessor=blocking_assessor)
+    runtime.heating_performance_monitor = monitor
+    run_heat_delivery_cycle(runtime, sensor_id)
+    results = []
+    errors = []
+
+    def assess_pending() -> None:
+        try:
+            results.extend(monitor.assess_pending())
+        except Exception as error:
+            errors.append(error)
+
+    worker = Thread(target=assess_pending)
+    worker.start()
+    assert blocking_assessor.entered.wait(timeout=5)
+
+    source_command_count = len(source.commands)
+    actuator_command_count = len(delivery_port.commands)
+    reevaluation = runtime.reevaluate_heat_demand()
+
+    assert [command.value for command in delivery_port.commands] == [30, 22]
+    assert [command.action for command in source.commands] == [
+        HeatingAction.ENABLE_HEATING,
+        HeatingAction.DISABLE_HEATING,
+    ]
+    assert len(source.commands) == source_command_count
+    assert len(delivery_port.commands) == actuator_command_count
+    assert reevaluation.command.action is HeatingAction.DISABLE_HEATING
+
+    blocking_assessor.release.set()
+    worker.join(timeout=5)
+    assert not worker.is_alive()
+    assert errors == []
+    assert len(results) == 1
 
 
 def test_runtime_branches_confirmed_zone_demand_to_heat_delivery_without_changing_source() -> None:
