@@ -39,9 +39,18 @@ and safety policies remain global. The current Home Assistant `0.7.0` adapter
 continues exposing its released one-zone configuration contract during this
 core Phase A work. No priorities, weights, or source duplication are included.
 
-Milestone 30 will coordinate zone valve/TRV outputs separately from building
-demand and shared-source protection. It will not retroactively make valves part
-of the Milestone 29 aggregation rule.
+Milestone 29 is complete. Milestone 30 introduces capability-based,
+vendor-independent zone heat-delivery actuators separately from building demand
+and shared-source protection. The core supports native control, deterministic
+setpoint assist, configured direct position, binary valves, optional valid-only
+remote-temperature forwarding, truthful command evidence, and stable
+multiple-actuator identity/order. The first Home Assistant slice exposes one
+generic climate setpoint-assist actuator per entry. It does not retroactively
+make actuators part of the Milestone 29 aggregation rule.
+
+Milestone 31 will cover adaptive assist and zone-performance observation using
+current heating-episode evidence. Learning, persistence, actuator travel/open
+verification, and source-water-temperature optimization remain future layers.
 
 ## Milestone 23: Home Assistant one-zone host vertical slice
 

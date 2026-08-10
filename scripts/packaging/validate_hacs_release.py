@@ -34,6 +34,7 @@ EXPECTED_ARCHIVE_FILES = frozenset(
         "event_loop_bridge.py",
         "failure_sink.py",
         "heat_source.py",
+        "heat_delivery.py",
         "host.py",
         "manifest.json",
         "measurement_ingestion.py",

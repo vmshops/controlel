@@ -189,6 +189,11 @@ class HomeAssistantControlelHost:
     def stopped(self) -> bool:
         return self._stopped
 
+    @property
+    def heat_delivery_states(self) -> tuple[object, ...]:
+        controller = getattr(self._runtime, "heat_delivery_controller", None)
+        return controller.states if controller is not None else ()
+
     async def async_initialize(self) -> None:
         async with self._lifecycle_lock:
             if self._initialized:

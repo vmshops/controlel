@@ -35,6 +35,11 @@ from .const import (
     CONF_ENABLE_SERVICE_DOMAIN,
     CONF_ENABLE_SERVICE_NAME,
     CONF_ENABLE_TARGET_ENTITY_ID,
+    CONF_HEAT_DELIVERY_ACTUATOR_ENTITY_ID,
+    CONF_HEAT_DELIVERY_ASSIST_POLICY,
+    CONF_HEAT_DELIVERY_ASSIST_TARGET,
+    CONF_HEAT_DELIVERY_MODE,
+    CONF_HEAT_DELIVERY_OWNERSHIP,
     CONF_HEAT_DEMAND_CONFIRMATION_DURATION,
     CONF_HEAT_DEMAND_CONFIRMATION_DURATION_MINUTES,
     CONF_HEAT_SOURCE_CONTROL_MODE,
@@ -64,6 +69,7 @@ from .const import (
     DEFAULT_DEBUG_UNTIL_CHANGED,
     DEFAULT_DIAGNOSTIC_PROFILE,
     DEFAULT_DIAGNOSTIC_PROFILE_BEFORE_DEBUG,
+    DEFAULT_HEAT_DELIVERY_ASSIST_TARGET,
     DEFAULT_HEAT_DEMAND_CONFIRMATION_DURATION,
     DEFAULT_HEATING_TURN_OFF_DIFFERENTIAL,
     DEFAULT_HEATING_TURN_ON_DIFFERENTIAL,
@@ -78,6 +84,12 @@ from .const import (
     DIAGNOSTIC_PROFILE_DEBUG,
     DIAGNOSTIC_PROFILE_DETAILED,
     DOMAIN,
+    HEAT_DELIVERY_ASSIST_ALWAYS,
+    HEAT_DELIVERY_ASSIST_NONE,
+    HEAT_DELIVERY_MODE_SETPOINT_ASSIST,
+    HEAT_DELIVERY_MODE_UNMANAGED,
+    HEAT_DELIVERY_OWNERSHIP_CONTROLEL,
+    HEAT_DELIVERY_OWNERSHIP_DEVICE,
     LEGACY_DIAGNOSTIC_PROFILE,
     LEGACY_HEAT_DEMAND_CONFIRMATION_DURATION,
     LEGACY_HEATING_TURN_OFF_DIFFERENTIAL,
@@ -110,6 +122,11 @@ _MUTABLE_COMMON_KEYS = (
     CONF_DEBUG_DURATION,
     CONF_DEBUG_UNTIL_CHANGED,
     CONF_DIAGNOSTIC_PROFILE_BEFORE_DEBUG,
+    CONF_HEAT_DELIVERY_MODE,
+    CONF_HEAT_DELIVERY_ACTUATOR_ENTITY_ID,
+    CONF_HEAT_DELIVERY_OWNERSHIP,
+    CONF_HEAT_DELIVERY_ASSIST_POLICY,
+    CONF_HEAT_DELIVERY_ASSIST_TARGET,
 )
 _ADVANCED_BINDING_KEYS = (
     CONF_ENABLE_SERVICE_DOMAIN,
@@ -490,6 +507,52 @@ def _basic_schema(
             CONF_CONTROLLED_ENTITY_ID,
             default=values.get(CONF_CONTROLLED_ENTITY_ID, vol.UNDEFINED),
         ): selector.EntitySelector(selector.EntitySelectorConfig(domain="switch")),
+        vol.Required(
+            CONF_HEAT_DELIVERY_MODE,
+            default=values.get(CONF_HEAT_DELIVERY_MODE, HEAT_DELIVERY_MODE_UNMANAGED),
+        ): selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=[
+                    {"value": HEAT_DELIVERY_MODE_UNMANAGED, "label": "Unmanaged / device controlled"},
+                    {"value": HEAT_DELIVERY_MODE_SETPOINT_ASSIST, "label": "Thermostat setpoint assist"},
+                ],
+                mode=selector.SelectSelectorMode.DROPDOWN,
+            )
+        ),
+        vol.Optional(
+            CONF_HEAT_DELIVERY_ACTUATOR_ENTITY_ID,
+            default=values.get(CONF_HEAT_DELIVERY_ACTUATOR_ENTITY_ID, vol.UNDEFINED),
+        ): selector.EntitySelector(selector.EntitySelectorConfig(domain="climate")),
+        vol.Required(
+            CONF_HEAT_DELIVERY_OWNERSHIP,
+            default=values.get(CONF_HEAT_DELIVERY_OWNERSHIP, HEAT_DELIVERY_OWNERSHIP_DEVICE),
+        ): selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=[
+                    {"value": HEAT_DELIVERY_OWNERSHIP_DEVICE, "label": "Device owned"},
+                    {"value": HEAT_DELIVERY_OWNERSHIP_CONTROLEL, "label": "Controlel owned"},
+                ],
+                mode=selector.SelectSelectorMode.DROPDOWN,
+            )
+        ),
+        vol.Required(
+            CONF_HEAT_DELIVERY_ASSIST_POLICY,
+            default=values.get(CONF_HEAT_DELIVERY_ASSIST_POLICY, HEAT_DELIVERY_ASSIST_ALWAYS),
+        ): selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=[
+                    {"value": HEAT_DELIVERY_ASSIST_NONE, "label": "No assist"},
+                    {"value": HEAT_DELIVERY_ASSIST_ALWAYS, "label": "Always while heating"},
+                ],
+                mode=selector.SelectSelectorMode.DROPDOWN,
+            )
+        ),
+        vol.Required(
+            CONF_HEAT_DELIVERY_ASSIST_TARGET,
+            default=values.get(CONF_HEAT_DELIVERY_ASSIST_TARGET, DEFAULT_HEAT_DELIVERY_ASSIST_TARGET),
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(mode=selector.NumberSelectorMode.BOX, unit_of_measurement=UNIT_CELSIUS)
+        ),
     }
     if not options_flow:
         schema[
@@ -794,6 +857,13 @@ def _configuration_from_steps(
             DEFAULT_INDETERMINATE_TIMEOUT_ACTION,
         ),
         CONF_HEAT_SOURCE_CONTROL_MODE: basic[CONF_HEAT_SOURCE_CONTROL_MODE],
+        CONF_HEAT_DELIVERY_MODE: basic.get(CONF_HEAT_DELIVERY_MODE, HEAT_DELIVERY_MODE_UNMANAGED),
+        CONF_HEAT_DELIVERY_ACTUATOR_ENTITY_ID: basic.get(CONF_HEAT_DELIVERY_ACTUATOR_ENTITY_ID, ""),
+        CONF_HEAT_DELIVERY_OWNERSHIP: basic.get(CONF_HEAT_DELIVERY_OWNERSHIP, HEAT_DELIVERY_OWNERSHIP_DEVICE),
+        CONF_HEAT_DELIVERY_ASSIST_POLICY: basic.get(CONF_HEAT_DELIVERY_ASSIST_POLICY, HEAT_DELIVERY_ASSIST_NONE),
+        CONF_HEAT_DELIVERY_ASSIST_TARGET: basic.get(
+            CONF_HEAT_DELIVERY_ASSIST_TARGET, DEFAULT_HEAT_DELIVERY_ASSIST_TARGET
+        ),
     }
     if basic[CONF_HEAT_SOURCE_CONTROL_MODE] == CONTROL_MODE_SIMPLE:
         configuration[CONF_CONTROLLED_ENTITY_ID] = basic.get(
@@ -935,6 +1005,11 @@ def _validate_basic(
         CONF_CONTROLLED_ENTITY_ID
     ):
         errors[CONF_CONTROLLED_ENTITY_ID] = "controlled_switch_required"
+    if user_input.get(CONF_HEAT_DELIVERY_MODE, HEAT_DELIVERY_MODE_UNMANAGED) == HEAT_DELIVERY_MODE_SETPOINT_ASSIST:
+        if not user_input.get(CONF_HEAT_DELIVERY_ACTUATOR_ENTITY_ID):
+            errors[CONF_HEAT_DELIVERY_ACTUATOR_ENTITY_ID] = "actuator_required"
+        if user_input.get(CONF_HEAT_DELIVERY_OWNERSHIP) != HEAT_DELIVERY_OWNERSHIP_CONTROLEL:
+            errors[CONF_HEAT_DELIVERY_OWNERSHIP] = "controlel_ownership_required"
     temperature_entity = str(user_input.get(CONF_TEMPERATURE_ENTITY_ID, ""))
     if temperature_entity != existing_temperature_entity:
         temperature_error = _temperature_entity_error(hass, temperature_entity)

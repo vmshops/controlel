@@ -24,6 +24,11 @@ from .const import (
     CONF_ENABLE_SERVICE_DOMAIN,
     CONF_ENABLE_SERVICE_NAME,
     CONF_ENABLE_TARGET_ENTITY_ID,
+    CONF_HEAT_DELIVERY_ACTUATOR_ENTITY_ID,
+    CONF_HEAT_DELIVERY_ASSIST_POLICY,
+    CONF_HEAT_DELIVERY_ASSIST_TARGET,
+    CONF_HEAT_DELIVERY_MODE,
+    CONF_HEAT_DELIVERY_OWNERSHIP,
     CONF_HEAT_DEMAND_CONFIRMATION_DURATION,
     CONF_HEAT_SOURCE_CONTROL_MODE,
     CONF_HEATING_TURN_OFF_DIFFERENTIAL,
@@ -63,6 +68,11 @@ _COMMON_MUTABLE_KEYS = (
     CONF_DEBUG_DURATION,
     CONF_DEBUG_UNTIL_CHANGED,
     CONF_DIAGNOSTIC_PROFILE_BEFORE_DEBUG,
+    CONF_HEAT_DELIVERY_MODE,
+    CONF_HEAT_DELIVERY_ACTUATOR_ENTITY_ID,
+    CONF_HEAT_DELIVERY_OWNERSHIP,
+    CONF_HEAT_DELIVERY_ASSIST_POLICY,
+    CONF_HEAT_DELIVERY_ASSIST_TARGET,
 )
 _CUSTOM_BINDING_KEYS = (
     CONF_ENABLE_SERVICE_DOMAIN,
@@ -123,6 +133,56 @@ def _normalized_config(config: HomeAssistantIntegrationConfig) -> dict[str, Any]
         "controlled_entity_id": config.controlled_entity_id,
         "enable_service": _service_call(config.heat_source.enable_heating),
         "disable_service": _service_call(config.heat_source.disable_heating),
+        "heat_delivery_mode": config.heat_delivery_mode,
+        "actuator_entity_id": config.heat_delivery_actuator_entity_id,
+        "actuator_ownership": config.heat_delivery_ownership,
+        "assist_policy": config.heat_delivery_assist_policy,
+        "assist_target_temperature": config.heat_delivery_assist_target,
+    }
+
+
+def _heat_delivery_state(state: Any) -> dict[str, Any]:
+    def command(value: Any | None) -> dict[str, Any] | None:
+        if value is None:
+            return None
+        return {
+            "actuator_id": value.actuator_id.value,
+            "zone_id": value.zone_id.value,
+            "kind": value.kind.value,
+            "value": value.value,
+            "requested_at": value.requested_at.isoformat(),
+        }
+
+    return {
+        "actuator_id": state.actuator_id.value,
+        "zone_id": state.zone_id.value,
+        "heat_delivery_mode": state.mode.value,
+        "actuator_ownership": state.ownership.value,
+        "actuator_capabilities": {
+            name: getattr(state.capabilities, name) for name in state.capabilities.__dataclass_fields__
+        },
+        "assist_policy": state.assist_policy.value,
+        "assist_active": state.assist_active,
+        "zone_target_temperature": state.zone_target_temperature,
+        "zone_measurement_temperature": state.zone_measurement_temperature,
+        "normal_actuator_target": state.normal_actuator_target,
+        "commanded_actuator_target": state.commanded_target_temperature,
+        "reported_actuator_target": state.reported_target_temperature,
+        "commanded_position": state.commanded_position,
+        "reported_position": state.reported_position,
+        "commanded_binary_open": state.commanded_binary_open,
+        "reported_binary_open": state.reported_binary_open,
+        "commanded_remote_temperature": state.commanded_remote_temperature,
+        "last_requested_actuator_command": command(state.last_requested_command),
+        "last_successful_actuator_command": command(state.last_successful_command),
+        "last_actuator_command_outcome": (
+            state.last_command_outcome.value if state.last_command_outcome is not None else None
+        ),
+        "last_actuator_command_timestamp": (
+            state.last_command_timestamp.isoformat() if state.last_command_timestamp is not None else None
+        ),
+        "actuator_failure_active": state.actuator_failure_active,
+        "actuator_failure_reason": state.actuator_failure_reason,
     }
 
 
@@ -250,6 +310,7 @@ async def async_get_config_entry_diagnostics(
         "operational_snapshot": snapshot_to_dict(snapshot),
         "decision_trace": trace_to_dict(host.snapshot_source.trace),
         "observability": host.observability.diagnostics(datetime.now(UTC)),
+        "heat_delivery": [_heat_delivery_state(state) for state in host.heat_delivery_states],
         "counters": {
             "snapshot_revision": snapshot.revision,
             "decision_trace_records": len(host.snapshot_source.trace),

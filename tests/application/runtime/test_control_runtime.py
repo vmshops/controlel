@@ -3,9 +3,18 @@ from inspect import signature
 
 from controlel.application.runtime.control_runtime import ControlRuntime
 from controlel.application.runtime.runtime_processing_result import RuntimeProcessingStatus
+from controlel.application.services.zone_heat_delivery_controller import ZoneHeatDeliveryController
 from controlel.domain.commands.heat_source_command import HeatSourceCommand
 from controlel.domain.commands.heating_action import HeatingAction
 from controlel.domain.entities.zone import Zone
+from controlel.domain.heat_delivery import (
+    HeatDeliveryActuatorConfiguration,
+    HeatDeliveryActuatorId,
+    HeatDeliveryAssistPolicy,
+    HeatDeliveryCapabilities,
+    HeatDeliveryMode,
+    HeatDeliveryOwnership,
+)
 from controlel.domain.measurements.measurement import Measurement
 from controlel.domain.repositories.sensor_repository import SensorRepository
 from controlel.domain.repositories.zone_repository import ZoneRepository
@@ -111,7 +120,69 @@ def test_control_runtime_constructor_uses_shared_source_contract_only():
         "minimum_heating_on_time",
         "minimum_heating_off_time",
         "demand_arbitrator",
+        "heat_delivery_controller",
     ]
     assert "actuator_routes" not in parameters
     assert "actuator" not in parameters
     assert "target_temperature" not in parameters
+
+
+class RecordingHeatDeliveryPort:
+    def __init__(self) -> None:
+        self.commands = []
+
+    def execute(self, command) -> None:
+        self.commands.append(command)
+
+
+def test_runtime_branches_confirmed_zone_demand_to_heat_delivery_without_changing_source() -> None:
+    sensor_id = SensorId("bedroom_temperature")
+    zone_id = ZoneId("bedroom")
+    sensors = SensorRepository()
+    sensors.add(Sensor(sensor_id=sensor_id, zone_id=zone_id, name="Bedroom temperature"))
+    zones = ZoneRepository()
+    zones.add(
+        Zone(
+            zone_id=zone_id,
+            primary_sensor_id=sensor_id,
+            primary_measurement_max_age=timedelta(minutes=5),
+            name="Bedroom",
+            target_temperature=Temperature(22),
+        )
+    )
+    source = NoOpHeatSource()
+    actuator = HeatDeliveryActuatorId("bedroom_trv")
+    delivery_port = RecordingHeatDeliveryPort()
+    controller = ZoneHeatDeliveryController(
+        (
+            HeatDeliveryActuatorConfiguration(
+                actuator_id=actuator,
+                zone_id=zone_id,
+                capabilities=HeatDeliveryCapabilities(can_set_target_temperature=True),
+                mode=HeatDeliveryMode.SETPOINT_ASSIST,
+                ownership=HeatDeliveryOwnership.CONTROLEL_OWNED,
+                assist_policy=HeatDeliveryAssistPolicy.ALWAYS_ASSIST_WHILE_HEATING,
+                assist_target_temperature=30,
+            ),
+        ),
+        {actuator: delivery_port},
+    )
+    runtime = ControlRuntime(
+        sensors,
+        zones,
+        source,
+        FixedClock(),
+        NoOpScheduler(),
+        NoOpScheduledFailureSink(),
+        timedelta(0),
+        timedelta(minutes=1),
+        HeatingAction.DISABLE_HEATING,
+        heat_delivery_controller=controller,
+    )
+
+    result = runtime.process_temperature(Measurement(sensor_id=sensor_id, value=Temperature(20), timestamp=NOW))
+    runtime.reevaluate_heat_demand()
+
+    assert [command.value for command in delivery_port.commands] == [30]
+    assert len(source.commands) == 1
+    assert source.commands[0] == result.heat_demand_evaluation.command
