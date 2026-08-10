@@ -38,8 +38,8 @@ replaced. Successful port return is not physical source-state confirmation.
 ## Custom-component packaging
 
 The integration source is `custom_components/controlel`. Integration version
-`0.6.0` declares one config entry and requires published
-`controlel==0.3.0`.
+`0.7.0` declares one config entry and requires published
+`controlel==0.4.0`.
 The integration and core versions are independent, and the core is not
 vendored into the component.
 
@@ -50,10 +50,10 @@ The repository root HACS manifest defines a release asset named
 validator are:
 
 ```text
-python scripts/packaging/build_hacs_release.py --version 0.6.0
+python scripts/packaging/build_hacs_release.py --version 0.7.0
 python scripts/packaging/validate_hacs_release.py \
   dist/hacs/controlel.zip \
-  --version 0.6.0 \
+  --version 0.7.0 \
   --checksum dist/hacs/controlel.zip.sha256
 ```
 
@@ -90,18 +90,18 @@ python -m pip install --no-deps -e /path/to/controlel
 ```
 
 The editable install overrides the public core only for local development.
-Public-package validation instead installs `controlel==0.3.0` into a separate
+Public-package validation instead installs `controlel==0.4.0` into a separate
 environment and never installs the checkout as a distribution.
 
 For a supported custom-component deployment, Home Assistant can install the
 exact manifest dependency automatically; users do not need to install the core
 manually. Metadata and deterministic release packaging are prepared for the
-unpublished `0.6.0` candidate. No default
+unpublished `0.7.0` candidate. No default
 HACS-store entry exists. End-user
 installation instructions are in
 [HomeAssistantInstallation.md](HomeAssistantInstallation.md).
 
-Core versions `0.1.0`, `0.2.0`, and `0.3.0` are immutable public releases. Any core
+Core versions `0.1.0`, `0.2.0`, `0.3.0`, and `0.4.0` are immutable public releases. Any core
 correction requires a new version; never rebuild and re-upload an existing
 version. See the
 [release guide](../development/ReleaseGuide.md) for its exact source commit and

@@ -99,8 +99,8 @@ def test_manifest_pins_published_core_and_keeps_version_independent() -> None:
     core_version = load_pyproject()["project"]["version"]
 
     assert core_version == "0.4.0"
-    assert manifest["requirements"] == ["controlel==0.3.0"]
-    assert manifest["version"] == "0.6.0"
+    assert manifest["requirements"] == ["controlel==0.4.0"]
+    assert manifest["version"] == "0.7.0"
     assert manifest["version"] != core_version
     assert manifest["issue_tracker"] == "https://github.com/vmshops/controlel/issues"
 
@@ -147,7 +147,7 @@ def test_framework_ci_separates_local_source_and_public_core_compositions() -> N
     assert "CONTROLEL_FRAMEWORK_COMPOSITION: local" in workflow
     assert "home-assistant-framework-public:" in workflow
     assert "CONTROLEL_FRAMEWORK_COMPOSITION: public" in workflow
-    assert "controlel==0.3.0" in workflow
+    assert "controlel==0.4.0" in workflow
     assert "python scripts/ci/verify_public_core.py" in workflow
     assert "candidate-core-wheel" not in workflow
 
@@ -162,7 +162,7 @@ def test_core_and_integration_tag_namespaces_are_explicit() -> None:
     assert "existing integration tag `v0.2.0` must remain unchanged" in normalized_guide
 
 
-def test_public_core_030_provenance_exception_records_immutable_pypi_hashes() -> None:
+def test_public_core_provenance_records_history_and_current_composition_hash() -> None:
     release_guide = (ROOT / "docs" / "development" / "ReleaseGuide.md").read_text(encoding="utf-8")
     checker = (ROOT / "scripts" / "ci" / "verify_public_core.py").read_text(encoding="utf-8")
 
@@ -172,7 +172,8 @@ def test_public_core_030_provenance_exception_records_immutable_pypi_hashes() ->
     assert "equivalent to `core-v0.3.0`" in release_guide
     assert wheel_hash in release_guide
     assert sdist_hash in release_guide
-    assert wheel_hash in checker
+    assert "controlel-0.4.0-py3-none-any.whl" in checker
+    assert "0d2175b3ff7357ce8c6ec05bd7ad26553ef8ce85e652ecafc42185f317ea4d0d" in checker
 
 
 def test_strict_final_core_release_interface_and_sequence_are_documented() -> None:

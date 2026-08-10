@@ -5,6 +5,18 @@
 Check the heating enable/disable threshold, hysteresis demand,
 source-control state, active lockout, lockout remaining, and deferred command
 entities. A deferred command means the relevant minimum time has not elapsed.
+
+Do not diagnose a lockout from an earliest-next timestamp alone. That timestamp
+is a passive protection boundary and may remain visible while no conflicting
+command is requested. A real lockout has an available active lockout type,
+deadline, and remaining value, plus a deferred command and matching reason. If
+demand clears before the deadline, those active/deferred fields become
+unavailable while the passive boundary may remain.
+
+Last successful enable/disable dispatch timestamps are adapter-call evidence.
+They must not be interpreted as physical boiler, burner, relay, or pump state.
+Reload and restart do not reconstruct source-control history from a Home
+Assistant switch state.
 Controlel uses successfully dispatched commands as its timing reference and
 has no physical boiler feedback. It reevaluates current demand at expiry and
 does not automatically retry a failed command.
@@ -17,7 +29,7 @@ The current switch state is never used to fabricate it.
 Confirm that the exact custom-repository URL is
 `https://github.com/vmshops/controlel` and the selected category is
 **Integration**. The repository must be publicly accessible. Use the latest
-published release; `0.6.0` remains an unpublished candidate.
+published release; `0.7.0` remains an unpublished candidate.
 
 If a zone stays in `confirmation_pending`, check measurement validity and the
 confirmation deadline/remaining entities. Unknown, unavailable, invalid,
@@ -113,16 +125,16 @@ second.
 
 ## Core dependency installation
 
-Integration candidate `0.6.0` requires exactly `controlel==0.3.0`
-during Milestone 27 Phase C. Normal supported
+Integration candidate `0.7.0` requires exactly `controlel==0.4.0`
+during Milestone 28 Phase C. Normal supported
 installation lets Home Assistant obtain that dependency automatically; users
 do not need to install it manually. If setup reports a missing core, confirm
 that the environment can reach PyPI and that `python -m pip show controlel`
-reports version `0.3.0`.
+reports version `0.4.0`.
 
 Local development may install the checkout with `python -m pip install
 --no-deps -e .`. Public-package framework validation must use a different
-environment, install `controlel==0.3.0` from PyPI, and resolve it from
+environment, install `controlel==0.4.0` from PyPI, and resolve it from
 `site-packages`.
 
 ## Framework test environment fails to start
@@ -138,7 +150,7 @@ The supported harness uses Python 3.14.2 or newer, Home Assistant `2026.7.3`,
 and `pytest-homeassistant-custom-component==0.13.347`. Install the hashed lock
 with `python -m pip install --require-hashes -r requirements/ha-test.txt`.
 Then either install the checkout editable for the local composition or install
-`controlel==0.3.0` from PyPI for the isolated public composition.
+`controlel==0.4.0` from PyPI for the isolated public composition.
 
 If native Windows reports `ModuleNotFoundError: No module named 'fcntl'` or
 `No module named 'resource'`, run the framework suite in Linux or WSL. These

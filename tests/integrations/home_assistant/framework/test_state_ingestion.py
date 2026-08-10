@@ -135,7 +135,7 @@ def make_host(hass, runtime: RecordingRuntime) -> HomeAssistantControlelHost:
                 profile_before_debug="detailed",
             ),
         ),
-        core_version="0.3.0",
+        core_version="0.4.0",
         logger=logging.getLogger(__name__),
     )
     sink.bind_fatal_handler(host.request_fatal_shutdown)

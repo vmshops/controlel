@@ -61,11 +61,13 @@ class SafetyState(StrEnum):
 
 
 class SourceControlState(StrEnum):
-    IDLE = "idle"
-    HEATING_REQUESTED = "heating_requested"
+    INDETERMINATE = "indeterminate"
     HEATING_NOT_REQUESTED = "heating_not_requested"
-    DEFERRED_ENABLE = "deferred_enable"
-    DEFERRED_DISABLE = "deferred_disable"
+    HEATING_REQUESTED_AND_ALLOWED = "heating_requested_and_allowed"
+    HEATING_REQUESTED_WAITING_MINIMUM_OFF = "heating_requested_waiting_minimum_off"
+    HEATING_ACTIVE_REQUEST = "heating_active_request"
+    HEATING_NOT_REQUESTED_WAITING_MINIMUM_ON = "heating_not_requested_waiting_minimum_on"
+    SAFETY_OVERRIDE = "safety_override"
     STOPPED = "stopped"
     FATAL_ERROR = "fatal_error"
 
@@ -168,6 +170,8 @@ class OperationalSummaryCode(StrEnum):
     SAFETY_TIMEOUT_ENABLE_REQUESTED = "safety_timeout_enable_requested"
     HEAT_DEFERRED_MINIMUM_OFF = "heat_deferred_minimum_off"
     NO_HEAT_DEFERRED_MINIMUM_ON = "no_heat_deferred_minimum_on"
+    NO_HEAT_ENABLE_BOUNDARY = "no_heat_enable_boundary"
+    SAFETY_DISABLE_BYPASSED_LOCKOUT = "safety_disable_bypassed_lockout"
     HEAT_COMMAND_FAILED = "heat_command_failed"
     NO_HEAT_COMMAND_FAILED = "no_heat_command_failed"
     HEAT_REQUESTED = "heat_requested"
@@ -245,12 +249,22 @@ class OperationalSnapshot:
     grace_deadline: datetime | None
     grace_remaining_seconds: float | None
     source_control_state: SourceControlState
+    aggregate_demand: str | None
+    earliest_next_enable_time: datetime | None
+    earliest_next_disable_time: datetime | None
+    active_lockout_deadline: datetime | None
+    active_lockout_remaining_seconds: float | None
     minimum_on_deadline: datetime | None
     minimum_off_deadline: datetime | None
     active_lockout_type: ActiveLockoutType | None
     lockout_remaining_seconds: float | None
     deferred_command: str | None
     deferred_reason: str | None
+    deferred_since: datetime | None
+    deferred_deadline: datetime | None
+    deferred_remaining_seconds: float | None
+    last_successful_enable_dispatch: datetime | None
+    last_successful_disable_dispatch: datetime | None
     last_normal_command_dispatch: datetime | None
     safety_bypassed_lockout: bool
     timeout_action: str
@@ -276,6 +290,7 @@ class OperationalSnapshot:
     trace_capacity: int
     operational_summary_code: OperationalSummaryCode
     operational_summary_translation_key: str
+    source_control_summary: str
     integration_version: str
     core_version: str
     last_meaningful_event_at: datetime | None
@@ -290,6 +305,13 @@ class OperationalSnapshot:
             ("confirmation deadline", self.confirmation_deadline),
             ("minimum-on deadline", self.minimum_on_deadline),
             ("minimum-off deadline", self.minimum_off_deadline),
+            ("earliest next enable time", self.earliest_next_enable_time),
+            ("earliest next disable time", self.earliest_next_disable_time),
+            ("active lockout deadline", self.active_lockout_deadline),
+            ("deferred since", self.deferred_since),
+            ("deferred deadline", self.deferred_deadline),
+            ("last successful enable dispatch", self.last_successful_enable_dispatch),
+            ("last successful disable dispatch", self.last_successful_disable_dispatch),
             ("normal command dispatch", self.last_normal_command_dispatch),
             ("decision timestamp", self.last_decision_timestamp),
             ("command timestamp", self.last_command_timestamp),
@@ -520,13 +542,23 @@ def initial_snapshot(
         safety_state=SafetyState.STOPPED,
         grace_deadline=None,
         grace_remaining_seconds=None,
-        source_control_state=SourceControlState.IDLE,
+        source_control_state=SourceControlState.INDETERMINATE,
+        aggregate_demand=None,
+        earliest_next_enable_time=None,
+        earliest_next_disable_time=None,
+        active_lockout_deadline=None,
+        active_lockout_remaining_seconds=None,
         minimum_on_deadline=None,
         minimum_off_deadline=None,
         active_lockout_type=None,
         lockout_remaining_seconds=None,
         deferred_command=None,
         deferred_reason=None,
+        deferred_since=None,
+        deferred_deadline=None,
+        deferred_remaining_seconds=None,
+        last_successful_enable_dispatch=None,
+        last_successful_disable_dispatch=None,
         last_normal_command_dispatch=None,
         safety_bypassed_lockout=False,
         timeout_action=timeout_action,
@@ -552,6 +584,7 @@ def initial_snapshot(
         trace_capacity=trace_capacity,
         operational_summary_code=OperationalSummaryCode.STARTING,
         operational_summary_translation_key="operational_summary_starting",
+        source_control_summary="Controlel is starting.",
         integration_version=integration_version,
         core_version=core_version,
         last_meaningful_event_at=None,
@@ -599,14 +632,16 @@ def _with_elapsed(
         and snapshot.confirmation_deadline > now
         else None
     )
-    lockout_deadline = {
-        ActiveLockoutType.MINIMUM_ON: snapshot.minimum_on_deadline,
-        ActiveLockoutType.MINIMUM_OFF: snapshot.minimum_off_deadline,
-        None: None,
-    }[snapshot.active_lockout_type]
     lockout_remaining = (
-        max(0.0, (lockout_deadline - now).total_seconds())
-        if lockout_deadline is not None and lockout_deadline > now
+        max(0.0, (snapshot.active_lockout_deadline - now).total_seconds())
+        if snapshot.active_lockout_type is not None
+        and snapshot.active_lockout_deadline is not None
+        and snapshot.active_lockout_deadline > now
+        else None
+    )
+    deferred_remaining = (
+        max(0.0, (snapshot.deferred_deadline - now).total_seconds())
+        if snapshot.deferred_deadline is not None and snapshot.deferred_deadline > now
         else None
     )
     debug_remaining = (
@@ -621,7 +656,9 @@ def _with_elapsed(
         measurement_stale_remaining_seconds=measurement_stale_remaining,
         grace_remaining_seconds=remaining,
         confirmation_remaining_seconds=confirmation_remaining,
+        active_lockout_remaining_seconds=lockout_remaining,
         lockout_remaining_seconds=lockout_remaining,
+        deferred_remaining_seconds=deferred_remaining,
         debug_expiry_remaining_seconds=debug_remaining,
     )
     summary_code = operational_summary_code(updated)
@@ -629,6 +666,7 @@ def _with_elapsed(
         updated,
         operational_summary_code=summary_code,
         operational_summary_translation_key=f"operational_summary_{summary_code.value}",
+        source_control_summary=_source_control_summary(updated),
     )
 
 
@@ -642,10 +680,16 @@ def active_countdown_names(snapshot: OperationalSnapshot) -> tuple[str, ...]:
         names.append("sensor_failure_grace")
     if snapshot.confirmation_remaining_seconds is not None:
         names.append("heat_demand_confirmation")
-    if snapshot.active_lockout_type is ActiveLockoutType.MINIMUM_ON and snapshot.lockout_remaining_seconds is not None:
+    if (
+        snapshot.active_lockout_type is ActiveLockoutType.MINIMUM_ON
+        and snapshot.active_lockout_remaining_seconds is not None
+    ):
         names.append("minimum_heating_on")
         names.append("deferred_source_command")
-    if snapshot.active_lockout_type is ActiveLockoutType.MINIMUM_OFF and snapshot.lockout_remaining_seconds is not None:
+    if (
+        snapshot.active_lockout_type is ActiveLockoutType.MINIMUM_OFF
+        and snapshot.active_lockout_remaining_seconds is not None
+    ):
         names.append("minimum_heating_off")
         names.append("deferred_source_command")
     if snapshot.debug_expiry_remaining_seconds is not None:
@@ -677,6 +721,8 @@ def operational_summary_code(snapshot: OperationalSnapshot) -> OperationalSummar
         if snapshot.last_requested_command == "enable_heating":
             return OperationalSummaryCode.SAFETY_TIMEOUT_ENABLE_REQUESTED
         return OperationalSummaryCode.SAFETY_TIMEOUT_DISABLE_REQUESTED
+    if snapshot.safety_bypassed_lockout:
+        return OperationalSummaryCode.SAFETY_DISABLE_BYPASSED_LOCKOUT
     if snapshot.active_lockout_type is ActiveLockoutType.MINIMUM_OFF:
         return OperationalSummaryCode.HEAT_DEFERRED_MINIMUM_OFF
     if snapshot.active_lockout_type is ActiveLockoutType.MINIMUM_ON:
@@ -691,8 +737,48 @@ def operational_summary_code(snapshot: OperationalSnapshot) -> OperationalSummar
     if snapshot.zone_heat_demand is HeatDemandState.HEAT_REQUIRED:
         return OperationalSummaryCode.HEAT_REQUESTED
     if snapshot.zone_heat_demand is HeatDemandState.NO_HEAT_REQUIRED:
+        if snapshot.earliest_next_enable_time is not None:
+            return OperationalSummaryCode.NO_HEAT_ENABLE_BOUNDARY
         return OperationalSummaryCode.NO_HEAT_REQUESTED
     return OperationalSummaryCode.DEMAND_INDETERMINATE
+
+
+def _source_control_summary(snapshot: OperationalSnapshot) -> str:
+    """Build a human-readable source summary without physical-state claims."""
+
+    if snapshot.runtime_status is RuntimeStatus.FATAL_ERROR:
+        return "The runtime is in a fatal state."
+    if snapshot.runtime_status is RuntimeStatus.STOPPED:
+        return "Controlel is stopped."
+    if snapshot.runtime_status is RuntimeStatus.STARTING:
+        return "Controlel is starting."
+    if snapshot.safety_bypassed_lockout:
+        return "Safety disable bypassed minimum-on protection."
+    if (
+        snapshot.active_lockout_type is ActiveLockoutType.MINIMUM_OFF
+        and snapshot.active_lockout_remaining_seconds is not None
+    ):
+        remaining = round(snapshot.active_lockout_remaining_seconds)
+        return f"Heating requested; waiting for minimum-off protection: {remaining} s."
+    if (
+        snapshot.active_lockout_type is ActiveLockoutType.MINIMUM_ON
+        and snapshot.active_lockout_remaining_seconds is not None
+    ):
+        remaining = round(snapshot.active_lockout_remaining_seconds)
+        return f"Heating no longer requested; waiting for minimum-on protection: {remaining} s."
+    if snapshot.deferred_command is not None and snapshot.deferred_deadline is not None:
+        command = "enable" if snapshot.deferred_command == "enable_heating" else "disable"
+        return f"{command.capitalize()} command deferred until {snapshot.deferred_deadline.isoformat()}."
+    if snapshot.source_control_state in {
+        SourceControlState.HEATING_REQUESTED_AND_ALLOWED,
+        SourceControlState.HEATING_ACTIVE_REQUEST,
+    }:
+        return "Heating request active."
+    if snapshot.source_control_state is SourceControlState.HEATING_NOT_REQUESTED:
+        if snapshot.earliest_next_enable_time is not None:
+            return f"No heating requested; next enable allowed after {snapshot.earliest_next_enable_time.isoformat()}."
+        return "No heating requested."
+    return "Source state indeterminate."
 
 
 def _serialize(value: Any) -> Any:

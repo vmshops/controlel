@@ -16,6 +16,8 @@ from controlel.application.runtime.runtime_processing_result import (
     RuntimeProcessingStatus,
     TemperatureNoDecisionReason,
 )
+from controlel.application.services.source_control_policy import SourceControlPolicy
+from controlel.domain.commands.heating_action import HeatingAction
 from controlel.domain.value_objects.sensor_id import SensorId
 from controlel.domain.value_objects.temperature import Temperature
 from controlel.domain.value_objects.zone_id import ZoneId
@@ -26,13 +28,133 @@ from custom_components.controlel.config import (
 )
 from custom_components.controlel.event_loop_bridge import HomeAssistantEventLoopBridge
 from custom_components.controlel.failure_sink import HomeAssistantScheduledFailureSink
-from custom_components.controlel.host import HomeAssistantControlelHost
+from custom_components.controlel.host import (
+    HomeAssistantControlelHost,
+    _source_control_snapshot_changes,
+)
 from custom_components.controlel.measurement_ingestion import (
     HomeAssistantMeasurementMapper,
 )
 from custom_components.controlel.runtime_executor import HomeAssistantRuntimeExecutor
 
 NOW = datetime(2026, 7, 23, 10, 0, tzinfo=UTC)
+
+
+def _disabled_source_state(policy: SourceControlPolicy):
+    initial = policy.initial_state(NOW)
+    assessment = policy.evaluate(
+        desired_command=HeatingAction.DISABLE_HEATING,
+        now=NOW,
+        current_state=initial,
+    )
+    return policy.record_dispatched(
+        assessment,
+        dispatched_at=NOW,
+        safety_command=False,
+    )
+
+
+def test_core_0_4_precise_passive_boundary_has_no_active_lockout_claim() -> None:
+    boundary = NOW + timedelta(minutes=5)
+    policy = SourceControlPolicy(
+        minimum_on_time=timedelta(minutes=10),
+        minimum_off_time=timedelta(minutes=5),
+    )
+    state = _disabled_source_state(policy)
+
+    changes = _source_control_snapshot_changes(state)
+
+    assert changes["source_control_state"].value == "heating_not_requested"
+    assert changes["earliest_next_enable_time"] == boundary
+    assert changes["active_lockout_type"] is None
+    assert changes["active_lockout_deadline"] is None
+    assert changes["deferred_command"] is None
+    assert changes["last_successful_disable_dispatch"] == NOW
+
+
+def test_core_0_4_precise_deferred_enable_and_cancellation_are_projected() -> None:
+    policy = SourceControlPolicy(
+        minimum_on_time=timedelta(minutes=10),
+        minimum_off_time=timedelta(minutes=5),
+    )
+    passive = _disabled_source_state(policy)
+    requested_at = NOW + timedelta(seconds=1)
+    deferred = policy.evaluate(
+        desired_command=HeatingAction.ENABLE_HEATING,
+        now=requested_at,
+        current_state=passive,
+    ).state
+
+    changes = _source_control_snapshot_changes(deferred)
+
+    assert changes["source_control_state"].value == "heating_requested_waiting_minimum_off"
+    assert changes["active_lockout_type"].value == "minimum_off"
+    assert changes["active_lockout_deadline"] == passive.earliest_next_enable_time
+    assert changes["deferred_command"] == "enable_heating"
+    assert changes["deferred_since"] == requested_at
+    assert changes["deferred_deadline"] == passive.earliest_next_enable_time
+
+    cancelled = policy.evaluate(
+        desired_command=HeatingAction.DISABLE_HEATING,
+        now=requested_at + timedelta(seconds=1),
+        current_state=deferred,
+    ).state
+    cancelled_changes = _source_control_snapshot_changes(cancelled)
+
+    assert cancelled_changes["source_control_state"].value == "heating_not_requested"
+    assert cancelled_changes["earliest_next_enable_time"] == passive.earliest_next_enable_time
+    assert cancelled_changes["active_lockout_type"] is None
+    assert cancelled_changes["active_lockout_deadline"] is None
+    assert cancelled_changes["deferred_command"] is None
+    assert cancelled_changes["deferred_deadline"] is None
+
+
+def test_core_0_4_precise_deferred_disable_and_safety_bypass_are_projected() -> None:
+    policy = SourceControlPolicy(
+        minimum_on_time=timedelta(minutes=10),
+        minimum_off_time=timedelta(minutes=5),
+    )
+    initial = policy.initial_state(NOW)
+    enable = policy.evaluate(
+        desired_command=HeatingAction.ENABLE_HEATING,
+        now=NOW,
+        current_state=initial,
+    )
+    enabled = policy.record_dispatched(enable, dispatched_at=NOW, safety_command=False)
+    requested_at = NOW + timedelta(seconds=1)
+    deferred = policy.evaluate(
+        desired_command=HeatingAction.DISABLE_HEATING,
+        now=requested_at,
+        current_state=enabled,
+    ).state
+
+    changes = _source_control_snapshot_changes(deferred)
+
+    assert changes["source_control_state"].value == "heating_not_requested_waiting_minimum_on"
+    assert changes["active_lockout_type"].value == "minimum_on"
+    assert changes["active_lockout_deadline"] == enabled.earliest_next_disable_time
+    assert changes["deferred_command"] == "disable_heating"
+    assert changes["last_successful_enable_dispatch"] == NOW
+
+    safety = policy.evaluate(
+        desired_command=HeatingAction.DISABLE_HEATING,
+        now=requested_at,
+        current_state=enabled,
+        safety_command=True,
+    )
+    safety_state = policy.record_dispatched(
+        safety,
+        dispatched_at=requested_at,
+        safety_command=True,
+    )
+    safety_changes = _source_control_snapshot_changes(safety_state)
+
+    assert safety_changes["source_control_state"].value == "safety_override"
+    assert safety_changes["safety_bypassed_lockout"] is True
+    assert safety_changes["active_lockout_type"] is None
+    assert safety_changes["deferred_command"] is None
+    assert safety_changes["last_successful_enable_dispatch"] == NOW
+    assert safety_changes["last_successful_disable_dispatch"] == requested_at
 
 
 def host_config():
@@ -175,7 +297,7 @@ def test_start_precedes_snapshot_buffer_drain_live_events_and_stop():
             ),
             failure_sink=failure_sink,
             config=host_config(),
-            core_version="0.3.0",
+            core_version="0.4.0",
             logger=logging.getLogger(__name__),
             state_subscriber=subscribe,
             state_getter=lambda entity_id: FakeState("19", NOW),
@@ -260,7 +382,7 @@ def test_start_precedes_explicit_indeterminate_snapshot_initialization(state_val
             ),
             failure_sink=failure_sink,
             config=host_config(),
-            core_version="0.3.0",
+            core_version="0.4.0",
             logger=logging.getLogger(__name__),
             state_subscriber=lambda hass, entity_id, listener: lambda: None,
             state_getter=lambda entity_id: FakeState(state_value, NOW),
@@ -309,7 +431,7 @@ def test_absent_snapshot_waits_for_one_buffered_real_state_without_indeterminate
             ),
             failure_sink=failure_sink,
             config=host_config(),
-            core_version="0.3.0",
+            core_version="0.4.0",
             logger=logging.getLogger(__name__),
             state_subscriber=subscribe,
             state_getter=lambda entity_id: None,

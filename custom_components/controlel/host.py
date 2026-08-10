@@ -29,6 +29,9 @@ from controlel.application.runtime.runtime_processing_result import (
 from controlel.application.services.heat_demand_safety_policy import (
     HeatDemandSafetyPhase,
 )
+from controlel.application.state.source_control_state import (
+    SourceControlState as CoreSourceControlState,
+)
 from controlel.domain.commands.heating_action import HeatingAction
 from controlel.domain.demands.building_heat_demand_status import (
     BuildingHeatDemandStatus,
@@ -292,6 +295,9 @@ class HomeAssistantControlelHost:
             runtime_status=RuntimeStatus.FATAL_ERROR,
             safety_state=SafetyState.FATAL_ERROR,
             source_control_state=SourceControlState.FATAL_ERROR,
+            aggregate_demand=None,
+            active_lockout_deadline=None,
+            active_lockout_remaining_seconds=None,
             confirmation_state=ConfirmationState.FATAL_ERROR,
             confirmation_started_at=None,
             confirmation_deadline=None,
@@ -301,6 +307,9 @@ class HomeAssistantControlelHost:
             lockout_remaining_seconds=None,
             deferred_command=None,
             deferred_reason=None,
+            deferred_since=None,
+            deferred_deadline=None,
+            deferred_remaining_seconds=None,
             safety_bypassed_lockout=True,
             fatal_failure_active=True,
             emergency_disable_attempted=False,
@@ -405,6 +414,9 @@ class HomeAssistantControlelHost:
             runtime_status=RuntimeStatus.FATAL_ERROR,
             safety_state=SafetyState.FATAL_ERROR,
             source_control_state=SourceControlState.FATAL_ERROR,
+            aggregate_demand=None,
+            active_lockout_deadline=None,
+            active_lockout_remaining_seconds=None,
             confirmation_state=ConfirmationState.FATAL_ERROR,
             confirmation_started_at=None,
             confirmation_deadline=None,
@@ -414,6 +426,9 @@ class HomeAssistantControlelHost:
             lockout_remaining_seconds=None,
             deferred_command=None,
             deferred_reason=None,
+            deferred_since=None,
+            deferred_deadline=None,
+            deferred_remaining_seconds=None,
             safety_bypassed_lockout=True,
             fatal_failure_active=True,
             emergency_disable_attempted=attempted,
@@ -502,6 +517,16 @@ class HomeAssistantControlelHost:
                     now=now,
                     runtime_status=RuntimeStatus.STOPPED,
                     safety_state=SafetyState.STOPPED,
+                    source_control_state=SourceControlState.STOPPED,
+                    active_lockout_type=None,
+                    active_lockout_deadline=None,
+                    active_lockout_remaining_seconds=None,
+                    lockout_remaining_seconds=None,
+                    deferred_command=None,
+                    deferred_reason=None,
+                    deferred_since=None,
+                    deferred_deadline=None,
+                    deferred_remaining_seconds=None,
                     confirmation_state=ConfirmationState.STOPPED,
                     confirmation_started_at=None,
                     confirmation_deadline=None,
@@ -877,18 +902,7 @@ class HomeAssistantControlelHost:
         source = result.source_control_assessment
         if source is not None:
             state = source.state
-            changes.update(
-                source_control_state=SourceControlState(state.phase.value),
-                minimum_on_deadline=state.minimum_on_deadline,
-                minimum_off_deadline=state.minimum_off_deadline,
-                active_lockout_type=(
-                    ActiveLockoutType(source.active_lockout.value) if source.active_lockout is not None else None
-                ),
-                deferred_command=(state.deferred_command.value if state.deferred_command is not None else None),
-                deferred_reason=(state.deferred_reason.value if state.deferred_reason is not None else None),
-                last_normal_command_dispatch=state.last_normal_command_dispatch,
-                safety_bypassed_lockout=source.safety_bypassed_lockout,
-            )
+            changes.update(_source_control_snapshot_changes(state))
         if command is not None:
             changes.update(
                 last_requested_command=command,
@@ -1051,18 +1065,7 @@ class HomeAssistantControlelHost:
         source = self._runtime.source_control_assessment
         if source is not None:
             state = source.state
-            changes.update(
-                source_control_state=SourceControlState(state.phase.value),
-                minimum_on_deadline=state.minimum_on_deadline,
-                minimum_off_deadline=state.minimum_off_deadline,
-                active_lockout_type=(
-                    ActiveLockoutType(source.active_lockout.value) if source.active_lockout is not None else None
-                ),
-                deferred_command=(state.deferred_command.value if state.deferred_command is not None else None),
-                deferred_reason=(state.deferred_reason.value if state.deferred_reason is not None else None),
-                last_normal_command_dispatch=state.last_normal_command_dispatch,
-                safety_bypassed_lockout=source.safety_bypassed_lockout,
-            )
+            changes.update(_source_control_snapshot_changes(state))
         trace: DecisionTraceRecord | None = None
         if confirmation is not None and confirmation.last_reason.value == "heat_demand_confirmation_completed":
             source_assessment = self._runtime.source_control_assessment
@@ -1288,6 +1291,31 @@ class HomeAssistantControlelHost:
         name: str,
     ) -> asyncio.Task[Any]:
         return self._hass.async_create_task(coroutine, name=name)
+
+
+def _source_control_snapshot_changes(state: CoreSourceControlState) -> dict[str, object]:
+    """Project one normalized core source-control snapshot into HA fields."""
+
+    active_lockout_type = state.active_lockout_type
+    active_lockout = ActiveLockoutType(active_lockout_type.value) if active_lockout_type is not None else None
+    return {
+        "source_control_state": SourceControlState(state.detailed_phase.value),
+        "aggregate_demand": (state.aggregate_demand.value if state.aggregate_demand is not None else None),
+        "earliest_next_enable_time": state.earliest_next_enable_time,
+        "earliest_next_disable_time": state.earliest_next_disable_time,
+        "active_lockout_type": active_lockout,
+        "active_lockout_deadline": state.active_lockout_deadline,
+        "minimum_on_deadline": state.earliest_next_disable_time,
+        "minimum_off_deadline": state.earliest_next_enable_time,
+        "deferred_command": (state.deferred_command.value if state.deferred_command is not None else None),
+        "deferred_reason": (state.deferred_reason.value if state.deferred_reason is not None else None),
+        "deferred_since": state.deferred_since,
+        "deferred_deadline": state.deferred_deadline,
+        "last_successful_enable_dispatch": state.last_successful_enable_dispatch,
+        "last_successful_disable_dispatch": state.last_successful_disable_dispatch,
+        "last_normal_command_dispatch": state.last_normal_command_dispatch,
+        "safety_bypassed_lockout": state.safety_bypass_active,
+    }
 
 
 def _default_state_subscriber(

@@ -1,7 +1,7 @@
 """Constants for the Controlel Home Assistant integration."""
 
 DOMAIN = "controlel"
-INTEGRATION_VERSION = "0.6.0"
+INTEGRATION_VERSION = "0.7.0"
 CONFIG_ENTRY_VERSION = 1
 
 CONTROL_MODE_SIMPLE = "simple_switch"

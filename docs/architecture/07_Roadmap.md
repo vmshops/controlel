@@ -23,15 +23,14 @@ manifest pinned to `controlel==0.2.0`; after the separately approved public
 core `0.3.0` release, Phase C pins the integration to `controlel==0.3.0` and
 validates both local-source and public-package compositions.
 
-Milestone 28 prepares unpublished core `0.4.0` and a future integration
-`0.7.0` candidate. It replaces ambiguous source timing observations with one
+Milestone 28 uses published immutable core `0.4.0` and prepares integration
+`0.7.0`. It replaces ambiguous source timing observations with one
 immutable state model that separates passive enable/disable boundaries, active
 minimum-time lockout, deferred commands, successful dispatch evidence, and
 safety bypass. Regulation, command timing, anti-cycling, confirmation, and
-fatal behavior remain equivalent to core 0.3.0/integration 0.6.0. Phase A keeps
-the integration manifest at `0.6.0` with `controlel==0.3.0`; core 0.4.0 must be
-approved and published separately before Phase C may set integration 0.7.0 and
-pin `controlel==0.4.0`.
+fatal behavior remain equivalent to core 0.3.0/integration 0.6.0. Phase C sets
+the integration manifest to `0.7.0`, pins `controlel==0.4.0`, and validates
+both local-source and public-PyPI framework compositions.
 
 ## Milestone 23: Home Assistant one-zone host vertical slice
 

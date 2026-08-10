@@ -18,6 +18,7 @@ from custom_components.controlel.operational import (
     OperationalSummaryCode,
     RuntimeStatus,
     SafetyState,
+    SourceControlState,
     initial_snapshot,
     snapshot_to_dict,
     trace_to_dict,
@@ -48,8 +49,8 @@ def source() -> OperationalSnapshotSource:
             debug_expiry_deadline=None,
             debug_profile_duration_seconds=3600.0,
             trace_capacity=20,
-            integration_version="0.6.0",
-            core_version="0.3.0",
+            integration_version="0.7.0",
+            core_version="0.4.0",
         )
     )
 
@@ -118,11 +119,92 @@ def test_expired_lockout_never_exposes_negative_remaining_duration() -> None:
     snapshots.update(
         now=NOW,
         active_lockout_type=ActiveLockoutType.MINIMUM_ON,
+        active_lockout_deadline=NOW + timedelta(seconds=10),
         minimum_on_deadline=NOW + timedelta(seconds=10),
     )
 
     assert snapshots.snapshot_at(NOW + timedelta(seconds=5)).lockout_remaining_seconds == 5
     assert snapshots.snapshot_at(NOW + timedelta(seconds=10)).lockout_remaining_seconds is None
+
+
+def test_passive_boundary_does_not_create_lockout_or_deferred_countdown() -> None:
+    snapshots = source()
+    boundary = NOW + timedelta(minutes=5)
+    snapshot = snapshots.update(
+        now=NOW,
+        runtime_status=RuntimeStatus.ACTIVE,
+        zone_heat_demand=HeatDemandState.NO_HEAT_REQUIRED,
+        source_control_state=SourceControlState.HEATING_NOT_REQUESTED,
+        earliest_next_enable_time=boundary,
+        minimum_off_deadline=boundary,
+        aggregate_demand="disable_heating",
+    )
+
+    assert snapshot.earliest_next_enable_time == boundary
+    assert snapshot.active_lockout_type is None
+    assert snapshot.active_lockout_deadline is None
+    assert snapshot.active_lockout_remaining_seconds is None
+    assert snapshot.deferred_command is None
+    assert snapshot.deferred_remaining_seconds is None
+    assert snapshot.source_control_summary == (
+        f"No heating requested; next enable allowed after {boundary.isoformat()}."
+    )
+
+
+def test_active_lockout_and_deferred_countdowns_share_the_truthful_deadline() -> None:
+    snapshots = source()
+    deadline = NOW + timedelta(seconds=42)
+    snapshot = snapshots.update(
+        now=NOW,
+        runtime_status=RuntimeStatus.ACTIVE,
+        zone_heat_demand=HeatDemandState.HEAT_REQUIRED,
+        active_lockout_type=ActiveLockoutType.MINIMUM_OFF,
+        active_lockout_deadline=deadline,
+        deferred_command="enable_heating",
+        deferred_reason="minimum_off_time_active",
+        deferred_since=NOW,
+        deferred_deadline=deadline,
+    )
+
+    assert snapshot.active_lockout_remaining_seconds == 42
+    assert snapshot.deferred_remaining_seconds == 42
+    assert snapshot.source_control_summary == ("Heating requested; waiting for minimum-off protection: 42 s.")
+    payload = snapshot_to_dict(snapshot)
+    assert payload["active_lockout_deadline"] == deadline.isoformat()
+    assert payload["deferred_since"] == NOW.isoformat()
+    assert payload["deferred_deadline"] == deadline.isoformat()
+
+
+def test_minimum_on_and_safety_summaries_never_claim_physical_state() -> None:
+    snapshots = source()
+    deadline = NOW + timedelta(seconds=18)
+    waiting = snapshots.update(
+        now=NOW,
+        runtime_status=RuntimeStatus.ACTIVE,
+        zone_heat_demand=HeatDemandState.NO_HEAT_REQUIRED,
+        active_lockout_type=ActiveLockoutType.MINIMUM_ON,
+        active_lockout_deadline=deadline,
+        deferred_command="disable_heating",
+        deferred_reason="minimum_on_time_active",
+        deferred_since=NOW,
+        deferred_deadline=deadline,
+    )
+
+    assert waiting.source_control_summary == ("Heating no longer requested; waiting for minimum-on protection: 18 s.")
+
+    bypassed = snapshots.update(
+        now=NOW,
+        active_lockout_type=None,
+        active_lockout_deadline=None,
+        deferred_command=None,
+        deferred_reason=None,
+        deferred_since=None,
+        deferred_deadline=None,
+        safety_bypassed_lockout=True,
+    )
+
+    assert bypassed.source_control_summary == "Safety disable bypassed minimum-on protection."
+    assert "boiler" not in bypassed.source_control_summary.casefold()
 
 
 def test_grace_visibility_is_truthful_across_lifecycle_and_stale_updates() -> None:
