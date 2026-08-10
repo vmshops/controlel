@@ -124,7 +124,7 @@ class FakeRuntime:
         self.operations.append(("stop", None))
 
 
-def test_snapshot_buffer_start_live_and_stop_ordering():
+def test_start_precedes_snapshot_buffer_drain_live_events_and_stop():
     async def scenario():
         event_loop_thread = get_ident()
         hass = FakeHass()
@@ -171,15 +171,15 @@ def test_snapshot_buffer_start_live_and_stop_ordering():
         failure_sink.bind_fatal_handler(host.request_fatal_shutdown)
 
         initialize = asyncio.create_task(host.async_initialize())
-        while not runtime.process_entered.is_set():
-            await asyncio.sleep(0)
-        listener_holder["listener"](FakeState("20", NOW.replace(second=1)))
-        runtime.process_release.set()
-
         while not runtime.start_entered.is_set():
             await asyncio.sleep(0)
-        listener_holder["listener"](FakeState("21", NOW.replace(second=2)))
+        listener_holder["listener"](FakeState("20", NOW.replace(second=1)))
         runtime.start_release.set()
+
+        while not runtime.process_entered.is_set():
+            await asyncio.sleep(0)
+        listener_holder["listener"](FakeState("21", NOW.replace(second=2)))
+        runtime.process_release.set()
         await initialize
 
         listener_holder["listener"](FakeState("22", NOW.replace(second=3)))
@@ -204,9 +204,9 @@ def test_snapshot_buffer_start_live_and_stop_ordering():
     runtime, host, unsubscribed, event_loop_thread = asyncio.run(scenario())
 
     assert runtime.operations == [
+        ("start", None),
         ("measurement", 19.0),
         ("measurement", 20.0),
-        ("start", None),
         ("measurement", 21.0),
         ("measurement", 22.0),
         ("stop", None),
@@ -218,7 +218,7 @@ def test_snapshot_buffer_start_live_and_stop_ordering():
     assert host.stopped is True
 
 
-def test_unavailable_snapshot_reaches_start_without_synthetic_measurement():
+def test_start_precedes_unavailable_snapshot_initialization():
     async def scenario():
         hass = FakeHass()
         executor = HomeAssistantRuntimeExecutor()
@@ -258,7 +258,7 @@ def test_unavailable_snapshot_reaches_start_without_synthetic_measurement():
         return runtime.operations
 
     assert asyncio.run(scenario()) == [
-        ("indeterminate", None),
         ("start", None),
+        ("indeterminate", None),
         ("stop", None),
     ]

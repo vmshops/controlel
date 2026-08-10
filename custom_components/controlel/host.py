@@ -204,9 +204,6 @@ class HomeAssistantControlelHost:
             )
             snapshot = self._state_getter(self._temperature_entity_id)
 
-            await self._async_process_state_now(snapshot)
-            await self._async_drain_setup_buffer()
-
             try:
                 startup_result = await self._executor.async_submit(self._runtime.start)
             except HomeAssistantServiceCallError as error:
@@ -229,6 +226,7 @@ class HomeAssistantControlelHost:
                     self._observe_evaluation_result(startup_result)
                 self._log_evaluation_result(startup_result)
 
+            await self._async_process_state_now(snapshot)
             await self._async_drain_setup_buffer()
             if self._fatal_error is not None:
                 raise self._fatal_error
@@ -870,10 +868,7 @@ class HomeAssistantControlelHost:
                 confirmation_reason=confirmation_reason,
             )
             reason = DecisionReason(confirmation_reason)
-            changes.update(
-                demand_reason=reason,
-                active_demand_cause=reason,
-            )
+            changes.update(active_demand_cause=reason)
             demand = confirmed_demand
             if confirmation_reason in {item.value for item in DecisionCode}:
                 code = DecisionCode(confirmation_reason)
@@ -1084,7 +1079,6 @@ class HomeAssistantControlelHost:
                 last_requested_command=requested,
                 last_command_outcome=outcome,
                 last_command_timestamp=now,
-                demand_reason=DecisionReason.HEAT_DEMAND_CONFIRMATION_COMPLETED,
                 active_demand_cause=(DecisionReason.HEAT_DEMAND_CONFIRMATION_COMPLETED),
             )
             trace = self._trace_record(

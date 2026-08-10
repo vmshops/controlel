@@ -310,6 +310,7 @@ async def test_hysteresis_hold_and_minimum_on_deferred_command_are_visible(
         assert held.raw_zone_heat_demand.value == "no_heat_required"
         assert held.hysteresis_demand.value == "heat_required"
         assert held.demand_reason.value == "preserved_previous_demand"
+        assert held.confirmation_reason == "heat_demand_confirmation_bypassed_zero_duration"
         assert [service for service, _ in service_calls] == ["turn_on"]
 
         clock.current += timedelta(seconds=10)
@@ -471,6 +472,8 @@ async def test_diagnostics_are_allowlisted_json_safe_and_redact_unknown_entry_da
     provenance = diagnostics["configuration_provenance"]
     assert diagnostics["configuration"]["diagnostic_profile"] == (DIAGNOSTIC_PROFILE_DETAILED)
     assert provenance["legacy_data_values"][CONF_TARGET_TEMPERATURE] == 21.0
+    assert CONF_HEAT_DEMAND_CONFIRMATION_DURATION not in provenance["legacy_data_values"]
+    assert provenance["effective_normalized_values"]["heat_demand_confirmation_duration_seconds"] == 0.0
     assert provenance["mutable_options_values"] == {}
     assert provenance["effective_normalized_values"] == diagnostics["configuration"]
     assert provenance["user_facing_timing_values"] == {
@@ -520,6 +523,7 @@ async def test_diagnostics_report_mixed_data_options_precedence(
     entry_data,
     service_calls,
 ) -> None:
+    entry_data[CONF_HEAT_DEMAND_CONFIRMATION_DURATION] = 120.0
     entry = MockConfigEntry(
         domain=DOMAIN,
         title="Living room",
@@ -528,6 +532,7 @@ async def test_diagnostics_report_mixed_data_options_precedence(
             CONF_DIAGNOSTIC_PROFILE: DIAGNOSTIC_PROFILE_BASIC,
             CONF_TARGET_TEMPERATURE: 22.5,
             CONF_PRIMARY_MEASUREMENT_MAX_AGE: 90.0,
+            CONF_HEAT_DEMAND_CONFIRMATION_DURATION: 45.0,
         },
     )
     hass.states.async_set(
@@ -543,16 +548,20 @@ async def test_diagnostics_report_mixed_data_options_precedence(
     provenance = diagnostics["configuration_provenance"]
 
     assert provenance["legacy_data_values"][CONF_TARGET_TEMPERATURE] == 21.0
+    assert provenance["legacy_data_values"][CONF_HEAT_DEMAND_CONFIRMATION_DURATION] == 120.0
     assert provenance["mutable_options_values"] == {
         CONF_DIAGNOSTIC_PROFILE: DIAGNOSTIC_PROFILE_BASIC,
         CONF_TARGET_TEMPERATURE: 22.5,
         CONF_PRIMARY_MEASUREMENT_MAX_AGE: 90.0,
+        CONF_HEAT_DEMAND_CONFIRMATION_DURATION: 45.0,
     }
     assert provenance["effective_normalized_values"]["target_temperature"] == 22.5
     assert provenance["effective_normalized_values"]["primary_measurement_max_age_seconds"] == 90.0
     assert provenance["effective_normalized_values"]["diagnostic_profile"] == (DIAGNOSTIC_PROFILE_BASIC)
+    assert provenance["effective_normalized_values"]["heat_demand_confirmation_duration_seconds"] == 45.0
     assert provenance["precedence_source"][CONF_TARGET_TEMPERATURE] == ("config_entry.options")
     assert provenance["precedence_source"][CONF_PRIMARY_MEASUREMENT_MAX_AGE] == ("config_entry.options")
     assert provenance["precedence_source"][CONF_DIAGNOSTIC_PROFILE] == ("config_entry.options")
+    assert provenance["precedence_source"][CONF_HEAT_DEMAND_CONFIRMATION_DURATION] == ("config_entry.options")
     assert provenance["precedence_source"][CONF_INDETERMINATE_GRACE_PERIOD] == ("config_entry.data")
     assert await hass.config_entries.async_unload(entry.entry_id)

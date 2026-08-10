@@ -268,23 +268,23 @@ async def test_real_startup_subscription_buffers_snapshot_start_and_drain_withou
     host = make_host(hass, runtime)
 
     initialize_task = hass.async_create_task(host.async_initialize())
-    await asyncio.to_thread(snapshot_entered.wait)
+    await asyncio.to_thread(start_entered.wait)
     hass.states.async_set(
         ENTITY_ID,
         "20",
         {ATTR_UNIT_OF_MEASUREMENT: UnitOfTemperature.CELSIUS},
     )
     await wait_until(lambda: len(host._buffer) == 1)
-    snapshot_release.set()
+    start_release.set()
 
-    await asyncio.to_thread(start_entered.wait)
+    await asyncio.to_thread(snapshot_entered.wait)
     hass.states.async_set(
         ENTITY_ID,
         "21",
         {ATTR_UNIT_OF_MEASUREMENT: UnitOfTemperature.CELSIUS},
     )
-    await wait_until(lambda: len(host._buffer) == 1)
-    start_release.set()
+    await wait_until(lambda: len(host._buffer) == 2)
+    snapshot_release.set()
 
     await asyncio.to_thread(during_drain_entered.wait)
     hass.states.async_set(
@@ -305,6 +305,6 @@ async def test_real_startup_subscription_buffers_snapshot_start_and_drain_withou
 
     assert [
         value.value.value if operation == "temperature" else operation for operation, value in runtime.operations
-    ] == [19.0, 20.0, "start", 21.0, 22.0, 23.0]
+    ] == ["start", 19.0, 20.0, 21.0, 22.0, 23.0]
     assert len(set(runtime.threads)) == 1
     await host.async_stop()
