@@ -173,3 +173,24 @@ def test_public_core_030_provenance_exception_records_immutable_pypi_hashes() ->
     assert wheel_hash in release_guide
     assert sdist_hash in release_guide
     assert wheel_hash in checker
+
+
+def test_strict_final_core_release_interface_and_sequence_are_documented() -> None:
+    preparer = ROOT / "scripts" / "packaging" / "prepare_final_core_release.py"
+    validator = ROOT / "scripts" / "packaging" / "validate_core_release_provenance.py"
+    release_guide = (ROOT / "docs" / "development" / "ReleaseGuide.md").read_text(encoding="utf-8")
+    normalized = " ".join(release_guide.split())
+
+    assert preparer.is_file()
+    assert validator.is_file()
+    for argument in ("--version", "--commit", "--tag", "--output-dir"):
+        assert argument in preparer.read_text(encoding="utf-8")
+    for argument in ("--provenance", "--artifact-dir"):
+        assert argument in validator.read_text(encoding="utf-8")
+    required_sequence = (
+        "implementation; 2. core-only merge; 3. green CI for the exact merged `HEAD`; "
+        "4. immutable release verification; 5. annotated `core-vX.Y.Z` tag"
+    )
+    assert required_sequence in normalized
+    assert "An older candidate artifact must never be uploaded" in normalized
+    assert "PyPI versions are immutable" in normalized
