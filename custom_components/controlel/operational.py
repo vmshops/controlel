@@ -11,6 +11,11 @@ from enum import StrEnum
 from threading import Lock
 from typing import Any
 
+from controlel.application.state.heating_diagnostics import (
+    HeatingDiagnosticsSnapshotV1,
+    empty_heating_diagnostics_snapshot,
+)
+
 TRACE_LIMIT = 20
 TRACE_LIMITS = {
     "basic": 20,
@@ -294,6 +299,7 @@ class OperationalSnapshot:
     integration_version: str
     core_version: str
     last_meaningful_event_at: datetime | None
+    heating_diagnostics: HeatingDiagnosticsSnapshotV1
 
     def __post_init__(self) -> None:
         _validate_aware(self.updated_at, "snapshot update timestamp")
@@ -437,7 +443,10 @@ class OperationalSnapshotSource:
             self._snapshot = snapshot
             subscribers = tuple(item[0] for item in self._subscribers.values())
         for subscriber in subscribers:
-            subscriber(snapshot)
+            try:
+                subscriber(snapshot)
+            except Exception:
+                LOGGER.exception("Controlel snapshot subscriber failed")
         LOGGER.debug(
             "Controlel operational snapshot revision=%s trace_record=%s",
             snapshot.revision,
@@ -458,7 +467,10 @@ class OperationalSnapshotSource:
                 subscriber for subscriber, elapsed_refresh in self._subscribers.values() if elapsed_refresh
             )
         for subscriber in subscribers:
-            subscriber(snapshot)
+            try:
+                subscriber(snapshot)
+            except Exception:
+                LOGGER.exception("Controlel elapsed snapshot subscriber failed")
         return snapshot
 
     def close(self) -> None:
@@ -500,6 +512,7 @@ def initial_snapshot(
     trace_capacity: int,
     integration_version: str,
     core_version: str,
+    heating_diagnostics: HeatingDiagnosticsSnapshotV1 | None = None,
 ) -> OperationalSnapshot:
     timestamp = now or datetime.now(UTC)
     return OperationalSnapshot(
@@ -588,13 +601,18 @@ def initial_snapshot(
         integration_version=integration_version,
         core_version=core_version,
         last_meaningful_event_at=None,
+        heating_diagnostics=(
+            heating_diagnostics if heating_diagnostics is not None else empty_heating_diagnostics_snapshot(zone_id)
+        ),
     )
 
 
 def snapshot_to_dict(snapshot: OperationalSnapshot) -> dict[str, Any]:
     """Convert a snapshot into JSON-serializable diagnostics primitives."""
 
-    return _serialize(asdict(snapshot))
+    payload = asdict(snapshot)
+    payload.pop("heating_diagnostics")
+    return _serialize(payload)
 
 
 def trace_to_dict(trace: tuple[DecisionTraceRecord, ...]) -> list[dict[str, Any]]:

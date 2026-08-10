@@ -1,7 +1,12 @@
+import ast
 import json
 import tomllib
 from pathlib import Path
 
+from controlel.domain.heat_delivery import (
+    HeatingPerformanceAssessmentReason,
+    ObservationQuality,
+)
 from custom_components.controlel.const import CONFIG_ENTRY_VERSION, INTEGRATION_VERSION
 
 ROOT = Path(__file__).parents[3]
@@ -94,6 +99,40 @@ def test_operational_translations_are_truthful_and_action_oriented():
     assert sensors["last_decision_reason"]["state"]["safety_grace_expired"] == "Sensor failure grace period expired"
 
 
+def test_heating_diagnostic_translations_cover_every_exposed_code() -> None:
+    strings = json.loads((COMPONENT / "strings.json").read_text(encoding="utf-8"))
+    english = json.loads((COMPONENT / "translations" / "en.json").read_text(encoding="utf-8"))
+    sensors = strings["entity"]["sensor"]
+    performance = sensors["heating_performance"]
+
+    assert set(performance["state"]) == {
+        "no_episode",
+        "observing",
+        "assessment_pending",
+        "assessed",
+        "insufficient_evidence",
+        "conflicting_evidence",
+        "interrupted",
+        "assessment_failed",
+        "diagnostics_unavailable",
+    }
+    assert set(performance["state_attributes"]["latest_assessment_reason_codes"]["state"]) == {
+        item.value for item in HeatingPerformanceAssessmentReason
+    }
+    assert set(performance["state_attributes"]["observation_quality"]["state"]) == {
+        item.value for item in ObservationQuality
+    }
+    assert set(sensors["shadow_pipeline_health"]["state"]) == {
+        "healthy",
+        "pending",
+        "degraded",
+        "dropping",
+        "unavailable",
+    }
+    assert english["entity"]["sensor"]["heating_performance"] == performance
+    assert english["entity"]["sensor"]["shadow_pipeline_health"] == sensors["shadow_pipeline_health"]
+
+
 def test_config_flow_exposes_supported_options_flow_without_reconfigure_flow():
     source = (COMPONENT / "config_flow.py").read_text(encoding="utf-8")
 
@@ -113,6 +152,19 @@ def test_core_has_no_home_assistant_or_custom_component_imports():
     for path in core_files:
         source = path.read_text(encoding="utf-8")
         assert not any(value in source for value in forbidden), path
+
+
+def test_home_assistant_diagnostics_consumes_only_application_snapshot_boundary() -> None:
+    host_source = (COMPONENT / "host.py").read_text(encoding="utf-8")
+    tree = ast.parse(host_source)
+    imported_modules = {
+        node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom) and node.module is not None
+    }
+
+    assert "controlel.application.services.heating_diagnostics_boundary" in imported_modules
+    assert "controlel.domain.heat_delivery" not in imported_modules
+    assert "HeatingEpisode" not in host_source
+    assert "_diagnostic_evidence_timestamp" not in host_source
 
 
 def test_normal_project_dependencies_exclude_home_assistant():

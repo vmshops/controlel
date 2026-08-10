@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from enum import StrEnum
 from typing import Any
@@ -19,9 +19,11 @@ from homeassistant.const import EntityCategory, UnitOfTemperature, UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
+from controlel.application.state.heating_diagnostics import ZoneHeatingDiagnosticsV1
 from controlel.application.state.source_control_state import SourceControlReason
 
 from . import ControlelEntryRuntime
+from .const import DIAGNOSTIC_PROFILE_BASIC
 from .entity import ControlelSnapshotEntity
 from .operational import (
     ActiveLockoutType,
@@ -45,6 +47,7 @@ type SensorValue = str | int | float | datetime | None
 @dataclass(frozen=True, kw_only=True)
 class ControlelSensorDescription(SensorEntityDescription):
     value_fn: Callable[[OperationalSnapshot], SensorValue]
+    attributes_fn: Callable[[OperationalSnapshot], dict[str, Any] | None] = lambda snapshot: None
     available_fn: Callable[[OperationalSnapshot], bool] = lambda snapshot: True
     always_available: bool = False
     refresh_elapsed: bool = False
@@ -62,6 +65,16 @@ SENSORS: tuple[ControlelSensorDescription, ...] = (
         options=[item.value for item in OperationalSummaryCode],
         always_available=True,
         value_fn=lambda snapshot: _enum_value(snapshot.operational_summary_code),
+    ),
+    ControlelSensorDescription(
+        key="shadow_pipeline_health",
+        translation_key="shadow_pipeline_health",
+        device_class=SensorDeviceClass.ENUM,
+        options=["healthy", "pending", "degraded", "dropping", "unavailable"],
+        entity_category=EntityCategory.DIAGNOSTIC,
+        always_available=True,
+        value_fn=lambda snapshot: snapshot.heating_diagnostics.pipeline.health_code,
+        attributes_fn=lambda snapshot: _pipeline_attributes(snapshot),
     ),
     ControlelSensorDescription(
         key="source_control_summary",
@@ -620,6 +633,10 @@ class ControlelSensor(ControlelSnapshotEntity, SensorEntity):
         return self.entity_description.value_fn(self._snapshot)
 
     @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        return self.entity_description.attributes_fn(self._snapshot)
+
+    @property
     def available(self) -> bool:
         return super().available and self.entity_description.available_fn(self._snapshot)
 
@@ -630,4 +647,128 @@ async def async_setup_entry(
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     del hass
-    async_add_entities(ControlelSensor(entry, entry.runtime_data, description) for description in SENSORS)
+    entities = [ControlelSensor(entry, entry.runtime_data, description) for description in SENSORS]
+    entities.append(ControlelHeatingPerformanceSensor(entry, entry.runtime_data))
+    async_add_entities(entities)
+
+
+class ControlelHeatingPerformanceSensor(ControlelSnapshotEntity, SensorEntity):
+    """Compact per-zone view of passive episode and assessment evidence."""
+
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = [
+        "no_episode",
+        "observing",
+        "assessment_pending",
+        "assessed",
+        "insufficient_evidence",
+        "conflicting_evidence",
+        "interrupted",
+        "assessment_failed",
+        "diagnostics_unavailable",
+    ]
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_translation_key = "heating_performance"
+
+    def __init__(self, entry: ConfigEntry, runtime_data: ControlelEntryRuntime) -> None:
+        if runtime_data.host is None:
+            raise RuntimeError("Controlel host is unavailable")
+        zone_id = runtime_data.config.zone_id.value
+        super().__init__(
+            entry,
+            runtime_data.host.snapshot_source,
+            f"heating_performance_{zone_id}",
+            always_available=True,
+        )
+        self._zone_id = zone_id
+
+    @property
+    def native_value(self) -> str:
+        return _zone_diagnostic_state(self._zone(self._snapshot), self._snapshot)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        zone = self._zone(self._snapshot)
+        if zone is None:
+            return {"schema_version": 1, "zone_id": self._zone_id}
+        return _zone_attributes(zone, self._snapshot)
+
+    def _zone(self, snapshot: OperationalSnapshot) -> ZoneHeatingDiagnosticsV1 | None:
+        return next((item for item in snapshot.heating_diagnostics.zones if item.zone_id == self._zone_id), None)
+
+
+def _zone_diagnostic_state(
+    zone: ZoneHeatingDiagnosticsV1 | None,
+    snapshot: OperationalSnapshot,
+) -> str:
+    if snapshot.heating_diagnostics.pipeline.projection_error is not None:
+        return "diagnostics_unavailable"
+    if zone is None:
+        return "no_episode"
+    if zone.active_episode is not None:
+        return "observing"
+    assessment_error = any(
+        item.zone_id == zone.zone_id for item in snapshot.heating_diagnostics.pipeline.assessment_errors
+    )
+    if assessment_error:
+        return "assessment_failed"
+    completed = zone.latest_completed_episode
+    assessment = zone.latest_assessment
+    if completed is not None and (assessment is None or assessment.episode_started_at != completed.started_at):
+        return "assessment_pending"
+    return assessment.status if assessment is not None else "no_episode"
+
+
+def _zone_attributes(
+    zone: ZoneHeatingDiagnosticsV1,
+    snapshot: OperationalSnapshot,
+) -> dict[str, Any]:
+    episode = zone.active_episode or zone.latest_completed_episode
+    assessment = zone.latest_assessment
+    attributes: dict[str, Any] = {
+        "schema_version": snapshot.heating_diagnostics.schema_version,
+        "updated_at": snapshot.heating_diagnostics.updated_at,
+        "zone_id": zone.zone_id,
+        "lifecycle": episode.lifecycle if episode is not None else None,
+        "episode_started_at": episode.started_at if episode is not None else None,
+        "episode_ended_at": episode.ended_at if episode is not None else None,
+        "termination_reason": episode.termination_reason if episode is not None else None,
+        "total_sample_count": episode.total_sample_count if episode is not None else 0,
+        "retained_sample_count": episode.retained_sample_count if episode is not None else 0,
+        "samples_truncated": episode.samples_truncated if episode is not None else False,
+        "latest_assessment_status": assessment.status if assessment is not None else None,
+        "latest_assessment_episode_started_at": (assessment.episode_started_at if assessment is not None else None),
+        "latest_assessment_reason_codes": (list(assessment.reason_codes) if assessment is not None else []),
+    }
+    if snapshot.diagnostic_profile != DIAGNOSTIC_PROFILE_BASIC:
+        attributes.update(
+            {
+                "completed_duration_seconds": (episode.completed_duration_seconds if episode is not None else None),
+                "observed_duration_through_latest_evidence_seconds": (
+                    episode.observed_duration_through_latest_evidence_seconds if episode is not None else None
+                ),
+                "temperature_evidence": asdict(episode.temperature) if episode is not None else None,
+                "target_evidence": asdict(episode.target) if episode is not None else None,
+                "actuator_evidence": ([asdict(item) for item in episode.actuators] if episode is not None else []),
+                "actuator_count_truncated": (episode.actuator_count_truncated if episode is not None else False),
+                "source_evidence": asdict(episode.source) if episode is not None else None,
+                "assessment": asdict(assessment) if assessment is not None else None,
+                "observation_error": asdict(zone.observation_error) if zone.observation_error is not None else None,
+            }
+        )
+    return attributes
+
+
+def _pipeline_attributes(snapshot: OperationalSnapshot) -> dict[str, Any]:
+    pipeline = snapshot.heating_diagnostics.pipeline
+    attributes: dict[str, Any] = {
+        "schema_version": snapshot.heating_diagnostics.schema_version,
+        "updated_at": snapshot.heating_diagnostics.updated_at,
+        "enabled": pipeline.enabled,
+        "pending_assessment_count": pipeline.pending_assessment_count,
+        "dropped_pending_assessment_count": pipeline.dropped_pending_assessment_count,
+        "error_count": pipeline.assessment_error_count + pipeline.observation_error_count,
+    }
+    if snapshot.diagnostic_profile != DIAGNOSTIC_PROFILE_BASIC:
+        attributes.update(asdict(pipeline))
+    return attributes

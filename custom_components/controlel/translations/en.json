@@ -213,6 +213,60 @@
         }
       },
       "source_control_summary": {"name": "Source-control summary"},
+      "heating_performance": {
+        "name": "Heating performance",
+        "state": {
+          "no_episode": "No observed episode",
+          "observing": "Observing",
+          "assessment_pending": "Assessment pending",
+          "assessed": "Assessed",
+          "insufficient_evidence": "Insufficient evidence",
+          "conflicting_evidence": "Conflicting evidence",
+          "interrupted": "Interrupted",
+          "assessment_failed": "Assessment failed",
+          "diagnostics_unavailable": "Diagnostics unavailable"
+        },
+        "state_attributes": {
+          "latest_assessment_reason_codes": {
+            "name": "Assessment reasons",
+            "state": {
+              "observed_temperature_response": "Observed temperature response",
+              "insufficient_distinct_measurements": "Insufficient distinct valid measurements",
+              "duplicate_measurements_removed": "Duplicate measurements removed",
+              "non_valid_measurements_excluded": "Non-valid measurements excluded",
+              "non_monotonic_timestamps": "Non-monotonic measurement timestamps",
+              "conflicting_measurements": "Conflicting measurements",
+              "target_changed": "Target changed",
+              "history_truncated": "Episode history truncated",
+              "demand_became_indeterminate": "Demand became indeterminate",
+              "runtime_stopped": "Runtime stopped",
+              "fatal_shutdown": "Fatal shutdown",
+              "physical_source_state_unknown": "Physical source state unknown"
+            }
+          },
+          "observation_quality": {
+            "name": "Observation quality",
+            "state": {
+              "unknown": "Unknown",
+              "valid": "Valid",
+              "stale": "Stale",
+              "degraded": "Degraded",
+              "conflicting": "Conflicting",
+              "unsupported": "Unsupported"
+            }
+          }
+        }
+      },
+      "shadow_pipeline_health": {
+        "name": "Shadow assessment pipeline",
+        "state": {
+          "healthy": "Healthy",
+          "pending": "Assessment pending",
+          "degraded": "Degraded",
+          "dropping": "Pending episodes dropped",
+          "unavailable": "Diagnostics unavailable"
+        }
+      },
       "heating_turn_on_differential": {"name": "Configured heating turn-on differential"},
       "heating_turn_off_differential": {"name": "Configured heating turn-off differential"},
       "heat_demand_confirmation_duration": {"name": "Configured heat-demand confirmation time"},

@@ -241,3 +241,14 @@ Deferred beyond this shadow milestone are failed-assessment retry policy,
 persistent history, distinct physical actuator-event accounting, exhaustive
 manual evidence-summary consistency validation, physical burner confirmation,
 adaptive assistance, and source-water-temperature optimization.
+
+Heating diagnostics follow a one-way boundary:
+
+`Observation -> Assessment -> Diagnostic Projection -> Presentation`
+
+The application projection is immutable, versioned, bounded, and derived only
+from existing evidence timestamps. Home Assistant receives this normalized
+projection rather than raw episode or assessment objects. Projection and
+presentation are never inputs to demand, heat delivery, source control, safety,
+or scheduling. Unknown physical actuator and source state remains explicitly
+unknown, and reload starts with no inferred diagnostic continuity.

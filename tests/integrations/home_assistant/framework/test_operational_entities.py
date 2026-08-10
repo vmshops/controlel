@@ -57,6 +57,7 @@ EXPECTED_SENSOR_KEYS = {
     "heat_demand_confirmation_duration",
     "heat_demand_confirmation_remaining",
     "heat_demand_confirmation_state",
+    "heating_performance_living_room",
     "heating_disable_threshold",
     "heating_enable_threshold",
     "heating_turn_off_differential",
@@ -92,6 +93,7 @@ EXPECTED_SENSOR_KEYS = {
     "sensor_failure_grace_period",
     "source_control_state",
     "source_control_summary",
+    "shadow_pipeline_health",
     "target_temperature",
     "timeout_action",
 }
@@ -177,6 +179,15 @@ async def test_device_entities_states_unique_ids_and_unload(
     assert hass.states.get(by_key["diagnostic_profile"].entity_id).state == (DIAGNOSTIC_PROFILE_DETAILED)
     assert hass.states.get(by_key["grace_remaining"].entity_id).state == "unavailable"
     assert hass.states.get(by_key["grace_deadline"].entity_id).state == "unavailable"
+    assert hass.states.get(by_key["heating_performance_living_room"].entity_id).state in {
+        "observing",
+        "assessment_pending",
+        "assessed",
+    }
+    assert hass.states.get(by_key["shadow_pipeline_health"].entity_id).state in {
+        "healthy",
+        "pending",
+    }
 
     entity_ids = [item.entity_id for item in entries]
     assert await hass.config_entries.async_unload(entry.entry_id)
@@ -195,6 +206,7 @@ async def test_reload_rename_and_target_change_keep_one_stable_entity_set(
     original = {item.unique_id: item.entity_id for item in er.async_entries_for_config_entry(registry, entry.entry_id)}
     expected_unique_ids = {f"{entry.entry_id}_{key}" for key in EXPECTED_SENSOR_KEYS | EXPECTED_BINARY_SENSOR_KEYS}
     assert set(original) == expected_unique_ids
+    performance_attributes = {}
 
     for profile in (
         DIAGNOSTIC_PROFILE_DETAILED,
@@ -213,6 +225,17 @@ async def test_reload_rename_and_target_change_keep_one_stable_entity_set(
         current_entries = er.async_entries_for_config_entry(registry, entry.entry_id)
         assert {item.unique_id: item.entity_id for item in current_entries} == original
         assert len(current_entries) == len(expected_unique_ids)
+        performance = next(
+            item for item in current_entries if item.unique_id.endswith("_heating_performance_living_room")
+        )
+        performance_attributes[profile] = dict(hass.states.get(performance.entity_id).attributes)
+
+    assert "temperature_evidence" not in performance_attributes[DIAGNOSTIC_PROFILE_BASIC]
+    assert "temperature_evidence" in performance_attributes[DIAGNOSTIC_PROFILE_DETAILED]
+    assert performance_attributes[DIAGNOSTIC_PROFILE_DEBUG].keys() == (
+        performance_attributes[DIAGNOSTIC_PROFILE_DETAILED].keys()
+    )
+    assert all(len(json.dumps(attributes)) < 65_536 for attributes in performance_attributes.values())
 
     current_entries = er.async_entries_for_config_entry(registry, entry.entry_id)
     target = next(item for item in current_entries if item.unique_id.endswith("_target_temperature"))
@@ -498,6 +521,9 @@ async def test_diagnostics_are_allowlisted_json_safe_and_redact_unknown_entry_da
     } <= diagnostics["operational_snapshot"].keys()
     assert len(diagnostics["entity_ids"]) == len(EXPECTED_SENSOR_KEYS | EXPECTED_BINARY_SENSOR_KEYS)
     assert diagnostics["decision_trace"]
+    assert diagnostics["heating_diagnostics"]["schema_version"] == 1
+    assert len(diagnostics["heating_diagnostics"]["zones"]) == 1
+    assert len(json.dumps(diagnostics["heating_diagnostics"])) < 65_536
     assert diagnostics["active_issue_ids"] == []
     provenance = diagnostics["configuration_provenance"]
     assert diagnostics["configuration"]["diagnostic_profile"] == (DIAGNOSTIC_PROFILE_DETAILED)

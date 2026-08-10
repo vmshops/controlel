@@ -1,8 +1,11 @@
 from datetime import UTC, datetime, timedelta
 from threading import Event, Thread
 
+import pytest
+
 from controlel.application.services.heating_performance_assessor import HeatingPerformanceAssessor
 from controlel.application.services.shadow_heating_performance_monitor import (
+    MAX_RETAINED_HEATING_PERFORMANCE_ASSESSMENTS,
     PendingAssessmentDropReason,
     ShadowHeatingPerformanceMonitor,
 )
@@ -105,6 +108,20 @@ def test_assessment_storage_is_bounded_in_completion_order() -> None:
     monitor.assess_pending()
 
     assert [assessment.zone_id.value for assessment in monitor.assessments] == ["second", "third"]
+
+
+def test_assessment_retention_capacity_has_a_hard_production_maximum() -> None:
+    default_monitor = ShadowHeatingPerformanceMonitor()
+    lower_test_monitor = ShadowHeatingPerformanceMonitor(max_assessments=2)
+
+    assert MAX_RETAINED_HEATING_PERFORMANCE_ASSESSMENTS == 20
+    assert default_monitor.assessment_capacity == 20
+    assert default_monitor.diagnostic_snapshot().assessment_capacity == 20
+    assert lower_test_monitor.assessment_capacity == 2
+    assert lower_test_monitor.diagnostic_snapshot().assessment_capacity == 2
+
+    with pytest.raises(ValueError, match="must not exceed 20"):
+        ShadowHeatingPerformanceMonitor(max_assessments=21)
 
 
 def test_pending_capacity_drops_oldest_with_truthful_stable_evidence() -> None:

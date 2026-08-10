@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from threading import Event, get_ident
 from types import SimpleNamespace
@@ -16,6 +16,11 @@ from controlel.application.runtime.runtime_processing_result import (
     RuntimeProcessingStatus,
     TemperatureNoDecisionReason,
 )
+from controlel.application.services.heating_diagnostics_boundary import (
+    HeatingDiagnosticsBoundary,
+    HeatingDiagnosticsProjectionResult,
+)
+from controlel.application.services.heating_diagnostics_projector import HeatingDiagnosticsProjector
 from controlel.application.services.heating_performance_assessor import HeatingPerformanceAssessor
 from controlel.application.services.shadow_heating_performance_monitor import ShadowHeatingPerformanceMonitor
 from controlel.application.services.source_control_policy import SourceControlPolicy
@@ -297,13 +302,26 @@ class ShadowAssessmentRuntime(FakeRuntime):
     def __init__(self, monitor: ShadowHeatingPerformanceMonitor) -> None:
         super().__init__()
         self.heating_performance_monitor = monitor
+        self.heating_episode_observer = FakeEpisodeObserver()
         self._episode_offset = 0
 
     def process_temperature(self, measurement):
         result = super().process_temperature(measurement)
-        self.heating_performance_monitor.submit_episode(completed_shadow_episode(self._episode_offset))
+        episode = completed_shadow_episode(self._episode_offset)
+        self.heating_episode_observer.completed.append(episode)
+        self.heating_performance_monitor.submit_episode(episode)
         self._episode_offset += 2
         return result
+
+
+class FakeEpisodeObserver:
+    def __init__(self) -> None:
+        self.active_episodes = ()
+        self.completed = []
+
+    @property
+    def completed_episodes(self):
+        return tuple(self.completed)
 
 
 class BlockingShadowAssessor:
@@ -324,7 +342,31 @@ class FailingShadowAssessor:
         raise RuntimeError(f"shadow failure for {episode.zone_id.value}")
 
 
-def create_shadow_test_host(runtime: FakeRuntime) -> HomeAssistantControlelHost:
+class BlockingDiagnosticsProjector:
+    def __init__(self) -> None:
+        self.entered = Event()
+        self.release = Event()
+        self._delegate = HeatingDiagnosticsProjector()
+
+    def project(self, **kwargs):
+        self.entered.set()
+        if not self.release.wait(timeout=5):
+            raise TimeoutError("diagnostic projection was not released")
+        return self._delegate.project(**kwargs)
+
+
+class FailingDiagnosticsProjector:
+    def project(self, **kwargs):
+        raise RuntimeError("password=secret must not be projected")
+
+
+def create_shadow_test_host(
+    runtime: FakeRuntime,
+    *,
+    heating_diagnostics_projector=None,
+    heating_diagnostics_boundary=None,
+    heating_diagnostics_enabled=True,
+) -> HomeAssistantControlelHost:
     hass = FakeHass()
     failure_sink = HomeAssistantScheduledFailureSink(
         hass,
@@ -351,6 +393,15 @@ def create_shadow_test_host(runtime: FakeRuntime) -> HomeAssistantControlelHost:
         state_getter=lambda entity_id: None,
         shutdown_subscriber=lambda hass, listener: lambda: None,
         interval_subscriber=lambda hass, listener, interval: lambda: None,
+        heating_diagnostics_boundary=(
+            heating_diagnostics_boundary
+            or (
+                HeatingDiagnosticsBoundary(projector=heating_diagnostics_projector)
+                if heating_diagnostics_projector is not None
+                else None
+            )
+        ),
+        heating_diagnostics_enabled=heating_diagnostics_enabled,
     )
     failure_sink.bind_fatal_handler(host.request_fatal_shutdown)
     return host
@@ -380,15 +431,25 @@ def test_production_host_drains_completed_episode_after_control_returns() -> Non
             await asyncio.sleep(0.001)
 
         await host.async_stop()
-        return result, monitor.assessments, len(host._shadow_assessment_tasks)
+        return (
+            result,
+            monitor.assessments,
+            len(host._shadow_assessment_tasks),
+            host.snapshot_source.current.heating_diagnostics,
+        )
 
-    result, assessments, remaining_shadow_tasks = asyncio.run(scenario())
+    result, assessments, remaining_shadow_tasks, diagnostics = asyncio.run(scenario())
 
     assert result is not None
     assert result.status is RuntimeProcessingStatus.NO_DECISION
     assert len(assessments) == 1
     assert assessments[0].zone_id == ZoneId("room")
     assert remaining_shadow_tasks == 0
+    assert diagnostics.schema_version == 1
+    assert diagnostics.zones[0].active_episode is None
+    assert diagnostics.zones[0].latest_completed_episode is not None
+    assert diagnostics.zones[0].latest_assessment is not None
+    assert diagnostics.zones[0].latest_assessment.status == "assessed"
 
 
 def test_blocked_production_assessor_does_not_block_next_control_event() -> None:
@@ -431,14 +492,132 @@ def test_production_assessor_failure_cannot_change_completed_control_result() ->
                 break
             await asyncio.sleep(0.001)
         await host.async_stop()
-        return result, tuple(runtime.operations), monitor.errors
+        return (
+            result,
+            tuple(runtime.operations),
+            monitor.errors,
+            host.snapshot_source.current.heating_diagnostics,
+        )
 
-    result, operations, errors = asyncio.run(scenario())
+    result, operations, errors, diagnostics = asyncio.run(scenario())
 
     assert result is not None
     assert result.status is RuntimeProcessingStatus.NO_DECISION
     assert operations[:2] == (("start", None), ("measurement", 19.0))
     assert errors == {ZoneId("room"): "RuntimeError: shadow failure for room"}
+    assert diagnostics.pipeline.health_code == "degraded"
+    assert diagnostics.pipeline.assessment_errors[0].exception_type == "RuntimeError"
+
+
+def test_blocked_diagnostic_projection_does_not_hold_runtime_or_delay_control_events() -> None:
+    async def scenario():
+        projector = BlockingDiagnosticsProjector()
+        runtime = FakeRuntime()
+        host = create_shadow_test_host(runtime, heating_diagnostics_projector=projector)
+        await host.async_initialize()
+
+        first = await host.async_process_state(FakeState("19", NOW))
+        while not projector.entered.is_set():
+            await asyncio.sleep(0)
+        second = await asyncio.wait_for(
+            host.async_process_state(FakeState("19.5", NOW + timedelta(seconds=1))),
+            timeout=1,
+        )
+        operations = tuple(runtime.operations)
+        projector.release.set()
+        await host.async_stop()
+        return first, second, operations
+
+    first, second, operations = asyncio.run(scenario())
+
+    assert first is not None and second is not None
+    assert [operation[0] for operation in operations] == ["start", "measurement", "measurement"]
+
+
+def test_failed_diagnostic_projection_is_safe_and_cannot_change_control_result() -> None:
+    async def scenario():
+        runtime = FakeRuntime()
+        host = create_shadow_test_host(runtime, heating_diagnostics_projector=FailingDiagnosticsProjector())
+        await host.async_initialize()
+
+        result = await host.async_process_state(FakeState("19", NOW))
+        for _ in range(100):
+            if host.snapshot_source.current.heating_diagnostics.pipeline.projection_error is not None:
+                break
+            await asyncio.sleep(0.001)
+        diagnostics = host.snapshot_source.current.heating_diagnostics
+        await host.async_stop()
+        return result, tuple(runtime.operations), diagnostics
+
+    result, operations, diagnostics = asyncio.run(scenario())
+
+    assert result is not None
+    assert result.status is RuntimeProcessingStatus.NO_DECISION
+    assert operations[:2] == (("start", None), ("measurement", 19.0))
+    assert diagnostics.pipeline.health_code == "unavailable"
+    assert diagnostics.pipeline.projection_error is not None
+    assert diagnostics.pipeline.projection_error.exception_type == "RuntimeError"
+    assert "password=secret" not in str(diagnostics)
+
+
+def test_stale_diagnostic_projection_cannot_overwrite_newer_generation() -> None:
+    class OutOfOrderBoundary:
+        def __init__(self) -> None:
+            self.calls = 0
+            self.first_entered = Event()
+            self.release_first = Event()
+
+        def project(self, *, current, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                return HeatingDiagnosticsProjectionResult(snapshot=current)
+            if self.calls == 2:
+                self.first_entered.set()
+                if not self.release_first.wait(timeout=5):
+                    raise TimeoutError("older diagnostic generation was not released")
+                return HeatingDiagnosticsProjectionResult(
+                    snapshot=replace(current, updated_at="2026-07-23T10:00:01+00:00")
+                )
+            return HeatingDiagnosticsProjectionResult(snapshot=replace(current, updated_at="2026-07-23T10:00:02+00:00"))
+
+    async def scenario():
+        boundary = OutOfOrderBoundary()
+        runtime = FakeRuntime()
+        host = create_shadow_test_host(runtime, heating_diagnostics_boundary=boundary)
+        await host.async_initialize()
+        while boundary.calls < 1:
+            await asyncio.sleep(0)
+
+        publications = []
+        unsubscribe = host.snapshot_source.subscribe(
+            lambda snapshot: publications.append(snapshot.heating_diagnostics.updated_at)
+        )
+        first = await host.async_process_state(FakeState("19", NOW))
+        while not boundary.first_entered.is_set():
+            await asyncio.sleep(0)
+        second = await asyncio.wait_for(
+            host.async_process_state(FakeState("19.5", NOW + timedelta(seconds=1))),
+            timeout=1,
+        )
+        for _ in range(100):
+            if host.snapshot_source.current.heating_diagnostics.updated_at == "2026-07-23T10:00:02+00:00":
+                break
+            await asyncio.sleep(0.001)
+        operations_before_release = tuple(runtime.operations)
+        boundary.release_first.set()
+        await host._async_wait_for_heating_diagnostics()
+        final_updated_at = host.snapshot_source.current.heating_diagnostics.updated_at
+        unsubscribe()
+        await host.async_stop()
+        return first, second, operations_before_release, publications, final_updated_at
+
+    first, second, operations, publications, final_updated_at = asyncio.run(scenario())
+
+    assert first is not None and second is not None
+    assert [operation[0] for operation in operations] == ["start", "measurement", "measurement"]
+    assert final_updated_at == "2026-07-23T10:00:02+00:00"
+    assert "2026-07-23T10:00:01+00:00" not in publications
+    assert publications.count("2026-07-23T10:00:02+00:00") == 1
 
 
 def test_start_precedes_snapshot_buffer_drain_live_events_and_stop():

@@ -1,7 +1,7 @@
 """Bounded, in-memory observation of confirmed zone-heating episodes."""
 
 from collections import deque
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime
 from math import isfinite
 
@@ -20,6 +20,13 @@ from controlel.domain.heat_delivery import (
     ObservedValue,
 )
 from controlel.domain.value_objects.zone_id import ZoneId
+
+
+@dataclass(frozen=True)
+class HeatingEpisodeObservationErrorEvidence:
+    zone_id: ZoneId | None
+    evidence_at: datetime
+    exception_type: str
 
 
 class HeatingEpisodeObserver:
