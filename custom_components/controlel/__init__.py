@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant
 
-from controlel.application.runtime.control_runtime import ControlRuntime
+from controlel.application.runtime.control_runtime import ControlRuntime as CoreControlRuntime
 from controlel.domain.capabilities.temperature_capability import (
     TemperatureCapability,
 )
@@ -32,6 +32,13 @@ from .scheduler import HomeAssistantScheduler
 
 LOGGER = logging.getLogger(__name__)
 PLATFORMS = ("sensor", "binary_sensor")
+
+
+class ControlRuntime(CoreControlRuntime):
+    """Use HA state objects, rather than an empty core evaluation, to begin regulation."""
+
+    def start(self) -> None:
+        """Start the HA-owned lifecycle without fabricating a measurement."""
 
 
 @dataclass

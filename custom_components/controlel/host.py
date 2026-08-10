@@ -224,9 +224,11 @@ class HomeAssistantControlelHost:
                 )
                 if isinstance(startup_result, HeatDemandEvaluationResult):
                     self._observe_evaluation_result(startup_result)
-                self._log_evaluation_result(startup_result)
+                if startup_result is not None:
+                    self._log_evaluation_result(startup_result)
 
-            await self._async_process_state_now(snapshot)
+            if snapshot is not None:
+                await self._async_process_state_now(snapshot)
             await self._async_drain_setup_buffer()
             if self._fatal_error is not None:
                 raise self._fatal_error

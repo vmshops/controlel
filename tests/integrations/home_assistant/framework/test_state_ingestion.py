@@ -166,6 +166,7 @@ async def test_real_state_events_map_only_configured_entity_and_preserve_framewo
     host = make_host(hass, runtime)
     loop_thread = get_ident()
     await host.async_initialize()
+    assert [operation for operation, _ in runtime.operations] == ["start", "indeterminate"]
 
     hass.states.async_set(
         "sensor.other",

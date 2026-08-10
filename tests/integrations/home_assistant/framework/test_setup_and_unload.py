@@ -6,7 +6,6 @@ from homeassistant.const import ATTR_UNIT_OF_MEASUREMENT, UnitOfTemperature
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 import custom_components.controlel as component
-from controlel.application.runtime.control_runtime import ControlRuntime
 from controlel.domain.repositories.sensor_repository import SensorRepository
 from controlel.domain.repositories.zone_repository import ZoneRepository
 from controlel.domain.value_objects.sensor_id import SensorId
@@ -17,6 +16,8 @@ from custom_components.controlel.const import (
     CONF_TEMPERATURE_ENTITY_ID,
     DOMAIN,
 )
+
+ControlRuntime = component.ControlRuntime
 
 
 class InstrumentedRuntime(ControlRuntime):

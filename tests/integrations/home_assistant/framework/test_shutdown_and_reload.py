@@ -13,7 +13,6 @@ from homeassistant.const import (
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 import custom_components.controlel as component
-from controlel.application.runtime.control_runtime import ControlRuntime
 from controlel.domain.value_objects.sensor_id import SensorId
 from custom_components.controlel.const import (
     CONF_CONTROLLED_ENTITY_ID,
@@ -42,6 +41,8 @@ from custom_components.controlel.const import (
 from custom_components.controlel.runtime_executor import HomeAssistantRuntimeExecutor
 
 from .test_state_ingestion import RecordingRuntime, make_host, wait_until
+
+ControlRuntime = component.ControlRuntime
 
 
 class ReloadRuntime(ControlRuntime):
@@ -347,7 +348,6 @@ async def test_invalid_options_are_rejected_without_runtime_reload(
 
 @pytest.mark.asyncio
 async def test_stop_rejects_new_events_waits_for_accepted_work_then_stops_on_worker(hass) -> None:
-    hass.states.async_set("sensor.living_room_temperature", "unknown")
     runtime = RecordingRuntime()
     entered = ThreadEvent()
     release = ThreadEvent()
