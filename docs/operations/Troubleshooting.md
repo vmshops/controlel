@@ -17,7 +17,14 @@ The current switch state is never used to fabricate it.
 Confirm that the exact custom-repository URL is
 `https://github.com/vmshops/controlel` and the selected category is
 **Integration**. The repository must be publicly accessible. Use the latest
-published release; `0.5.0` remains an unpublished candidate.
+published release; `0.6.0` remains an unpublished candidate.
+
+If a zone stays in `confirmation_pending`, check measurement validity and the
+confirmation deadline/remaining entities. Unknown, unavailable, invalid,
+stale, or future-dated input intentionally cancels the interval; recovery must
+remain continuously heat-required for the full configured duration. A
+confirmed zone may still show a deferred enable because source minimum-off
+protection is a separate later policy.
 
 If HACS downloaded files but Home Assistant cannot find Controlel, confirm
 that `manifest.json` is at
@@ -106,15 +113,16 @@ second.
 
 ## Core dependency installation
 
-Integration `0.5.0` requires exactly `controlel==0.2.0`. Normal supported
+Integration candidate `0.6.0` requires exactly `controlel==0.3.0`
+during Milestone 27 Phase C. Normal supported
 installation lets Home Assistant obtain that dependency automatically; users
 do not need to install it manually. If setup reports a missing core, confirm
 that the environment can reach PyPI and that `python -m pip show controlel`
-reports version `0.2.0`.
+reports version `0.3.0`.
 
 Local development may install the checkout with `python -m pip install
 --no-deps -e .`. Public-package framework validation must use a different
-environment, install `controlel==0.2.0` from PyPI, and resolve it from
+environment, install `controlel==0.3.0` from PyPI, and resolve it from
 `site-packages`.
 
 ## Framework test environment fails to start
@@ -130,7 +138,7 @@ The supported harness uses Python 3.14.2 or newer, Home Assistant `2026.7.3`,
 and `pytest-homeassistant-custom-component==0.13.347`. Install the hashed lock
 with `python -m pip install --require-hashes -r requirements/ha-test.txt`.
 Then either install the checkout editable for the local composition or install
-`controlel==0.2.0` from PyPI for the isolated public composition.
+`controlel==0.3.0` from PyPI for the isolated public composition.
 
 If native Windows reports `ModuleNotFoundError: No module named 'fcntl'` or
 `No module named 'resource'`, run the framework suite in Linux or WSL. These

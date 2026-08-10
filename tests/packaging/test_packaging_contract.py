@@ -99,8 +99,8 @@ def test_manifest_pins_published_core_and_keeps_version_independent() -> None:
     core_version = load_pyproject()["project"]["version"]
 
     assert core_version == "0.3.0"
-    assert manifest["requirements"] == ["controlel==0.2.0"]
-    assert manifest["version"] == "0.5.0"
+    assert manifest["requirements"] == ["controlel==0.3.0"]
+    assert manifest["version"] == "0.6.0"
     assert manifest["version"] != core_version
     assert manifest["issue_tracker"] == "https://github.com/vmshops/controlel/issues"
 
@@ -140,6 +140,18 @@ def test_packaging_ci_builds_and_validates_without_publishing() -> None:
     assert "token" not in workflow.casefold()
 
 
+def test_framework_ci_separates_local_source_and_public_core_compositions() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8")
+
+    assert "home-assistant-framework-local:" in workflow
+    assert "CONTROLEL_FRAMEWORK_COMPOSITION: local" in workflow
+    assert "home-assistant-framework-public:" in workflow
+    assert "CONTROLEL_FRAMEWORK_COMPOSITION: public" in workflow
+    assert "controlel==0.3.0" in workflow
+    assert "python scripts/ci/verify_public_core.py" in workflow
+    assert "candidate-core-wheel" not in workflow
+
+
 def test_core_and_integration_tag_namespaces_are_explicit() -> None:
     release_guide = (ROOT / "docs" / "development" / "ReleaseGuide.md").read_text(encoding="utf-8")
     normalized_guide = " ".join(release_guide.split())
@@ -148,3 +160,16 @@ def test_core_and_integration_tag_namespaces_are_explicit() -> None:
     assert "`vX.Y.Z` is reserved for Home Assistant integration releases" in normalized_guide
     assert "`core-v0.2.0` is the namespace-correct tag name" in normalized_guide
     assert "existing integration tag `v0.2.0` must remain unchanged" in normalized_guide
+
+
+def test_public_core_030_provenance_exception_records_immutable_pypi_hashes() -> None:
+    release_guide = (ROOT / "docs" / "development" / "ReleaseGuide.md").read_text(encoding="utf-8")
+    checker = (ROOT / "scripts" / "ci" / "verify_public_core.py").read_text(encoding="utf-8")
+
+    wheel_hash = "a8756b0a1bc3efff7876439bbc12db42d3632ce2aa5bb1a4f8a74400fd76500e"
+    sdist_hash = "f97bd8f1b129f7dcf2024ce4eeafbba5f0f4ffa49f6d0ee5704dddccfdf55289"
+    assert "built from a dirty Milestone 27 working" in release_guide
+    assert "equivalent to `core-v0.3.0`" in release_guide
+    assert wheel_hash in release_guide
+    assert sdist_hash in release_guide
+    assert wheel_hash in checker

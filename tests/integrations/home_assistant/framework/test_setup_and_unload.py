@@ -6,7 +6,6 @@ from homeassistant.const import ATTR_UNIT_OF_MEASUREMENT, UnitOfTemperature
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 import custom_components.controlel as component
-from controlel.application.runtime.control_runtime import ControlRuntime
 from controlel.domain.repositories.sensor_repository import SensorRepository
 from controlel.domain.repositories.zone_repository import ZoneRepository
 from controlel.domain.value_objects.sensor_id import SensorId
@@ -17,6 +16,8 @@ from custom_components.controlel.const import (
     CONF_TEMPERATURE_ENTITY_ID,
     DOMAIN,
 )
+
+ControlRuntime = component.ControlRuntime
 
 
 class InstrumentedRuntime(ControlRuntime):
@@ -45,7 +46,7 @@ class InstrumentedRuntime(ControlRuntime):
 
 
 @pytest.mark.asyncio
-async def test_real_setup_initializes_once_processes_snapshot_then_starts_and_unloads(
+async def test_real_setup_initializes_once_starts_then_processes_snapshot_and_unloads(
     hass,
     entry_data,
     service_calls,
@@ -85,7 +86,7 @@ async def test_real_setup_initializes_once_processes_snapshot_then_starts_and_un
     assert len(InstrumentedRuntime.instances) == 1
     assert initialize.call_count == 1
     assert host._executor._executor._max_workers == 1
-    assert runtime.operations[:2] == ["temperature", "start"]
+    assert runtime.operations[:2] == ["start", "temperature"]
     assert len(set(runtime.threads)) == 1
     assert runtime.threads[0] != loop_thread
     measurement = runtime.state_store.get_latest(SensorId("living_room_temperature"))
@@ -148,7 +149,7 @@ async def test_partial_setup_failure_cleans_every_constructed_resource_and_prese
     assert host.accepting is False
     assert host.stopped is True
     assert host._executor.closed is True
-    assert runtime.operations == ["temperature", "start", "stop"]
+    assert runtime.operations == ["start", "stop"]
 
     hass.states.async_set(
         entry_data[CONF_TEMPERATURE_ENTITY_ID],
@@ -156,7 +157,7 @@ async def test_partial_setup_failure_cleans_every_constructed_resource_and_prese
         {ATTR_UNIT_OF_MEASUREMENT: UnitOfTemperature.CELSIUS},
     )
     await hass.async_block_till_done()
-    assert runtime.operations == ["temperature", "start", "stop"]
+    assert runtime.operations == ["start", "stop"]
 
 
 @pytest.mark.asyncio

@@ -7,12 +7,34 @@ import json
 import sys
 import tomllib
 from pathlib import Path
+from urllib.request import Request, urlopen
 
 import controlel
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-CORE_VERSION = "0.2.0"
+CORE_VERSION = "0.3.0"
 CORE_REQUIREMENT = f"controlel=={CORE_VERSION}"
+PUBLIC_WHEEL_FILENAME = "controlel-0.3.0-py3-none-any.whl"
+PUBLIC_WHEEL_SIZE = 62_209
+PUBLIC_WHEEL_SHA256 = "a8756b0a1bc3efff7876439bbc12db42d3632ce2aa5bb1a4f8a74400fd76500e"
+PYPI_METADATA_URL = f"https://pypi.org/pypi/controlel/{CORE_VERSION}/json"
+
+
+def verify_public_wheel_metadata() -> None:
+    """Verify the immutable public wheel identity recorded for this composition."""
+
+    request = Request(PYPI_METADATA_URL, headers={"User-Agent": "controlel-ci-provenance-check"})
+    with urlopen(request, timeout=30) as response:  # noqa: S310 - fixed HTTPS PyPI endpoint
+        metadata = json.load(response)
+    matching_files = [
+        file
+        for file in metadata["urls"]
+        if file["filename"] == PUBLIC_WHEEL_FILENAME and file["packagetype"] == "bdist_wheel"
+    ]
+    assert len(matching_files) == 1
+    wheel = matching_files[0]
+    assert wheel["size"] == PUBLIC_WHEEL_SIZE
+    assert wheel["digests"]["sha256"] == PUBLIC_WHEEL_SHA256
 
 
 def main() -> int:
@@ -34,8 +56,12 @@ def main() -> int:
     assert project["dependencies"] == ["pydantic>=2.0"]
     assert not any("homeassistant" in dependency.casefold() for dependency in project["dependencies"])
     assert manifest["requirements"] == [CORE_REQUIREMENT]
+    verify_public_wheel_metadata()
 
-    print(f"Verified public controlel {CORE_VERSION} at {package_path}")
+    print(
+        f"Verified public controlel {CORE_VERSION} at {package_path}; "
+        f"{PUBLIC_WHEEL_FILENAME} SHA-256 {PUBLIC_WHEEL_SHA256}"
+    )
     return 0
 
 

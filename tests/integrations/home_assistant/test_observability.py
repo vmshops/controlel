@@ -6,6 +6,7 @@ import pytest
 from custom_components.controlel.observability import ObservabilityController
 from custom_components.controlel.operational import (
     ActiveLockoutType,
+    ConfirmationState,
     DecisionCode,
     DecisionReason,
     DecisionTraceRecord,
@@ -30,6 +31,7 @@ def source() -> OperationalSnapshotSource:
             target_temperature=21.0,
             heating_turn_on_differential=0.3,
             heating_turn_off_differential=0.1,
+            heat_demand_confirmation_duration_seconds=120.0,
             primary_measurement_max_age_seconds=300.0,
             sensor_failure_grace_period_seconds=60.0,
             minimum_heating_on_time_seconds=600.0,
@@ -40,8 +42,8 @@ def source() -> OperationalSnapshotSource:
             debug_expiry_deadline=None,
             debug_profile_duration_seconds=3600.0,
             trace_capacity=20,
-            integration_version="0.5.0",
-            core_version="0.2.0",
+            integration_version="0.6.0",
+            core_version="0.3.0",
         )
     )
 
@@ -241,6 +243,14 @@ def test_diagnostics_explain_configured_and_inactive_countdowns() -> None:
             {"safety_state": SafetyState.INDETERMINATE_GRACE},
             "grace_deadline",
             "sensor_failure_grace",
+        ),
+        (
+            {
+                "confirmation_state": ConfirmationState.CONFIRMATION_PENDING,
+                "confirmation_started_at": NOW,
+            },
+            "confirmation_deadline",
+            "heat_demand_confirmation",
         ),
     ],
 )

@@ -7,6 +7,7 @@ from custom_components.controlel.operational import (
     TRACE_LIMIT,
     ActiveLockoutType,
     CommandOutcome,
+    ConfirmationState,
     DecisionCode,
     DecisionReason,
     DecisionTraceRecord,
@@ -47,8 +48,8 @@ def source() -> OperationalSnapshotSource:
             debug_expiry_deadline=None,
             debug_profile_duration_seconds=3600.0,
             trace_capacity=20,
-            integration_version="0.5.0",
-            core_version="0.2.0",
+            integration_version="0.6.0",
+            core_version="0.3.0",
         )
     )
 
@@ -230,6 +231,9 @@ def test_diagnostics_serialization_uses_json_safe_stable_values() -> None:
             "safety_state": "normal",
             "raw_demand": None,
             "hysteresis_demand": None,
+            "confirmed_zone_demand": None,
+            "confirmation_state": None,
+            "confirmation_reason": None,
             "source_control_state": None,
             "deferred_reason": None,
             "safety_bypassed_lockout": False,
@@ -257,6 +261,31 @@ def test_latest_input_status_and_active_demand_cause_remove_ambiguous_snapshot_m
 
     assert snapshot.latest_input_status is MeasurementStatus.INVALID_VALUE
     assert snapshot.active_demand_cause is DecisionReason.MEASUREMENT_STALE
+
+
+def test_confirmation_countdown_is_active_only_while_pending() -> None:
+    snapshots = source()
+    deadline = NOW + timedelta(seconds=120)
+
+    pending = snapshots.update(
+        now=NOW,
+        heat_demand_confirmation_duration_seconds=120.0,
+        confirmation_state=ConfirmationState.CONFIRMATION_PENDING,
+        confirmation_started_at=NOW,
+        confirmation_deadline=deadline,
+        confirmation_reason="heat_demand_confirmation_started",
+    )
+    refreshed = snapshots.refresh_elapsed(NOW + timedelta(seconds=36))
+
+    assert pending.confirmation_remaining_seconds == 120.0
+    assert refreshed.confirmation_remaining_seconds == 84.0
+    completed = snapshots.update(
+        now=deadline,
+        confirmation_state=ConfirmationState.HEAT_REQUIRED_CONFIRMED,
+        confirmation_started_at=None,
+        confirmation_deadline=None,
+    )
+    assert completed.confirmation_remaining_seconds is None
 
 
 @pytest.mark.parametrize(

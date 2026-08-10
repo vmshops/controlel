@@ -43,6 +43,15 @@ class HeatDemandState(StrEnum):
     INDETERMINATE = "indeterminate"
 
 
+class ConfirmationState(StrEnum):
+    NO_HEAT_REQUIRED = "no_heat_required"
+    CONFIRMATION_PENDING = "confirmation_pending"
+    HEAT_REQUIRED_CONFIRMED = "heat_required_confirmed"
+    INDETERMINATE = "indeterminate"
+    STOPPED = "stopped"
+    FATAL_ERROR = "fatal_error"
+
+
 class SafetyState(StrEnum):
     NORMAL = "normal"
     INDETERMINATE_GRACE = "indeterminate_grace"
@@ -82,6 +91,15 @@ class DecisionCode(StrEnum):
     FATAL_SHUTDOWN_NO_COMMAND_PATH_AVAILABLE = "fatal_shutdown_no_command_path_available"
     RUNTIME_STARTED = "runtime_started"
     RUNTIME_STOPPED = "runtime_stopped"
+    HEAT_DEMAND_CONFIRMATION_STARTED = "heat_demand_confirmation_started"
+    HEAT_DEMAND_CONFIRMATION_COMPLETED = "heat_demand_confirmation_completed"
+    HEAT_DEMAND_CONFIRMATION_CANCELLED_DEMAND_CLEARED = "heat_demand_confirmation_cancelled_demand_cleared"
+    HEAT_DEMAND_CONFIRMATION_CANCELLED_MEASUREMENT_INDETERMINATE = (
+        "heat_demand_confirmation_cancelled_measurement_indeterminate"
+    )
+    HEAT_DEMAND_CONFIRMATION_CANCELLED_RELOAD = "heat_demand_confirmation_cancelled_reload"
+    HEAT_DEMAND_CONFIRMATION_EXPIRED_BUT_DEMAND_CHANGED = "heat_demand_confirmation_expired_but_demand_changed"
+    HEAT_DEMAND_CONFIRMATION_BYPASSED_ZERO_DURATION = "heat_demand_confirmation_bypassed_zero_duration"
 
 
 class DecisionReason(StrEnum):
@@ -109,6 +127,17 @@ class DecisionReason(StrEnum):
     SERVICE_CALL_FAILED = "service_call_failed"
     FATAL_RUNTIME_FAILURE = "fatal_runtime_failure"
     RUNTIME_LIFECYCLE = "runtime_lifecycle"
+    HEAT_DEMAND_CONFIRMATION_STARTED = "heat_demand_confirmation_started"
+    HEAT_DEMAND_CONFIRMATION_COMPLETED = "heat_demand_confirmation_completed"
+    HEAT_DEMAND_CONFIRMATION_CANCELLED_DEMAND_CLEARED = "heat_demand_confirmation_cancelled_demand_cleared"
+    HEAT_DEMAND_CONFIRMATION_CANCELLED_MEASUREMENT_INDETERMINATE = (
+        "heat_demand_confirmation_cancelled_measurement_indeterminate"
+    )
+    HEAT_DEMAND_CONFIRMATION_CANCELLED_RELOAD = "heat_demand_confirmation_cancelled_reload"
+    HEAT_DEMAND_CONFIRMATION_EXPIRED_BUT_DEMAND_CHANGED = "heat_demand_confirmation_expired_but_demand_changed"
+    HEAT_DEMAND_CONFIRMATION_BYPASSED_ZERO_DURATION = "heat_demand_confirmation_bypassed_zero_duration"
+    HEAT_DEMAND_CONFIRMATION_CONFIRMED_DEMAND_PRESERVED = "heat_demand_confirmation_confirmed_demand_preserved"
+    HEAT_DEMAND_CONFIRMATION_NO_HEAT_REQUIRED = "heat_demand_confirmation_no_heat_required"
 
 
 class CommandOutcome(StrEnum):
@@ -144,6 +173,8 @@ class OperationalSummaryCode(StrEnum):
     HEAT_REQUESTED = "heat_requested"
     NO_HEAT_REQUESTED = "no_heat_requested"
     DEMAND_INDETERMINATE = "demand_indeterminate"
+    HEAT_CONFIRMATION_PENDING = "heat_confirmation_pending"
+    HEAT_CONFIRMATION_CANCELLED = "heat_confirmation_cancelled"
 
 
 @dataclass(frozen=True)
@@ -159,6 +190,9 @@ class DecisionTraceRecord:
     safety_state: SafetyState
     raw_demand: HeatDemandState | None = None
     hysteresis_demand: HeatDemandState | None = None
+    confirmed_zone_demand: HeatDemandState | None = None
+    confirmation_state: ConfirmationState | None = None
+    confirmation_reason: str | None = None
     source_control_state: SourceControlState | None = None
     deferred_reason: str | None = None
     safety_bypassed_lockout: bool = False
@@ -185,6 +219,7 @@ class OperationalSnapshot:
     heating_turn_off_differential: float
     heating_enable_threshold: float
     heating_disable_threshold: float
+    heat_demand_confirmation_duration_seconds: float
     primary_measurement_max_age_seconds: float
     sensor_failure_grace_period_seconds: float
     minimum_heating_on_time_seconds: float
@@ -198,6 +233,12 @@ class OperationalSnapshot:
     zone_heat_demand: HeatDemandState
     raw_zone_heat_demand: HeatDemandState
     hysteresis_demand: HeatDemandState
+    confirmed_zone_heat_demand: HeatDemandState
+    confirmation_state: ConfirmationState
+    confirmation_started_at: datetime | None
+    confirmation_deadline: datetime | None
+    confirmation_remaining_seconds: float | None
+    confirmation_reason: str | None
     demand_reason: DecisionReason
     active_demand_cause: DecisionReason
     safety_state: SafetyState
@@ -245,6 +286,8 @@ class OperationalSnapshot:
             ("measurement timestamp", self.measurement_timestamp),
             ("measurement stale deadline", self.measurement_stale_deadline),
             ("grace deadline", self.grace_deadline),
+            ("confirmation start", self.confirmation_started_at),
+            ("confirmation deadline", self.confirmation_deadline),
             ("minimum-on deadline", self.minimum_on_deadline),
             ("minimum-off deadline", self.minimum_off_deadline),
             ("normal command dispatch", self.last_normal_command_dispatch),
@@ -422,6 +465,7 @@ def initial_snapshot(
     target_temperature: float,
     heating_turn_on_differential: float,
     heating_turn_off_differential: float,
+    heat_demand_confirmation_duration_seconds: float = 0.0,
     primary_measurement_max_age_seconds: float,
     sensor_failure_grace_period_seconds: float,
     minimum_heating_on_time_seconds: float,
@@ -451,6 +495,7 @@ def initial_snapshot(
         heating_turn_off_differential=heating_turn_off_differential,
         heating_enable_threshold=target_temperature - heating_turn_on_differential,
         heating_disable_threshold=target_temperature + heating_turn_off_differential,
+        heat_demand_confirmation_duration_seconds=(heat_demand_confirmation_duration_seconds),
         primary_measurement_max_age_seconds=primary_measurement_max_age_seconds,
         sensor_failure_grace_period_seconds=sensor_failure_grace_period_seconds,
         minimum_heating_on_time_seconds=minimum_heating_on_time_seconds,
@@ -464,6 +509,12 @@ def initial_snapshot(
         zone_heat_demand=HeatDemandState.INDETERMINATE,
         raw_zone_heat_demand=HeatDemandState.INDETERMINATE,
         hysteresis_demand=HeatDemandState.INDETERMINATE,
+        confirmed_zone_heat_demand=HeatDemandState.INDETERMINATE,
+        confirmation_state=ConfirmationState.INDETERMINATE,
+        confirmation_started_at=None,
+        confirmation_deadline=None,
+        confirmation_remaining_seconds=None,
+        confirmation_reason=None,
         demand_reason=DecisionReason.WAITING_FOR_FIRST_MEASUREMENT,
         active_demand_cause=DecisionReason.WAITING_FOR_FIRST_MEASUREMENT,
         safety_state=SafetyState.STOPPED,
@@ -541,6 +592,13 @@ def _with_elapsed(
         if snapshot.grace_deadline is not None and snapshot.safety_state is SafetyState.INDETERMINATE_GRACE
         else None
     )
+    confirmation_remaining = (
+        max(0.0, (snapshot.confirmation_deadline - now).total_seconds())
+        if snapshot.confirmation_deadline is not None
+        and snapshot.confirmation_state is ConfirmationState.CONFIRMATION_PENDING
+        and snapshot.confirmation_deadline > now
+        else None
+    )
     lockout_deadline = {
         ActiveLockoutType.MINIMUM_ON: snapshot.minimum_on_deadline,
         ActiveLockoutType.MINIMUM_OFF: snapshot.minimum_off_deadline,
@@ -562,6 +620,7 @@ def _with_elapsed(
         measurement_stale_deadline=measurement_stale_deadline,
         measurement_stale_remaining_seconds=measurement_stale_remaining,
         grace_remaining_seconds=remaining,
+        confirmation_remaining_seconds=confirmation_remaining,
         lockout_remaining_seconds=lockout_remaining,
         debug_expiry_remaining_seconds=debug_remaining,
     )
@@ -581,6 +640,8 @@ def active_countdown_names(snapshot: OperationalSnapshot) -> tuple[str, ...]:
         names.append("measurement_maximum_age")
     if snapshot.grace_remaining_seconds is not None:
         names.append("sensor_failure_grace")
+    if snapshot.confirmation_remaining_seconds is not None:
+        names.append("heat_demand_confirmation")
     if snapshot.active_lockout_type is ActiveLockoutType.MINIMUM_ON and snapshot.lockout_remaining_seconds is not None:
         names.append("minimum_heating_on")
         names.append("deferred_source_command")
@@ -605,6 +666,13 @@ def operational_summary_code(snapshot: OperationalSnapshot) -> OperationalSummar
         return OperationalSummaryCode.FATAL
     if snapshot.safety_state is SafetyState.INDETERMINATE_GRACE:
         return OperationalSummaryCode.SENSOR_FAILURE_GRACE
+    if snapshot.confirmation_state is ConfirmationState.CONFIRMATION_PENDING:
+        return OperationalSummaryCode.HEAT_CONFIRMATION_PENDING
+    if snapshot.confirmation_reason in {
+        "heat_demand_confirmation_cancelled_demand_cleared",
+        "heat_demand_confirmation_expired_but_demand_changed",
+    }:
+        return OperationalSummaryCode.HEAT_CONFIRMATION_CANCELLED
     if snapshot.safety_state is SafetyState.TIMEOUT_ACTION_APPLIED:
         if snapshot.last_requested_command == "enable_heating":
             return OperationalSummaryCode.SAFETY_TIMEOUT_ENABLE_REQUESTED

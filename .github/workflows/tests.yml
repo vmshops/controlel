@@ -95,9 +95,9 @@ jobs:
           python -m pip install \
             --no-cache-dir \
             --index-url https://pypi.org/simple \
-            controlel==0.2.0
+            controlel==0.3.0
 
-      - name: Verify public core package provenance
+      - name: Verify public core provenance
         run: python scripts/ci/verify_public_core.py
 
       - name: Run Home Assistant framework tests

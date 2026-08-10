@@ -79,6 +79,15 @@ class RecordingRuntime:
         finally:
             self.active = False
 
+    def mark_measurement_indeterminate(self):
+        assert self.active is False
+        self.threads.append(get_ident())
+        self.operations.append(("indeterminate", None))
+        return SimpleNamespace(
+            status=HeatDemandEvaluationStatus.INDETERMINATE_GRACE,
+            next_evaluation_at=NOW,
+        )
+
     def stop(self) -> None:
         assert self.active is False
         self.threads.append(get_ident())
@@ -113,6 +122,7 @@ def make_host(hass, runtime: RecordingRuntime) -> HomeAssistantControlelHost:
             target_temperature=Temperature(21),
             heating_turn_on_differential=0.0,
             heating_turn_off_differential=0.0,
+            heat_demand_confirmation_duration=timedelta(0),
             primary_measurement_max_age=timedelta(minutes=5),
             indeterminate_grace_period=timedelta(minutes=1),
             minimum_heating_on_time=timedelta(0),
@@ -125,7 +135,7 @@ def make_host(hass, runtime: RecordingRuntime) -> HomeAssistantControlelHost:
                 profile_before_debug="detailed",
             ),
         ),
-        core_version="0.2.0",
+        core_version="0.3.0",
         logger=logging.getLogger(__name__),
     )
     sink.bind_fatal_handler(host.request_fatal_shutdown)
@@ -156,6 +166,7 @@ async def test_real_state_events_map_only_configured_entity_and_preserve_framewo
     host = make_host(hass, runtime)
     loop_thread = get_ident()
     await host.async_initialize()
+    assert [operation for operation, _ in runtime.operations] == ["start", "indeterminate"]
 
     hass.states.async_set(
         "sensor.other",
@@ -258,23 +269,23 @@ async def test_real_startup_subscription_buffers_snapshot_start_and_drain_withou
     host = make_host(hass, runtime)
 
     initialize_task = hass.async_create_task(host.async_initialize())
-    await asyncio.to_thread(snapshot_entered.wait)
+    await asyncio.to_thread(start_entered.wait)
     hass.states.async_set(
         ENTITY_ID,
         "20",
         {ATTR_UNIT_OF_MEASUREMENT: UnitOfTemperature.CELSIUS},
     )
     await wait_until(lambda: len(host._buffer) == 1)
-    snapshot_release.set()
+    start_release.set()
 
-    await asyncio.to_thread(start_entered.wait)
+    await asyncio.to_thread(snapshot_entered.wait)
     hass.states.async_set(
         ENTITY_ID,
         "21",
         {ATTR_UNIT_OF_MEASUREMENT: UnitOfTemperature.CELSIUS},
     )
-    await wait_until(lambda: len(host._buffer) == 1)
-    start_release.set()
+    await wait_until(lambda: len(host._buffer) == 2)
+    snapshot_release.set()
 
     await asyncio.to_thread(during_drain_entered.wait)
     hass.states.async_set(
@@ -295,6 +306,6 @@ async def test_real_startup_subscription_buffers_snapshot_start_and_drain_withou
 
     assert [
         value.value.value if operation == "temperature" else operation for operation, value in runtime.operations
-    ] == [19.0, 20.0, "start", 21.0, 22.0, 23.0]
+    ] == ["start", 19.0, 20.0, 21.0, 22.0, 23.0]
     assert len(set(runtime.threads)) == 1
     await host.async_stop()

@@ -22,15 +22,13 @@ The goal is to create a reliable heating controller capable of optimizing comfor
 
 Project phase: Home Assistant one-zone host vertical slice
 
-Core package candidate version: 0.3.0
+Core package published version: 0.3.0
 
-Home Assistant integration candidate version: 0.5.0
-
-Core `0.3.0` is under development and has not been tagged or published. The
-integration manifest remains pinned to published immutable `controlel==0.2.0`.
+Home Assistant integration candidate version: 0.6.0
 
 Use the latest published release for HACS custom-repository installation.
-Version `0.5.0` is under development and has not been tagged or published.
+Core `0.3.0` is published and immutable. Integration `0.6.0` remains an
+unpublished candidate and pins exactly `controlel==0.3.0`.
 Controlel is not listed in the default HACS store.
 
 ## Home Assistant installation
@@ -46,7 +44,7 @@ installation flow is:
    **Controlel**.
 
 The integration manifest makes Home Assistant install the exact public core
-dependency `controlel==0.2.0`; users must not install the core manually.
+dependency `controlel==0.3.0`; users must not install the core manually.
 Detailed prerequisites, configuration, safety behavior, manual installation,
 upgrades, removal, and current limitations are in the
 [Home Assistant installation guide](docs/operations/HomeAssistantInstallation.md).
@@ -67,9 +65,10 @@ executor for every synchronous `ControlRuntime` operation. No core method runs
 on Home Assistant's event-loop thread.
 
 New entries default to asymmetric hysteresis of 0.3 Â°C below and 0.1 Â°C above
-the target, plus command-based minimum on/off times of 10/5 minutes. Existing
-entries resolve all four settings to zero until the user explicitly changes
-them. The controller preserves its last logical demand within the deadband and
+the target, a two-minute heat-demand confirmation interval, plus command-based
+minimum on/off times of 10/5 minutes. Existing entries resolve all five
+settings to zero until the user explicitly changes them. The controller
+preserves its last logical demand within the deadband and
 reevaluates current demand at a lockout deadline instead of replaying a stored
 command. Safety-disable commands bypass minimum-on protection; safety-enable
 commands remain subject to minimum-off protection.
@@ -82,7 +81,7 @@ durations remain visible, while deadline and remaining entities are unavailable
 when their countdown is inactive.
 
 The Options Flow offers Basic, Detailed, and Debug diagnostic profiles. New
-0.5.0 entries default to Basic. Existing entries without a stored profile
+0.5.0 and later entries default to Basic. Existing entries without a stored profile
 resolve to Detailed, preserving periodic operational timing visibility without
 a setup-time migration write. Basic refreshes presentation on meaningful
 runtime events and retains 20 trace records; Detailed refreshes active
@@ -93,12 +92,12 @@ be kept active until manually changed. Profiles affect presentation, logging,
 and in-memory evidence only—not regulation.
 
 The integration manifest requires the exact public core release
-`controlel==0.2.0`. A supported custom-component deployment can therefore let
+`controlel==0.3.0`. A supported custom-component deployment can therefore let
 Home Assistant obtain the core dependency automatically; users do not need to
 install the core manually. Editable installation remains available for local
 source compatibility testing. The core test suite does not require Home
 Assistant, while Home Assistant framework tests use separate local-source and
-public-package compositions against the same immutable core `0.2.0` release.
+public-package compositions against the same immutable core `0.3.0` release.
 
 Framework compatibility is tested against Home Assistant `2026.7.3` with
 `pytest-homeassistant-custom-component==0.13.347` on Python 3.14.2 or newer.
@@ -106,18 +105,18 @@ The isolated, hashed environment is defined by `requirements/ha-test.in` and
 `requirements/ha-test.txt`; setup and suite commands are in the
 [development guide](docs/development/DevelopmentGuide.md). The compatibility
 harness is separate from HACS release validation. HACS metadata and
-deterministic release packaging are prepared for `0.5.0`, but that candidate
+deterministic release packaging are prepared for `0.6.0`, but that candidate
 has not been published and no default-store publication exists.
 
 ## Core package artifacts
 
 The reusable core is published as the `controlel` distribution and import
-package at version `0.2.0`. Its static version source and PEP 517 build
+package at version `0.3.0`. Its static version source and PEP 517 build
 configuration live in `pyproject.toml`; normal installation depends only on
 Pydantic. Packaging validation builds one wheel and one sdist, inspects their
 contents, and installs the wheel into a clean environment outside the checkout.
 
-Core versions `0.1.0` and `0.2.0` are published on PyPI and immutable. Future
+Core versions `0.1.0`, `0.2.0`, and `0.3.0` are published on PyPI and immutable. Future
 core corrections require a new version; rebuilt artifacts for an already
 published version must never be uploaded.
 Repository packaging CI remains validation-only and contains no publication
@@ -126,7 +125,7 @@ the published release record, build validation, and version separation.
 
 ## Zone heat-demand confirmation
 
-The core candidate inserts a zone-owned confirmation policy after hysteresis
+Core `0.3.0` inserts a zone-owned confirmation policy after hysteresis
 and before `IdentityDemandArbitrator`. Positive-duration heat demand must remain
 continuous until its deadline; the deadline reevaluates current hysteresis
 demand rather than replaying stored state. No-heat demand clears immediately.

@@ -5,6 +5,9 @@ from datetime import UTC, datetime, timedelta
 from threading import Event, get_ident
 from types import SimpleNamespace
 
+import pytest
+
+from controlel.application.runtime.control_runtime import ControlRuntime as CoreControlRuntime
 from controlel.application.runtime.heat_demand_evaluation_result import (
     HeatDemandEvaluationStatus,
 )
@@ -16,6 +19,7 @@ from controlel.application.runtime.runtime_processing_result import (
 from controlel.domain.value_objects.sensor_id import SensorId
 from controlel.domain.value_objects.temperature import Temperature
 from controlel.domain.value_objects.zone_id import ZoneId
+from custom_components.controlel import ControlRuntime as HomeAssistantControlRuntime
 from custom_components.controlel.config import (
     DiagnosticConfiguration,
     HomeAssistantSensorBinding,
@@ -41,6 +45,7 @@ def host_config():
         target_temperature=Temperature(21),
         heating_turn_on_differential=0.3,
         heating_turn_off_differential=0.1,
+        heat_demand_confirmation_duration=timedelta(minutes=2),
         primary_measurement_max_age=timedelta(minutes=5),
         indeterminate_grace_period=timedelta(minutes=1),
         minimum_heating_on_time=timedelta(minutes=10),
@@ -110,12 +115,30 @@ class FakeRuntime:
             next_evaluation_at=NOW,
         )
 
+    def mark_measurement_indeterminate(self):
+        self.worker_threads.append(get_ident())
+        self.operations.append(("indeterminate", None))
+        return SimpleNamespace(
+            status=HeatDemandEvaluationStatus.INDETERMINATE_GRACE,
+            next_evaluation_at=NOW,
+        )
+
     def stop(self):
         self.worker_threads.append(get_ident())
         self.operations.append(("stop", None))
 
 
-def test_snapshot_buffer_start_live_and_stop_ordering():
+def test_home_assistant_runtime_start_does_not_evaluate_empty_core_state(monkeypatch):
+    def fail_if_called(runtime):
+        raise AssertionError("core startup evaluation must not run before a real HA state")
+
+    monkeypatch.setattr(CoreControlRuntime, "start", fail_if_called)
+    runtime = object.__new__(HomeAssistantControlRuntime)
+
+    assert runtime.start() is None
+
+
+def test_start_precedes_snapshot_buffer_drain_live_events_and_stop():
     async def scenario():
         event_loop_thread = get_ident()
         hass = FakeHass()
@@ -152,7 +175,7 @@ def test_snapshot_buffer_start_live_and_stop_ordering():
             ),
             failure_sink=failure_sink,
             config=host_config(),
-            core_version="0.2.0",
+            core_version="0.3.0",
             logger=logging.getLogger(__name__),
             state_subscriber=subscribe,
             state_getter=lambda entity_id: FakeState("19", NOW),
@@ -162,15 +185,15 @@ def test_snapshot_buffer_start_live_and_stop_ordering():
         failure_sink.bind_fatal_handler(host.request_fatal_shutdown)
 
         initialize = asyncio.create_task(host.async_initialize())
-        while not runtime.process_entered.is_set():
-            await asyncio.sleep(0)
-        listener_holder["listener"](FakeState("20", NOW.replace(second=1)))
-        runtime.process_release.set()
-
         while not runtime.start_entered.is_set():
             await asyncio.sleep(0)
-        listener_holder["listener"](FakeState("21", NOW.replace(second=2)))
+        listener_holder["listener"](FakeState("20", NOW.replace(second=1)))
         runtime.start_release.set()
+
+        while not runtime.process_entered.is_set():
+            await asyncio.sleep(0)
+        listener_holder["listener"](FakeState("21", NOW.replace(second=2)))
+        runtime.process_release.set()
         await initialize
 
         listener_holder["listener"](FakeState("22", NOW.replace(second=3)))
@@ -195,9 +218,9 @@ def test_snapshot_buffer_start_live_and_stop_ordering():
     runtime, host, unsubscribed, event_loop_thread = asyncio.run(scenario())
 
     assert runtime.operations == [
+        ("start", None),
         ("measurement", 19.0),
         ("measurement", 20.0),
-        ("start", None),
         ("measurement", 21.0),
         ("measurement", 22.0),
         ("stop", None),
@@ -209,7 +232,8 @@ def test_snapshot_buffer_start_live_and_stop_ordering():
     assert host.stopped is True
 
 
-def test_unavailable_snapshot_reaches_start_without_synthetic_measurement():
+@pytest.mark.parametrize("state_value", ["unavailable", "unknown"])
+def test_start_precedes_explicit_indeterminate_snapshot_initialization(state_value):
     async def scenario():
         hass = FakeHass()
         executor = HomeAssistantRuntimeExecutor()
@@ -236,10 +260,10 @@ def test_unavailable_snapshot_reaches_start_without_synthetic_measurement():
             ),
             failure_sink=failure_sink,
             config=host_config(),
-            core_version="0.2.0",
+            core_version="0.3.0",
             logger=logging.getLogger(__name__),
             state_subscriber=lambda hass, entity_id, listener: lambda: None,
-            state_getter=lambda entity_id: FakeState("unavailable", NOW),
+            state_getter=lambda entity_id: FakeState(state_value, NOW),
             shutdown_subscriber=lambda hass, listener: lambda: None,
             interval_subscriber=lambda hass, listener, interval: lambda: None,
         )
@@ -248,4 +272,63 @@ def test_unavailable_snapshot_reaches_start_without_synthetic_measurement():
         await host.async_stop()
         return runtime.operations
 
-    assert asyncio.run(scenario()) == [("start", None), ("stop", None)]
+    assert asyncio.run(scenario()) == [
+        ("start", None),
+        ("indeterminate", None),
+        ("stop", None),
+    ]
+
+
+def test_absent_snapshot_waits_for_one_buffered_real_state_without_indeterminate():
+    async def scenario():
+        hass = FakeHass()
+        runtime = FakeRuntime()
+        runtime.start_release.clear()
+        listener_holder = {}
+
+        def subscribe(hass, entity_id, listener):
+            listener_holder["listener"] = listener
+            return lambda: None
+
+        failure_sink = HomeAssistantScheduledFailureSink(
+            hass,
+            HomeAssistantEventLoopBridge(asyncio.get_running_loop()),
+            "entry",
+            logging.getLogger(__name__),
+            create_issue=lambda *args, **kwargs: None,
+            delete_issue=lambda *args: None,
+            warning_severity="warning",
+            error_severity="error",
+        )
+        host = HomeAssistantControlelHost(
+            hass=hass,
+            runtime=runtime,
+            executor=HomeAssistantRuntimeExecutor(),
+            measurement_mapper=HomeAssistantMeasurementMapper(
+                HomeAssistantSensorBinding("sensor.room", SensorId("room_temperature"))
+            ),
+            failure_sink=failure_sink,
+            config=host_config(),
+            core_version="0.3.0",
+            logger=logging.getLogger(__name__),
+            state_subscriber=subscribe,
+            state_getter=lambda entity_id: None,
+            shutdown_subscriber=lambda hass, listener: lambda: None,
+            interval_subscriber=lambda hass, listener, interval: lambda: None,
+        )
+        failure_sink.bind_fatal_handler(host.request_fatal_shutdown)
+
+        initialize = asyncio.create_task(host.async_initialize())
+        while not runtime.start_entered.is_set():
+            await asyncio.sleep(0)
+        listener_holder["listener"](FakeState("20", NOW))
+        runtime.start_release.set()
+        await initialize
+        await host.async_stop()
+        return runtime.operations
+
+    assert asyncio.run(scenario()) == [
+        ("start", None),
+        ("measurement", 20.0),
+        ("stop", None),
+    ]
