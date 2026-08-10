@@ -4,7 +4,9 @@
 
 Temperature strategy output is raw zone demand. A pure, stateful
 `TemperatureHysteresisPolicy` converts it to logical demand with asymmetric
-enable/disable thresholds. Safety policy then resolves indeterminate demand.
+enable/disable thresholds, and confirmation establishes each zone's effective
+demand independently. `MultiZoneDemandArbitrator` then resolves one immutable
+building demand. Safety policy resolves an indeterminate building result.
 Finally, `SourceControlPolicy` arbitrates the requested heat-source command
 against command-dispatch-based minimum on/off deadlines. Home Assistant owns
 configuration, serialized execution, scheduling adapters, and observation, not
@@ -19,11 +21,23 @@ The ownership boundary is explicit:
   bypass, and future water/return-temperature, modulation, and source
   diagnostics.
 
-`DemandArbitrator` separates those layers. The current
-`IdentityDemandArbitrator` maps the already-aggregated one-zone demand directly
-to shared-source demand. It deliberately contains no future multi-zone rules.
+`DemandArbitrator` separates those layers. Milestone 29's
+`MultiZoneDemandArbitrator` consumes confirmed `ZoneHeatDemandInput` values and
+emits one `BuildingHeatDemand`. Any confirmed heat request wins. If no zone
+requests heat, any valid no-heat decision establishes no heat unless an
+indeterminate zone carries a previously confirmed active request into the
+existing safety/grace layer. All-indeterminate and empty inputs are
+indeterminate. Observable zone IDs are sorted by stable `zone_id`.
 `SourceControlPolicy` receives only the resolved source command and timing
 state; it has no zone ID, temperature, sensor, or Home Assistant dependency.
+
+The building snapshot reports contributing heat zones, valid no-heat zones,
+indeterminate zones, counts, and a stable reason code. Aggregation is unweighted:
+there are no priorities, percentages, or demand magnitudes. Source configuration
+is shared rather than copied into zones because minimum-time protection,
+dispatch evidence, deferred commands, and safety belong to the one physical
+command path. Future Milestone 30 valve/TRV coordination remains a separate
+zone-output concern.
 
 One scheduler deadline represents the earliest demand-validity, safety-grace,
 or deferred-command reevaluation. Expiry always reevaluates current state.
@@ -122,6 +136,15 @@ The initial adapter is deliberately one entry, one zone, one primary sensor,
 and one shared heat source. Reconfiguration unloads and reconstructs the
 runtime; repositories are never mutated live.
 
+`ControlRuntime` has no public dynamic zone-addition or zone-removal API.
+Configured `ZoneRepository` identity is immutable for one running lifecycle:
+duplicate IDs are rejected at repository construction, demand updates replace
+state by stable `ZoneId`, and reconfiguration stops the complete old runtime
+before constructing a new one. Stop invalidates the owned scheduler generation,
+so confirmation callbacks from the removed lifecycle cannot influence the new
+aggregate. Per-zone live removal semantics are intentionally deferred until a
+serialized configuration-mutation API exists.
+
 ## Zone heat-demand confirmation
 
 Milestone 27 inserts a deterministic core policy between zone hysteresis and
@@ -133,7 +156,9 @@ measurement -> hysteresis -> zone confirmation -> demand arbitrator
 ```
 
 The state machine is `no_heat_required`, `confirmation_pending`,
-`heat_required_confirmed`, `indeterminate`, `stopped`, or `fatal_error`.
+`heat_required_confirmed`, `indeterminate`, `stopped`, or `fatal_error`. State,
+start time, and deadline are keyed by stable zone identity; activity in one zone
+does not reset another zone's interval or hysteresis memory.
 Positive-duration heat demand starts one fresh interval. Repeated identical
 measurements retain its start and deadline. At the deadline the serialized
 runtime reevaluates current hysteresis demand; it never confirms a stored

@@ -37,7 +37,7 @@ from controlel.application.runtime.runtime_processing_result import (
 )
 from controlel.application.services.demand_arbitrator import (
     DemandArbitrator,
-    IdentityDemandArbitrator,
+    MultiZoneDemandArbitrator,
 )
 from controlel.application.services.heat_demand_deadline_calculator import (
     HeatDemandDeadlineCalculator,
@@ -88,7 +88,6 @@ from controlel.application.time.clock import Clock
 from controlel.domain.commands.command_family import CommandFamily
 from controlel.domain.commands.heat_source_command import HeatSourceCommand
 from controlel.domain.commands.heating_action import HeatingAction
-from controlel.domain.demands.building_heat_demand import BuildingHeatDemand
 from controlel.domain.demands.building_heat_demand_status import (
     BuildingHeatDemandStatus,
 )
@@ -99,6 +98,7 @@ from controlel.domain.events.temperature_measured_event import (
 from controlel.domain.measurements.measurement import Measurement
 from controlel.domain.repositories.sensor_repository import SensorRepository
 from controlel.domain.repositories.zone_repository import ZoneRepository
+from controlel.domain.value_objects.zone_id import ZoneId
 
 
 class ControlRuntime:
@@ -136,7 +136,7 @@ class ControlRuntime:
             zone_repository=zone_repository,
             clock=clock,
         )
-        self.demand_arbitrator = demand_arbitrator if demand_arbitrator is not None else IdentityDemandArbitrator()
+        self.demand_arbitrator = demand_arbitrator if demand_arbitrator is not None else MultiZoneDemandArbitrator()
         self.heat_demand_safety_policy = HeatDemandSafetyPolicy(
             grace_period=indeterminate_grace_period,
             timeout_action=indeterminate_timeout_action,
@@ -162,8 +162,14 @@ class ControlRuntime:
         )
         self.temperature_hysteresis_state: TemperatureHysteresisState | None = None
         self.temperature_hysteresis_assessment: TemperatureHysteresisAssessment | None = None
+        self.temperature_hysteresis_states: dict[ZoneId, TemperatureHysteresisState] = {}
+        self.temperature_hysteresis_assessments: dict[ZoneId, TemperatureHysteresisAssessment] = {}
         self.zone_heat_demand_confirmation_state: ZoneHeatDemandConfirmationState | None = None
         self.zone_heat_demand_confirmation_assessment: ZoneHeatDemandConfirmationAssessment | None = None
+        self.zone_heat_demand_confirmation_states: dict[ZoneId, ZoneHeatDemandConfirmationState] = {}
+        self.zone_heat_demand_confirmation_assessments: dict[ZoneId, ZoneHeatDemandConfirmationAssessment] = {}
+        self._zone_confirmation_inputs: dict[ZoneId, BuildingHeatDemandStatus] = {}
+        self._last_processed_zone_id: ZoneId | None = None
         self.source_control_state: SourceControlState | None = None
         self.source_control_assessment: SourceControlAssessment | None = None
         self.target_resolver = ZoneTargetResolver(
@@ -234,9 +240,15 @@ class ControlRuntime:
                     now=self.source_control_state.last_evaluated_at,
                 )
             now = self.clock.now()
-            self.zone_heat_demand_confirmation_state = self.zone_heat_demand_confirmation_policy.stopped_state(
-                self.zone_heat_demand_confirmation_state,
-                now=now,
+            self.zone_heat_demand_confirmation_states = {
+                zone_id: self.zone_heat_demand_confirmation_policy.stopped_state(state, now=now)
+                for zone_id, state in self.zone_heat_demand_confirmation_states.items()
+            }
+            self.zone_heat_demand_confirmation_state = self._representative_confirmation_state(
+                fallback=self.zone_heat_demand_confirmation_policy.stopped_state(
+                    self.zone_heat_demand_confirmation_state,
+                    now=now,
+                )
             )
 
     def fatal_shutdown(
@@ -272,9 +284,15 @@ class ControlRuntime:
                 self.source_control_state,
                 now=requested_at,
             )
-            self.zone_heat_demand_confirmation_state = self.zone_heat_demand_confirmation_policy.fatal_state(
-                self.zone_heat_demand_confirmation_state,
-                now=requested_at,
+            self.zone_heat_demand_confirmation_states = {
+                zone_id: self.zone_heat_demand_confirmation_policy.fatal_state(state, now=requested_at)
+                for zone_id, state in self.zone_heat_demand_confirmation_states.items()
+            }
+            self.zone_heat_demand_confirmation_state = self._representative_confirmation_state(
+                fallback=self.zone_heat_demand_confirmation_policy.fatal_state(
+                    self.zone_heat_demand_confirmation_state,
+                    now=requested_at,
+                )
             )
 
             if original_failed_action is HeatingAction.DISABLE_HEATING:
@@ -364,12 +382,15 @@ class ControlRuntime:
             )
 
         zone = self.target_resolver.resolve(measurement.sensor_id)
+        self._last_processed_zone_id = zone.zone_id
         hysteresis = self.temperature_hysteresis_policy.evaluate(
             current_temperature=measurement.value.value,
             target_temperature=zone.target_temperature.value,
             raw_requires_heat=zone_demand.requires_heat,
-            current_state=self.temperature_hysteresis_state,
+            current_state=self.temperature_hysteresis_states.get(zone.zone_id),
         )
+        self.temperature_hysteresis_states[zone.zone_id] = hysteresis.state
+        self.temperature_hysteresis_assessments[zone.zone_id] = hysteresis
         self.temperature_hysteresis_state = hysteresis.state
         self.temperature_hysteresis_assessment = hysteresis
         self.zone_demand_store.record(
@@ -407,27 +428,84 @@ class ControlRuntime:
         indeterminate_start_hint: datetime | None = None,
     ) -> HeatDemandEvaluationResult:
         aggregate_demand = self.heat_demand_aggregator.evaluate()
-        previous_confirmation_deadline = (
-            self.zone_heat_demand_confirmation_state.confirmation_deadline
-            if self.zone_heat_demand_confirmation_state is not None
-            else None
-        )
-        confirmation_assessment = self.zone_heat_demand_confirmation_policy.evaluate(
-            hysteresis_demand=aggregate_demand.status,
-            now=aggregate_demand.evaluated_at,
-            current_state=self.zone_heat_demand_confirmation_state,
-            deadline_reevaluation=(
+        previous_pending_zone_ids = {
+            zone_id
+            for zone_id, state in self.zone_heat_demand_confirmation_states.items()
+            if state.phase is ZoneHeatDemandConfirmationPhase.CONFIRMATION_PENDING
+        }
+        active_zone_ids = {item.zone_id for item in aggregate_demand.zone_inputs}
+        self.zone_heat_demand_confirmation_states = {
+            zone_id: state
+            for zone_id, state in self.zone_heat_demand_confirmation_states.items()
+            if zone_id in active_zone_ids
+        }
+        self.zone_heat_demand_confirmation_assessments = {
+            zone_id: assessment
+            for zone_id, assessment in self.zone_heat_demand_confirmation_assessments.items()
+            if zone_id in active_zone_ids
+        }
+        self._zone_confirmation_inputs = {
+            zone_id: demand for zone_id, demand in self._zone_confirmation_inputs.items() if zone_id in active_zone_ids
+        }
+        confirmation_assessments = dict(self.zone_heat_demand_confirmation_assessments)
+        evaluated_zone_ids: list[ZoneId] = []
+        confirmed_inputs = []
+        for zone_input in aggregate_demand.zone_inputs:
+            current_state = self.zone_heat_demand_confirmation_states.get(zone_input.zone_id)
+            deadline_reevaluation = (
                 trigger is HeatDemandEvaluationTrigger.SCHEDULED
-                and self.zone_heat_demand_confirmation_state is not None
-                and self.zone_heat_demand_confirmation_state.confirmation_deadline == scheduled_for
-            ),
+                and current_state is not None
+                and current_state.confirmation_deadline == scheduled_for
+            )
+            input_changed = self._zone_confirmation_inputs.get(zone_input.zone_id) is not zone_input.demand
+            current_zone_event = (
+                trigger is HeatDemandEvaluationTrigger.ACTIONABLE_DECISION
+                and zone_input.zone_id == self._last_processed_zone_id
+            )
+            if (
+                current_state is None
+                or input_changed
+                or deadline_reevaluation
+                or current_zone_event
+                or trigger in {HeatDemandEvaluationTrigger.STARTUP, HeatDemandEvaluationTrigger.MANUAL}
+            ):
+                assessment = self.zone_heat_demand_confirmation_policy.evaluate(
+                    hysteresis_demand=zone_input.demand,
+                    now=aggregate_demand.evaluated_at,
+                    current_state=current_state,
+                    deadline_reevaluation=deadline_reevaluation,
+                )
+                self.zone_heat_demand_confirmation_states[zone_input.zone_id] = assessment.state
+                confirmation_assessments[zone_input.zone_id] = assessment
+                evaluated_zone_ids.append(zone_input.zone_id)
+            else:
+                assessment = confirmation_assessments[zone_input.zone_id]
+            self._zone_confirmation_inputs[zone_input.zone_id] = zone_input.demand
+            confirmed_inputs.append(
+                zone_input.model_copy(
+                    update={
+                        "demand": assessment.output_demand,
+                        "preserves_confirmed_heat": (
+                            assessment.output_demand is BuildingHeatDemandStatus.INDETERMINATE
+                            and assessment.state.confirmed_demand is BuildingHeatDemandStatus.HEAT_REQUIRED
+                        ),
+                    }
+                )
+            )
+        self.zone_heat_demand_confirmation_assessments = confirmation_assessments
+        representative_zone_id = self._representative_zone_id(
+            tuple(evaluated_zone_ids) or tuple(confirmation_assessments),
+            scheduled_for=scheduled_for,
         )
-        self.zone_heat_demand_confirmation_state = confirmation_assessment.state
+        confirmation_assessment = (
+            confirmation_assessments.get(representative_zone_id) if representative_zone_id is not None else None
+        )
         self.zone_heat_demand_confirmation_assessment = confirmation_assessment
-        confirmed_aggregate_demand = _with_confirmed_zone_demand(
-            aggregate_demand,
-            confirmation_assessment.output_demand,
+        self.zone_heat_demand_confirmation_state = (
+            confirmation_assessment.state if confirmation_assessment is not None else None
         )
+        confirmed_aggregate_demand = aggregate_demand.model_copy(update={"zone_inputs": tuple(confirmed_inputs)})
+        confirmed_aggregate_demand = MultiZoneDemandArbitrator().resolve(confirmed_aggregate_demand)
         building_heat_demand = self.demand_arbitrator.resolve(confirmed_aggregate_demand)
         safety_assessment = self.heat_demand_safety_policy.evaluate(
             demand=building_heat_demand,
@@ -437,11 +515,18 @@ class ControlRuntime:
         self.heat_demand_safety_state_store.save(safety_assessment.state)
 
         eligibility_deadline = self.heat_demand_deadline_calculator.next_eligibility_change_at(building_heat_demand)
-        confirmation_deadline = confirmation_assessment.state.confirmation_deadline
-        confirmation_callback_invalidated = (
-            previous_confirmation_deadline is not None
-            and confirmation_assessment.state.phase is not ZoneHeatDemandConfirmationPhase.CONFIRMATION_PENDING
-        )
+        confirmation_deadlines = [
+            state.confirmation_deadline
+            for state in self.zone_heat_demand_confirmation_states.values()
+            if state.confirmation_deadline is not None
+        ]
+        confirmation_deadline = min(confirmation_deadlines) if confirmation_deadlines else None
+        current_pending_zone_ids = {
+            zone_id
+            for zone_id, state in self.zone_heat_demand_confirmation_states.items()
+            if state.phase is ZoneHeatDemandConfirmationPhase.CONFIRMATION_PENDING
+        }
+        confirmation_callback_invalidated = bool(previous_pending_zone_ids - current_pending_zone_ids)
         grace_deadline = (
             safety_assessment.timeout_at
             if safety_assessment.phase is HeatDemandSafetyPhase.INDETERMINATE_GRACE
@@ -572,6 +657,38 @@ class ControlRuntime:
             source_control_assessment=source_assessment,
         )
 
+    def _representative_zone_id(
+        self,
+        zone_ids: tuple[ZoneId, ...],
+        *,
+        scheduled_for: datetime | None,
+    ) -> ZoneId | None:
+        if scheduled_for is not None:
+            matching = sorted(
+                (
+                    zone_id
+                    for zone_id in zone_ids
+                    if self.zone_heat_demand_confirmation_states[zone_id].confirmation_deadline == scheduled_for
+                ),
+                key=lambda zone_id: zone_id.value,
+            )
+            if matching:
+                return matching[0]
+        if self._last_processed_zone_id in zone_ids:
+            return self._last_processed_zone_id
+        return min(zone_ids, key=lambda zone_id: zone_id.value) if zone_ids else None
+
+    def _representative_confirmation_state(
+        self,
+        *,
+        fallback: ZoneHeatDemandConfirmationState,
+    ) -> ZoneHeatDemandConfirmationState:
+        zone_id = self._representative_zone_id(
+            tuple(self.zone_heat_demand_confirmation_states),
+            scheduled_for=None,
+        )
+        return self.zone_heat_demand_confirmation_states.get(zone_id, fallback)
+
     def _replace_scheduled_evaluation(
         self,
         deadline: datetime | None,
@@ -658,21 +775,3 @@ class ControlRuntime:
             scheduled_for=scheduled_for,
             indeterminate_start_hint=scheduled_for,
         )
-
-
-def _with_confirmed_zone_demand(
-    aggregate_demand: BuildingHeatDemand,
-    status: BuildingHeatDemandStatus,
-) -> BuildingHeatDemand:
-    if status is BuildingHeatDemandStatus.INDETERMINATE:
-        return aggregate_demand.model_copy(update={"status": status})
-    requires_heat = status is BuildingHeatDemandStatus.HEAT_REQUIRED
-    eligible_demands = tuple(
-        demand.model_copy(update={"requires_heat": requires_heat}) for demand in aggregate_demand.eligible_demands
-    )
-    return aggregate_demand.model_copy(
-        update={
-            "status": status,
-            "eligible_demands": eligible_demands,
-        }
-    )

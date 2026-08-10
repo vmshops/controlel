@@ -12,6 +12,7 @@ from controlel.application.runtime.runtime_processing_result import (
     RuntimeProcessingStatus,
     TemperatureNoDecisionReason,
 )
+from controlel.application.services.demand_arbitrator import IdentityDemandArbitrator
 from controlel.application.services.heat_demand_safety_policy import (
     HeatDemandClockRegressionError,
 )
@@ -186,6 +187,69 @@ class ForceNoHeatArbitrator:
     def resolve(self, aggregate_demand):
         self.received.append(aggregate_demand)
         return aggregate_demand.model_copy(update={"status": BuildingHeatDemandStatus.NO_HEAT_REQUIRED})
+
+
+def test_single_zone_runtime_is_differentially_equivalent_to_frozen_identity_seam() -> None:
+    def exercise(demand_arbitrator=None):
+        runtime, clock, scheduler, port = create_runtime(
+            confirmation_duration=timedelta(minutes=2),
+            demand_arbitrator=demand_arbitrator,
+        )
+        first = runtime.process_temperature(measurement(19))
+        clock.current_time = NOW + timedelta(minutes=1)
+        repeated = runtime.process_temperature(measurement(19, timestamp=clock.current_time))
+        confirmation_deadline = runtime.zone_heat_demand_confirmation_state.confirmation_deadline
+        clock.current_time = confirmation_deadline
+        next(task for task in scheduler.active if task.when == confirmation_deadline).invoke()
+        clock.current_time += timedelta(seconds=1)
+        cleared = runtime.process_temperature(measurement(23, timestamp=clock.current_time))
+        return (
+            (first.status, repeated.status, cleared.status),
+            tuple(command.action for command in port.commands),
+            confirmation_deadline,
+            runtime.source_control_state,
+        )
+
+    assert exercise() == exercise(IdentityDemandArbitrator())
+
+
+def test_single_zone_source_timing_safety_and_deferred_state_match_identity_seam() -> None:
+    def exercise(demand_arbitrator=None):
+        runtime, clock, scheduler, port = create_runtime(
+            minimum_on=timedelta(minutes=2),
+            minimum_off=timedelta(minutes=2),
+            demand_arbitrator=demand_arbitrator,
+        )
+        initial = runtime.process_temperature(measurement(23))
+        clock.current_time = NOW + timedelta(minutes=1)
+        deferred_enable = runtime.process_temperature(measurement(19, timestamp=clock.current_time))
+        enable_deadline = runtime.source_control_state.deferred_deadline
+        clock.current_time = enable_deadline
+        next(task for task in scheduler.active if task.when == enable_deadline).invoke()
+        clock.current_time = NOW + timedelta(minutes=3)
+        deferred_disable = runtime.process_temperature(measurement(23, timestamp=clock.current_time))
+        disable_deadline = runtime.source_control_state.deferred_deadline
+        clock.current_time = disable_deadline
+        next(task for task in scheduler.active if task.when == disable_deadline).invoke()
+
+        safety_runtime, safety_clock, _, safety_port = create_runtime(
+            grace=timedelta(0),
+            demand_arbitrator=demand_arbitrator,
+        )
+        safety_runtime.process_temperature(measurement(19))
+        safety_clock.current_time = NOW + MAX_AGE + datetime.resolution
+        safety = safety_runtime.reevaluate_heat_demand()
+        return (
+            (initial.status, deferred_enable.status, deferred_disable.status),
+            (enable_deadline, disable_deadline),
+            tuple(command.action for command in port.commands),
+            runtime.source_control_state,
+            safety.status,
+            tuple(command.action for command in safety_port.commands),
+            safety_runtime.source_control_state,
+        )
+
+    assert exercise() == exercise(IdentityDemandArbitrator())
 
 
 def measurement(
@@ -634,7 +698,7 @@ def test_all_fresh_false_disables_but_false_expiry_becomes_indeterminate():
     result = runtime.process_temperature(
         measurement(23, sensor="bedroom_temperature"),
     )
-    assert result.status is RuntimeProcessingStatus.COMMAND_EXECUTED
+    assert result.status is RuntimeProcessingStatus.COMMAND_SUPPRESSED
     assert port.commands[-1].action is HeatingAction.DISABLE_HEATING
 
     expiry_task = scheduler.active[0]
@@ -673,7 +737,7 @@ def test_sensor_recovery_after_safety_disable_enables_source():
     ]
 
 
-def test_actionable_timed_out_uncertainty_maps_safety_execution_and_suppression():
+def test_valid_no_heat_ends_startup_uncertainty_even_with_other_zone_missing():
     runtime, clock, _, port = create_runtime(
         zone_names=("living_room", "bedroom"),
     )
@@ -684,10 +748,10 @@ def test_actionable_timed_out_uncertainty_maps_safety_execution_and_suppression(
     first = runtime.process_temperature(current)
     second = runtime.process_temperature(current)
 
-    assert first.status is RuntimeProcessingStatus.SAFETY_COMMAND_EXECUTED
-    assert first.heat_demand_evaluation.status is HeatDemandEvaluationStatus.SAFETY_COMMAND_EXECUTED
-    assert second.status is RuntimeProcessingStatus.SAFETY_COMMAND_SUPPRESSED
-    assert second.heat_demand_evaluation.status is HeatDemandEvaluationStatus.SAFETY_COMMAND_SUPPRESSED
+    assert first.status is RuntimeProcessingStatus.COMMAND_EXECUTED
+    assert first.heat_demand_evaluation.status is HeatDemandEvaluationStatus.DEMAND_COMMAND_EXECUTED
+    assert second.status is RuntimeProcessingStatus.COMMAND_SUPPRESSED
+    assert second.heat_demand_evaluation.status is HeatDemandEvaluationStatus.DEMAND_COMMAND_SUPPRESSED
     assert [command.action for command in port.commands] == [HeatingAction.DISABLE_HEATING]
 
 
@@ -834,6 +898,147 @@ def test_runtime_cancels_deferred_transition_and_rejects_stale_callback():
     assert stale_task.cancelled is True
     assert runtime.source_control_state.deferred_command is None
     assert port.commands == commands_before
+
+
+def test_two_zones_keep_independent_confirmation_deadlines_and_cancellation() -> None:
+    runtime, clock, scheduler, port = create_runtime(
+        zone_names=("zone_a", "zone_b"),
+        confirmation_duration=timedelta(minutes=2),
+    )
+    runtime.process_temperature(measurement(19, sensor="zone_a_temperature"))
+    zone_a = ZoneId(value="zone_a")
+    zone_b = ZoneId(value="zone_b")
+    a_deadline = runtime.zone_heat_demand_confirmation_states[zone_a].confirmation_deadline
+    a_confirmation_state = runtime.zone_heat_demand_confirmation_states[zone_a]
+    a_started_at = runtime.zone_heat_demand_confirmation_states[zone_a].confirmation_started_at
+    a_hysteresis = runtime.temperature_hysteresis_states[zone_a]
+    source_disable_at = runtime.source_control_state.last_successful_disable_dispatch
+    source_enable_boundary = runtime.source_control_state.earliest_next_enable_time
+    schedule_generation = runtime._schedule_generation
+
+    clock.current_time = NOW + timedelta(seconds=30)
+    runtime.process_temperature(measurement(19, sensor="zone_b_temperature", timestamp=clock.current_time))
+
+    assert runtime.zone_heat_demand_confirmation_states[zone_a].confirmation_deadline == a_deadline
+    assert runtime.zone_heat_demand_confirmation_states[zone_a].confirmation_started_at == a_started_at
+    assert runtime.zone_heat_demand_confirmation_states[zone_a] is a_confirmation_state
+    assert runtime.temperature_hysteresis_states[zone_a] is a_hysteresis
+    assert runtime.source_control_state.last_successful_disable_dispatch == source_disable_at
+    assert runtime.source_control_state.earliest_next_enable_time == source_enable_boundary
+    assert runtime._schedule_generation == schedule_generation
+    assert runtime.zone_heat_demand_confirmation_states[zone_b].confirmation_deadline == (
+        clock.current_time + timedelta(minutes=2)
+    )
+
+    clock.current_time = a_deadline
+    scheduler.active[0].invoke()
+    assert runtime.zone_heat_demand_confirmation_states[zone_a].phase.value == "heat_required_confirmed"
+    assert runtime.zone_heat_demand_confirmation_states[zone_b].phase.value == "confirmation_pending"
+    assert [command.action for command in port.commands] == [
+        HeatingAction.DISABLE_HEATING,
+        HeatingAction.ENABLE_HEATING,
+    ]
+
+    clock.current_time += timedelta(seconds=1)
+    cancelled = runtime.process_temperature(measurement(23, sensor="zone_b_temperature", timestamp=clock.current_time))
+    assert cancelled.heat_demand_evaluation.building_heat_demand.status is (BuildingHeatDemandStatus.HEAT_REQUIRED)
+    assert runtime.zone_heat_demand_confirmation_states[zone_b].phase.value == "no_heat_required"
+    assert len(port.commands) == 2
+
+
+def test_multi_zone_stale_confirmation_callback_cannot_resurrect_demand() -> None:
+    runtime, clock, scheduler, port = create_runtime(
+        zone_names=("zone_a", "zone_b"),
+        confirmation_duration=timedelta(minutes=2),
+    )
+    runtime.process_temperature(measurement(19, sensor="zone_a_temperature"))
+    stale = scheduler.active[0]
+    clock.current_time = NOW + timedelta(seconds=30)
+    runtime.process_temperature(measurement(19, sensor="zone_b_temperature", timestamp=clock.current_time))
+    clock.current_time += timedelta(seconds=1)
+    runtime.process_temperature(measurement(23, sensor="zone_a_temperature", timestamp=clock.current_time))
+    commands_before = list(port.commands)
+    clock.current_time = stale.when
+    stale.invoke()
+
+    assert stale.cancelled is True
+    assert port.commands == commands_before
+    assert runtime.zone_heat_demand_confirmation_states[ZoneId(value="zone_a")].phase.value == ("no_heat_required")
+
+
+def test_multi_zone_deferred_enable_survives_requesting_zone_change() -> None:
+    runtime, clock, scheduler, port = create_runtime(
+        zone_names=("zone_a", "zone_b"),
+        minimum_off=timedelta(minutes=5),
+    )
+    runtime.process_temperature(measurement(23, sensor="zone_a_temperature"))
+    runtime.process_temperature(measurement(23, sensor="zone_b_temperature"))
+    clock.current_time = NOW + timedelta(minutes=1)
+    runtime.process_temperature(measurement(19, sensor="zone_a_temperature", timestamp=clock.current_time))
+    deferred_since = runtime.source_control_state.deferred_since
+    deferred_deadline = runtime.source_control_state.deferred_deadline
+    successful_disable_at = runtime.source_control_state.last_successful_disable_dispatch
+    schedule_generation = runtime._schedule_generation
+    clock.current_time += timedelta(minutes=1)
+    runtime.process_temperature(measurement(19, sensor="zone_b_temperature", timestamp=clock.current_time))
+    clock.current_time += timedelta(minutes=1)
+    runtime.process_temperature(measurement(23, sensor="zone_a_temperature", timestamp=clock.current_time))
+
+    assert runtime.source_control_state.deferred_command is HeatingAction.ENABLE_HEATING
+    assert runtime.source_control_state.deferred_since == deferred_since
+    assert runtime.source_control_state.deferred_deadline == deferred_deadline
+    assert runtime.source_control_state.last_successful_disable_dispatch == successful_disable_at
+    assert runtime._schedule_generation == schedule_generation
+    assert [command.action for command in port.commands] == [HeatingAction.DISABLE_HEATING]
+    deadline = runtime.source_control_state.next_reevaluation_deadline
+    clock.current_time = deadline
+    next(task for task in scheduler.active if task.when == deadline).invoke()
+    assert [command.action for command in port.commands] == [
+        HeatingAction.DISABLE_HEATING,
+        HeatingAction.ENABLE_HEATING,
+    ]
+
+
+def test_multi_zone_deferred_enable_cancels_when_all_requests_clear() -> None:
+    runtime, clock, scheduler, port = create_runtime(
+        zone_names=("zone_a", "zone_b"),
+        minimum_off=timedelta(minutes=5),
+    )
+    runtime.process_temperature(measurement(23, sensor="zone_a_temperature"))
+    clock.current_time = NOW + timedelta(minutes=1)
+    runtime.process_temperature(measurement(19, sensor="zone_a_temperature", timestamp=clock.current_time))
+    stale = next(task for task in scheduler.active if task.when == NOW + timedelta(minutes=5))
+    clock.current_time += timedelta(minutes=1)
+    runtime.process_temperature(measurement(23, sensor="zone_a_temperature", timestamp=clock.current_time))
+
+    assert runtime.source_control_state.deferred_command is None
+    commands_before = list(port.commands)
+    clock.current_time = stale.when
+    stale.invoke()
+    assert port.commands == commands_before
+
+
+def test_multi_zone_minimum_on_applies_only_when_final_request_clears() -> None:
+    runtime, clock, scheduler, port = create_runtime(
+        zone_names=("zone_a", "zone_b"),
+        minimum_on=timedelta(minutes=5),
+    )
+    runtime.process_temperature(measurement(19, sensor="zone_a_temperature"))
+    runtime.process_temperature(measurement(19, sensor="zone_b_temperature"))
+    clock.current_time = NOW + timedelta(minutes=1)
+    runtime.process_temperature(measurement(23, sensor="zone_a_temperature", timestamp=clock.current_time))
+    final = runtime.process_temperature(measurement(23, sensor="zone_b_temperature", timestamp=clock.current_time))
+
+    assert final.status is RuntimeProcessingStatus.COMMAND_DEFERRED
+    assert runtime.source_control_state.deferred_command is HeatingAction.DISABLE_HEATING
+    assert [command.action for command in port.commands] == [HeatingAction.ENABLE_HEATING]
+    deadline = runtime.source_control_state.next_reevaluation_deadline
+    clock.current_time = deadline
+    next(task for task in scheduler.active if task.when == deadline).invoke()
+    assert [command.action for command in port.commands] == [
+        HeatingAction.ENABLE_HEATING,
+        HeatingAction.DISABLE_HEATING,
+    ]
 
 
 def test_runtime_safety_disable_bypasses_minimum_on_lockout():

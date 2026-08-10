@@ -22,13 +22,14 @@ The goal is to create a reliable heating controller capable of optimizing comfor
 
 Project phase: Home Assistant one-zone host vertical slice
 
-Core package version: 0.4.0 (published and immutable)
+Core package candidate version: 0.5.0 (unpublished)
 
 Home Assistant integration candidate version: 0.7.0
 
 Use the latest published release for HACS custom-repository installation.
-Core `0.4.0` is published and immutable. Milestone 28 Phase C prepares
-integration `0.7.0`, whose manifest pins exactly `controlel==0.4.0`.
+Core `0.4.0` is published and immutable. Milestone 29 Phase A prepares core
+`0.5.0`; integration `0.7.0` remains pinned exactly to `controlel==0.4.0`
+until the new core has been separately published and verified.
 Integration `0.7.0` remains an unpublished candidate.
 Controlel is not listed in the default HACS store.
 
@@ -64,6 +65,12 @@ advanced mode preserves separate enable and disable service calls. Options
 updates fully unload and rebuild the runtime. It uses a dedicated single-worker
 executor for every synchronous `ControlRuntime` operation. No core method runs
 on Home Assistant's event-loop thread.
+
+The core runtime now supports deterministic multi-zone demand composition ahead
+of a future Home Assistant multi-zone configuration UI. Hysteresis and demand
+confirmation remain zone-local; a simple unweighted any-zone rule produces one
+building demand for the unchanged shared-source protection and dispatch path.
+Source minimum-time configuration is therefore not duplicated per zone.
 
 New entries default to asymmetric hysteresis of 0.3 Â°C below and 0.1 Â°C above
 the target, a two-minute heat-demand confirmation interval, plus command-based
@@ -122,7 +129,8 @@ has not been published and no default-store publication exists.
 ## Core package artifacts
 
 The reusable core is published as the `controlel` distribution and import
-package at version `0.4.0`. Its static version source and PEP 517 build
+package at version `0.4.0`; this source tree prepares candidate `0.5.0`. Its
+static version source and PEP 517 build
 configuration live in `pyproject.toml`; normal installation depends only on
 Pydantic. Packaging validation builds one wheel and one sdist, inspects their
 contents, and installs the wheel into a clean environment outside the checkout.
@@ -136,8 +144,9 @@ the published release record, build validation, and version separation.
 
 ## Zone heat-demand confirmation
 
-Core `0.3.0` inserts a zone-owned confirmation policy after hysteresis
-and before `IdentityDemandArbitrator`. Positive-duration heat demand must remain
+Core `0.3.0` inserts a zone-owned confirmation policy after hysteresis.
+Milestone 29 keys that state independently per zone and places deterministic
+building aggregation immediately afterward. Positive-duration heat demand must remain
 continuous until its deadline; the deadline reevaluates current hysteresis
 demand rather than replaying stored state. No-heat demand clears immediately.
 Invalid, unavailable, stale, or future-dated input cancels a pending interval,

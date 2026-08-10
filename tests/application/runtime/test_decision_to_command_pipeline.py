@@ -192,18 +192,17 @@ def test_single_zone_action_executes_shared_source_command_with_exact_provenance
     assert demand.source_sensor_id is measurement.sensor_id
 
 
-def test_first_false_with_other_zone_missing_is_indeterminate_without_source_action():
+def test_first_false_with_other_zone_missing_establishes_no_heat():
     port = RecordingHeatSource()
     runtime = create_runtime(port, ("living_room", "bedroom"))
 
     result = runtime.process_temperature(create_measurement(23))
 
-    assert result.status is RuntimeProcessingStatus.BUILDING_HEAT_DEMAND_INDETERMINATE
+    assert result.status is RuntimeProcessingStatus.COMMAND_EXECUTED
     evaluation = result.heat_demand_evaluation
     assert evaluation.building_heat_demand.missing_zone_ids == (ZoneId(value="bedroom"),)
-    assert evaluation.command is None
-    assert port.commands == []
-    assert runtime.heat_source_state_store.get() is None
+    assert evaluation.command.action is HeatingAction.DISABLE_HEATING
+    assert [command.action for command in port.commands] == [HeatingAction.DISABLE_HEATING]
 
 
 def test_first_true_with_other_zone_missing_enables_source():
@@ -266,18 +265,16 @@ def test_all_zones_fresh_false_explicitly_disables_source():
     first = runtime.process_temperature(create_measurement(23))
     second = runtime.process_temperature(create_measurement(23, sensor_id="bedroom_temperature"))
 
-    assert first.status is RuntimeProcessingStatus.BUILDING_HEAT_DEMAND_INDETERMINATE
-    assert second.status is RuntimeProcessingStatus.COMMAND_EXECUTED
+    assert first.status is RuntimeProcessingStatus.COMMAND_EXECUTED
+    assert second.status is RuntimeProcessingStatus.COMMAND_SUPPRESSED
     assert second.heat_demand_evaluation.command.action is HeatingAction.DISABLE_HEATING
 
 
-@pytest.mark.parametrize("expired_requires_heat", [True, False])
-def test_expired_demand_prevents_disable(expired_requires_heat):
+def test_expired_confirmed_heat_prevents_disable():
     clock = MutableClock()
     port = RecordingHeatSource()
     runtime = create_runtime(port, ("living_room", "bedroom"), clock)
-    first_value = 19 if expired_requires_heat else 23
-    runtime.process_temperature(create_measurement(first_value))
+    runtime.process_temperature(create_measurement(19))
     clock.current_time = NOW + MAX_AGE + timedelta(seconds=1)
 
     result = runtime.process_temperature(
@@ -292,6 +289,21 @@ def test_expired_demand_prevents_disable(expired_requires_heat):
     assert result.heat_demand_evaluation.building_heat_demand.expired_zone_ids == (ZoneId(value="living_room"),)
     assert result.heat_demand_evaluation.command is None
     assert all(command.action is not HeatingAction.DISABLE_HEATING for command in port.commands)
+
+
+def test_expired_no_heat_plus_fresh_no_heat_remains_no_heat():
+    clock = MutableClock()
+    port = RecordingHeatSource()
+    runtime = create_runtime(port, ("living_room", "bedroom"), clock)
+    runtime.process_temperature(create_measurement(23))
+    clock.current_time = NOW + MAX_AGE + timedelta(seconds=1)
+
+    result = runtime.process_temperature(
+        create_measurement(23, sensor_id="bedroom_temperature", timestamp=clock.current_time)
+    )
+
+    assert result.status is RuntimeProcessingStatus.COMMAND_SUPPRESSED
+    assert result.heat_demand_evaluation.building_heat_demand.status is (BuildingHeatDemandStatus.NO_HEAT_REQUIRED)
 
 
 def test_fresh_true_overrides_expired_uncertainty():
