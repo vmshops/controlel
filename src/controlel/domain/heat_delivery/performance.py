@@ -135,6 +135,7 @@ class HeatingPerformanceAssessment:
     episode_ended_at: datetime
     assessed_at: datetime
     status: HeatingPerformanceAssessmentStatus
+    criteria: HeatingPerformanceAssessmentCriteria
     temperature_response: ObservedTemperatureResponse | None
     evidence: HeatingPerformanceEvidenceSummary
     reasons: tuple[HeatingPerformanceAssessmentReason, ...]

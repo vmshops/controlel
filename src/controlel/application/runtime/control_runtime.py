@@ -50,6 +50,7 @@ from controlel.application.services.heat_source_command_dispatcher import (
     HeatSourceCommandDispatcher,
 )
 from controlel.application.services.heating_episode_observer import (
+    HeatingEpisodeObservationErrorEvidence,
     HeatingEpisodeObserver,
     heat_delivery_observation_from_state,
     heat_source_observation_from_state,
@@ -150,6 +151,8 @@ class ControlRuntime:
         self.heating_episode_observer = HeatingEpisodeObserver()
         self.heating_episode_observation_error: str | None = None
         self.heating_episode_observation_errors: dict[ZoneId, str] = {}
+        self.heating_episode_observation_error_evidence: dict[ZoneId, HeatingEpisodeObservationErrorEvidence] = {}
+        self.heating_episode_observation_global_error_evidence: HeatingEpisodeObservationErrorEvidence | None = None
         self.heating_performance_monitor = ShadowHeatingPerformanceMonitor()
         self.zone_demand_store = ZoneDemandStore()
         self.heat_demand_safety_state_store = HeatDemandSafetyStateStore()
@@ -728,9 +731,16 @@ class ControlRuntime:
         except Exception as error:
             self.heating_episode_observation_errors = {}
             self.heating_episode_observation_error = f"{type(error).__name__}: {error}"
+            self.heating_episode_observation_error_evidence = {}
+            self.heating_episode_observation_global_error_evidence = HeatingEpisodeObservationErrorEvidence(
+                zone_id=None,
+                evidence_at=captured_at,
+                exception_type=type(error).__name__,
+            )
             return
 
         errors: dict[ZoneId, str] = {}
+        error_evidence: dict[ZoneId, HeatingEpisodeObservationErrorEvidence] = {}
         for zone_input in zone_inputs:
             try:
                 zone = self.zone_repository.get(zone_input.zone_id)
@@ -760,8 +770,15 @@ class ControlRuntime:
                     self.heating_performance_monitor.submit_episode(episode)
             except Exception as error:
                 errors[zone_input.zone_id] = f"{type(error).__name__}: {error}"
+                error_evidence[zone_input.zone_id] = HeatingEpisodeObservationErrorEvidence(
+                    zone_id=zone_input.zone_id,
+                    evidence_at=captured_at,
+                    exception_type=type(error).__name__,
+                )
 
         self.heating_episode_observation_errors = errors
+        self.heating_episode_observation_error_evidence = error_evidence
+        self.heating_episode_observation_global_error_evidence = None
         self.heating_episode_observation_error = (
             "; ".join(
                 f"{zone_id.value}: {error}" for zone_id, error in sorted(errors.items(), key=lambda item: item[0].value)
@@ -782,8 +799,14 @@ class ControlRuntime:
             )
             for episode in episodes:
                 self.heating_performance_monitor.submit_episode(episode)
+            self.heating_episode_observation_global_error_evidence = None
         except Exception as error:
             self.heating_episode_observation_error = f"{type(error).__name__}: {error}"
+            self.heating_episode_observation_global_error_evidence = HeatingEpisodeObservationErrorEvidence(
+                zone_id=None,
+                evidence_at=ended_at,
+                exception_type=type(error).__name__,
+            )
 
     @staticmethod
     def _zone_temperature_observation(

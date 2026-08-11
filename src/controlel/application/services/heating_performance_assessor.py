@@ -124,6 +124,7 @@ class HeatingPerformanceAssessor:
             episode_ended_at=episode.ended_at,
             assessed_at=episode.ended_at,
             status=status,
+            criteria=self.criteria,
             temperature_response=response,
             evidence=HeatingPerformanceEvidenceSummary(
                 total_sample_count=episode.total_sample_count,

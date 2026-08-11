@@ -12,6 +12,8 @@ from controlel.domain.value_objects.zone_id import ZoneId
 
 from .heating_performance_assessor import HeatingPerformanceAssessor
 
+MAX_RETAINED_HEATING_PERFORMANCE_ASSESSMENTS = 20
+
 
 class EpisodeAssessor(Protocol):
     def assess(self, episode: HeatingEpisode) -> HeatingPerformanceAssessment: ...
@@ -29,6 +31,25 @@ class DroppedPendingAssessmentEvidence:
     reason: PendingAssessmentDropReason
 
 
+@dataclass(frozen=True)
+class ShadowAssessmentErrorEvidence:
+    zone_id: ZoneId
+    episode_started_at: datetime
+    episode_ended_at: datetime
+    exception_type: str
+
+
+@dataclass(frozen=True)
+class ShadowPerformanceMonitorSnapshot:
+    enabled: bool
+    pending_assessment_count: int
+    assessments: tuple[HeatingPerformanceAssessment, ...]
+    assessment_capacity: int
+    dropped_pending_assessment_count: int
+    latest_drop: DroppedPendingAssessmentEvidence | None
+    errors: tuple[ShadowAssessmentErrorEvidence, ...]
+
+
 class ShadowHeatingPerformanceMonitor:
     """Assess completed episodes without exposing any control output."""
 
@@ -36,12 +57,14 @@ class ShadowHeatingPerformanceMonitor:
         self,
         *,
         enabled: bool = True,
-        max_assessments: int = 20,
+        max_assessments: int = MAX_RETAINED_HEATING_PERFORMANCE_ASSESSMENTS,
         max_pending_episodes: int = 20,
         assessor: EpisodeAssessor | None = None,
     ) -> None:
         if max_assessments <= 0:
             raise ValueError("max_assessments must be positive")
+        if max_assessments > MAX_RETAINED_HEATING_PERFORMANCE_ASSESSMENTS:
+            raise ValueError(f"max_assessments must not exceed {MAX_RETAINED_HEATING_PERFORMANCE_ASSESSMENTS}")
         if max_pending_episodes <= 0:
             raise ValueError("max_pending_episodes must be positive")
         self.enabled = enabled
@@ -50,6 +73,7 @@ class ShadowHeatingPerformanceMonitor:
         self._pending: deque[HeatingEpisode] = deque()
         self._assessments: deque[HeatingPerformanceAssessment] = deque(maxlen=max_assessments)
         self._errors: dict[ZoneId, str] = {}
+        self._error_evidence: dict[ZoneId, ShadowAssessmentErrorEvidence] = {}
         self._dropped_pending_assessment_count = 0
         self._last_dropped_pending_assessment: DroppedPendingAssessmentEvidence | None = None
         self._lock = Lock()
@@ -87,9 +111,16 @@ class ShadowHeatingPerformanceMonitor:
                 except Exception as error:
                     with self._lock:
                         self._errors[episode.zone_id] = f"{type(error).__name__}: {error}"
+                        self._error_evidence[episode.zone_id] = ShadowAssessmentErrorEvidence(
+                            zone_id=episode.zone_id,
+                            episode_started_at=episode.started_at,
+                            episode_ended_at=episode.ended_at,
+                            exception_type=type(error).__name__,
+                        )
                     continue
                 with self._lock:
                     self._errors.pop(episode.zone_id, None)
+                    self._error_evidence.pop(episode.zone_id, None)
                     self._assessments.append(assessment)
                 completed.append(assessment)
 
@@ -104,9 +135,26 @@ class ShadowHeatingPerformanceMonitor:
             return dict(self._errors)
 
     @property
+    def error_evidence(self) -> tuple[ShadowAssessmentErrorEvidence, ...]:
+        with self._lock:
+            return tuple(
+                self._error_evidence[zone_id] for zone_id in sorted(self._error_evidence, key=lambda item: item.value)
+            )
+
+    @property
     def pending_episode_count(self) -> int:
         with self._lock:
             return len(self._pending)
+
+    @property
+    def retained_assessment_count(self) -> int:
+        with self._lock:
+            return len(self._assessments)
+
+    @property
+    def assessment_capacity(self) -> int:
+        with self._lock:
+            return self._assessments.maxlen or 0
 
     @property
     def dropped_pending_assessment_count(self) -> int:
@@ -117,3 +165,20 @@ class ShadowHeatingPerformanceMonitor:
     def last_dropped_pending_assessment(self) -> DroppedPendingAssessmentEvidence | None:
         with self._lock:
             return self._last_dropped_pending_assessment
+
+    def diagnostic_snapshot(self) -> ShadowPerformanceMonitorSnapshot:
+        """Capture one consistent, immutable, read-only monitor view."""
+
+        with self._lock:
+            return ShadowPerformanceMonitorSnapshot(
+                enabled=self.enabled,
+                pending_assessment_count=len(self._pending),
+                assessments=tuple(self._assessments),
+                assessment_capacity=self._assessments.maxlen or 0,
+                dropped_pending_assessment_count=self._dropped_pending_assessment_count,
+                latest_drop=self._last_dropped_pending_assessment,
+                errors=tuple(
+                    self._error_evidence[zone_id]
+                    for zone_id in sorted(self._error_evidence, key=lambda item: item.value)
+                ),
+            )
