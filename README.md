@@ -22,15 +22,13 @@ The goal is to create a reliable heating controller capable of optimizing comfor
 
 Project phase: Home Assistant one-zone host vertical slice
 
-Core package candidate version: 0.5.0 (unpublished)
+Core package version: 0.5.0 (published)
 
-Home Assistant integration candidate version: 0.7.0
+Home Assistant integration candidate version: 0.8.0
 
 Use the latest published release for HACS custom-repository installation.
-Core `0.4.0` is published and immutable. Milestone 29 Phase A prepares core
-`0.5.0`; integration `0.7.0` remains pinned exactly to `controlel==0.4.0`
-until the new core has been separately published and verified.
-Integration `0.7.0` remains an unpublished candidate.
+Core `0.5.0` is published and immutable. Integration `0.8.0` pins exactly to
+`controlel==0.5.0` and remains an unpublished candidate.
 Controlel is not listed in the default HACS store.
 
 ## Home Assistant installation
@@ -46,7 +44,7 @@ installation flow is:
    **Controlel**.
 
 The integration manifest makes Home Assistant install the exact public core
-dependency `controlel==0.4.0`; users must not install the core manually.
+dependency `controlel==0.5.0`; users must not install the core manually.
 Detailed prerequisites, configuration, safety behavior, manual installation,
 upgrades, removal, and current limitations are in the
 [Home Assistant installation guide](docs/operations/HomeAssistantInstallation.md).
@@ -121,12 +119,12 @@ be kept active until manually changed. Profiles affect presentation, logging,
 and in-memory evidence only—not regulation.
 
 The integration manifest requires the exact public core release
-`controlel==0.4.0`. A supported custom-component deployment can therefore let
+`controlel==0.5.0`. A supported custom-component deployment can therefore let
 Home Assistant obtain the core dependency automatically; users do not need to
 install the core manually. Editable installation remains available for local
 source compatibility testing. The core test suite does not require Home
 Assistant, while Home Assistant framework tests use separate local-source and
-public-package compositions against the same immutable core `0.4.0` release.
+public-package compositions against the same immutable core `0.5.0` release.
 
 Framework compatibility is tested against Home Assistant `2026.7.3` with
 `pytest-homeassistant-custom-component==0.13.347` on Python 3.14.2 or newer.
@@ -134,20 +132,19 @@ The isolated, hashed environment is defined by `requirements/ha-test.in` and
 `requirements/ha-test.txt`; setup and suite commands are in the
 [development guide](docs/development/DevelopmentGuide.md). The compatibility
 harness is separate from HACS release validation. HACS metadata and
-deterministic release packaging are prepared for `0.7.0`, but that candidate
+deterministic release packaging are prepared for `0.8.0`, but that candidate
 has not been published and no default-store publication exists.
 
 ## Core package artifacts
 
 The reusable core is published as the `controlel` distribution and import
-package at version `0.4.0`; this source tree prepares candidate `0.5.0`. Its
-static version source and PEP 517 build
+package at version `0.5.0`. Its static version source and PEP 517 build
 configuration live in `pyproject.toml`; normal installation depends only on
 Pydantic. Packaging validation builds one wheel and one sdist, inspects their
 contents, and installs the wheel into a clean environment outside the checkout.
 
-Core versions `0.1.0`, `0.2.0`, `0.3.0`, and `0.4.0` are published on PyPI and immutable. Future
-core corrections require a new version; rebuilt artifacts for an already
+Core versions `0.1.0`, `0.2.0`, `0.3.0`, `0.4.0`, and `0.5.0` are published on
+PyPI and immutable. Future core corrections require a new version; rebuilt artifacts for an already
 published version must never be uploaded.
 Repository packaging CI remains validation-only and contains no publication
 automation. See the [core release guide](docs/development/ReleaseGuide.md) for

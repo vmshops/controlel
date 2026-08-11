@@ -17,12 +17,12 @@ Protection history is not persisted. After restart or reload, Controlel reads
 the current sensor value deterministically but does not infer prior command
 history or lockout state from the switch.
 
-Controlel `0.7.0` is the current development candidate for one heating zone,
+Controlel `0.8.0` is the current development candidate for one heating zone,
 one primary temperature sensor, and one shared heat source. It requires the
-public core package `controlel==0.4.0`.
+public core package `controlel==0.5.0`.
 
-Milestone 28 Phase C uses the published immutable core `0.4.0`. The integration
-candidate is `0.7.0` and its manifest pins `controlel==0.4.0`.
+Milestone 30.1C uses the published immutable core `0.5.0`. The integration
+candidate is `0.8.0` and its manifest pins `controlel==0.5.0`.
 
 ### Heat-source timing observations
 
@@ -47,7 +47,7 @@ High-frequency remaining-time entities may be excluded from Recorder if their
 history is not useful. Passive timestamp entities are low-churn. Controlel does
 not modify Recorder configuration automatically.
 
-Candidate `0.7.0` is not published; use the latest published release for HACS
+Candidate `0.8.0` is not published; use the latest published release for HACS
 custom-repository installation. Controlel is not listed in the default HACS
 store.
 
@@ -89,7 +89,7 @@ custom integration.
 
 HACS downloads the release asset into
 `config/custom_components/controlel/`. During integration setup, Home
-Assistant reads the manifest and installs `controlel==0.4.0` from PyPI.
+Assistant reads the manifest and installs `controlel==0.5.0` from PyPI.
 Manual core installation is neither required nor supported for normal use.
 
 ## Manual installation fallback
@@ -234,7 +234,7 @@ structure must provide an explicit migration.
 3. Restart Home Assistant.
 
 HACS removes the integration directory but does not uninstall Python packages
-or related Home Assistant data automatically. The `controlel==0.4.0` package
+or related Home Assistant data automatically. The `controlel==0.5.0` package
 may remain in Home Assistant's managed Python environment and must not be
 manually removed.
 
