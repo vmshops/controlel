@@ -32,12 +32,12 @@ fatal behavior remain equivalent to core 0.3.0/integration 0.6.0. Phase C sets
 the integration manifest to `0.7.0`, pins `controlel==0.4.0`, and validates
 both local-source and public-PyPI framework compositions.
 
-Milestone 28 is complete. Milestone 29 prepares core `0.5.0` with multi-zone heat-demand
+Milestone 28 is complete. Milestone 29 prepared core `0.5.0` with multi-zone heat-demand
 aggregation: zone-local hysteresis and confirmation feed a deterministic,
 unweighted any-zone building demand while the existing shared-source control
-and safety policies remain global. The current Home Assistant `0.7.0` adapter
-continues exposing its released one-zone configuration contract during this
-core Phase A work. No priorities, weights, or source duplication are included.
+and safety policies remain global. During that core Phase A work, the Home
+Assistant `0.7.0` candidate continued exposing its one-zone configuration
+contract. No priorities, weights, or source duplication are included.
 
 Milestone 29 is complete, and its core boundary is published as immutable
 `controlel==0.5.0`. Milestone 30 introduces capability-based,
@@ -55,6 +55,10 @@ assessment. Milestone 30.1C projects that evidence through an immutable,
 bounded application diagnostic contract for read-only Home Assistant
 presentation. These stages create no actuator or source commands and do not
 feed control decisions.
+
+Integration `0.8.0` is the M30.1C Home Assistant release candidate. It retains
+the one-zone configuration surface, consumes immutable `controlel==0.5.0`, and
+adds only read-only diagnostic presentation.
 
 Adaptive assistance remains future work. Learning, persistence, actuator
 travel/open verification, and source-water-temperature optimization also
