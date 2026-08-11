@@ -39,7 +39,7 @@ replaced. Successful port return is not physical source-state confirmation.
 
 The integration source is `custom_components/controlel`. Integration version
 `0.7.0` declares one config entry and requires published
-`controlel==0.4.0`.
+`controlel==0.5.0`.
 The integration and core versions are independent, and the core is not
 vendored into the component.
 
@@ -90,7 +90,7 @@ python -m pip install --no-deps -e /path/to/controlel
 ```
 
 The editable install overrides the public core only for local development.
-Public-package validation instead installs `controlel==0.4.0` into a separate
+Public-package validation instead installs `controlel==0.5.0` into a separate
 environment and never installs the checkout as a distribution.
 
 For a supported custom-component deployment, Home Assistant can install the

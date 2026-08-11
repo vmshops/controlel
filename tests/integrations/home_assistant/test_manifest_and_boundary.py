@@ -25,7 +25,7 @@ def test_manifest_has_required_custom_component_contract():
         "issue_tracker": "https://github.com/vmshops/controlel/issues",
         "integration_type": "hub",
         "iot_class": "local_push",
-        "requirements": ["controlel==0.4.0"],
+        "requirements": ["controlel==0.5.0"],
         "single_config_entry": True,
         "version": "0.7.0",
     }
@@ -38,7 +38,7 @@ def test_core_and_integration_versions_are_intentionally_independent():
 
     assert core_version == "0.5.0"
     assert manifest["version"] == INTEGRATION_VERSION == "0.7.0"
-    assert manifest["requirements"] == ["controlel==0.4.0"]
+    assert manifest["requirements"] == ["controlel==0.5.0"]
     assert manifest["version"] != manifest["requirements"][0].partition("==")[2]
 
 
@@ -46,7 +46,7 @@ def test_manifest_requirement_is_one_exact_public_distribution_pin():
     manifest = json.loads((COMPONENT / "manifest.json").read_text(encoding="utf-8"))
     requirements = manifest["requirements"]
 
-    assert requirements == ["controlel==0.4.0"]
+    assert requirements == ["controlel==0.5.0"]
     assert len(requirements) == 1
     assert not any(marker in requirements[0] for marker in ("~=", ">=", "<=", " @ ", "git+", "-e ", "file:"))
 

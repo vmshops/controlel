@@ -2,12 +2,11 @@
 
 ## Milestone 29 Phase A boundary
 
-Milestone 29 Phase A prepares unpublished core candidate `0.5.0` with
-multi-zone building-demand aggregation. Integration `0.7.0` remains unchanged
-and continues to require immutable public `controlel==0.4.0`. The manifest must
-not move to `0.5.0` until that core release has been separately published and
-verified. Phase A creates validation artifacts only; it does not tag, upload,
-publish, or release them.
+Milestone 29 Phase A prepared core candidate `0.5.0` with multi-zone
+building-demand aggregation. Integration `0.7.0` remained unchanged and
+continued to require immutable public `controlel==0.4.0`. The manifest was not
+moved to `0.5.0` until that core release was separately published and verified.
+Phase A created validation artifacts only; it did not publish them.
 
 ## Milestone 28 sequencing
 
@@ -43,10 +42,10 @@ Controlel uses distinct release states:
    backend under `dist/`.
 3. **Verified wheel** has passed metadata, archive-content, and clean
    out-of-checkout installation checks.
-4. **Published core package** is the verified `controlel==0.4.0` release on
+4. **Published core package** is the verified `controlel==0.5.0` release on
    PyPI.
 5. **Home Assistant exact dependency pin** is the integration contract
-   `"requirements": ["controlel==0.4.0"]`.
+   `"requirements": ["controlel==0.5.0"]`.
 6. **HACS readiness** additionally requires integration release packaging and
    HACS metadata. A verified or published core wheel alone does not provide
    HACS readiness.
@@ -54,7 +53,7 @@ Controlel uses distinct release states:
 ## Distribution identity and version
 
 The distribution name and Python import package are both `controlel`. Versions
-`0.1.0`, `0.2.0`, `0.3.0`, and `0.4.0` are publicly available on PyPI and immutable.
+`0.1.0`, `0.2.0`, `0.3.0`, `0.4.0`, and `0.5.0` are publicly available on PyPI and immutable.
 PyPI versions are immutable; corrections always require a higher version.
 
 The first core release is `0.1.0`. The single authoritative release
@@ -79,6 +78,18 @@ The tag namespaces are disjoint and permanent:
 
 Core tags record PyPI source provenance. They do not create GitHub Releases in
 this monorepo because HACS consumes the repository-wide GitHub Release stream.
+
+## Published core 0.5.0 record
+
+- Exact release commit: `c6791d444ab18d8c10f23bead53c87fe6d5adae4`.
+- Annotated tag: `core-v0.5.0`.
+- Wheel: `controlel-0.5.0-py3-none-any.whl`, 94,976 bytes, SHA-256
+  `bb6e1e4a7b802e1ebc3d65bbd18c2111f6a4b992c3aaac56a3a823f272f45d09`.
+- Sdist: `controlel-0.5.0.tar.gz`, 56,023 bytes, SHA-256
+  `860cc9cd0a90050f61b0af9c456f2eec38375f1c89f545eca2bde5ccaccb9f28`.
+
+The isolated public-composition CI verifies the exact wheel identity before
+running the Home Assistant framework suite.
 
 ## Published core 0.4.0 record
 
@@ -298,7 +309,7 @@ paths.
 
 ## Future core release checklist
 
-Published core versions `0.1.0`, `0.2.0`, `0.3.0`, and `0.4.0` are immutable. Every
+Published core versions `0.1.0`, `0.2.0`, `0.3.0`, `0.4.0`, and `0.5.0` are immutable. Every
 future core publication follows this order:
 
 1. implementation;
@@ -341,7 +352,7 @@ must not upload rebuilt artifacts for an already published version.
 
 ## Home Assistant dependency contract
 
-Integration `0.7.0` Phase C pins exactly `controlel==0.4.0`. CI keeps local editable
+Integration `0.7.0` M30.1C pins exactly `controlel==0.5.0`. CI keeps local editable
 compatibility and public-package framework jobs isolated. The public job never
 installs the repository as a distribution and proves the core resolves from
 `site-packages`. Normal supported integration installation can obtain the core
@@ -357,7 +368,7 @@ Integration releases use a separate version stream:
   `Controlel Home Assistant Integration v0.7.0`;
 - HACS asset: `controlel.zip`;
 - checksum asset: `controlel.zip.sha256`;
-- exact core dependency: `controlel==0.4.0`.
+- exact core dependency: `controlel==0.5.0`.
 
 The published `v0.6.0` tag is immutable. No `v0.7.0` tag or GitHub Release
 exists. Integration tags always use

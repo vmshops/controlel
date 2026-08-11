@@ -51,7 +51,7 @@ python3.14 -m venv .venv-ha-public
 ./.venv-ha-public/bin/python -m pip install \
   --no-cache-dir \
   --index-url https://pypi.org/simple \
-  controlel==0.4.0
+  controlel==0.5.0
 CONTROLEL_FRAMEWORK_COMPOSITION=public \
   ./.venv-ha-public/bin/python -m pytest \
   tests/integrations/home_assistant/framework
@@ -117,7 +117,7 @@ python3 -m script.hassfest --action validate \
 ```
 
 Framework compatibility is separate from HACS release validation. The manifest
-pins the published core as `controlel==0.4.0`; HACS metadata and deterministic
+pins the published core as `controlel==0.5.0`; HACS metadata and deterministic
 integration release packaging are validated without publishing anything.
 
 ## HACS release candidate
@@ -145,7 +145,7 @@ rejection behavior. Generated files remain below ignored `dist/hacs/`.
 ## Configuration and options development
 
 The integration candidate version is `0.7.0`; its manifest pins the published,
-immutable core `controlel==0.4.0`.
+immutable core `controlel==0.5.0`.
 
 New-entry configuration defaults are 0.3/0.1 Â°C hysteresis and 10/5-minute
 minimum on/off times. Legacy entries normalize missing values to zero.
