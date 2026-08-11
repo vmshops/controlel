@@ -4,6 +4,7 @@ from threading import Event, Thread
 
 from controlel.application.runtime.control_runtime import ControlRuntime
 from controlel.application.runtime.runtime_processing_result import RuntimeProcessingStatus
+from controlel.application.services.heating_diagnostics_projector import HeatingDiagnosticsProjector
 from controlel.application.services.heating_episode_observer import HeatingEpisodeObserver
 from controlel.application.services.heating_performance_assessor import HeatingPerformanceAssessor
 from controlel.application.services.shadow_heating_performance_monitor import ShadowHeatingPerformanceMonitor
@@ -187,6 +188,11 @@ class FailingPerformanceAssessor:
         raise RuntimeError(f"assessment failed for {episode.zone_id.value}")
 
 
+class FailingDiagnosticsProjector:
+    def project(self, **kwargs):
+        raise RuntimeError("diagnostic projection failed")
+
+
 class BlockingPerformanceAssessor:
     def __init__(self) -> None:
         self.entered = Event()
@@ -362,6 +368,7 @@ def run_non_interference_scenario(
     minimum_heating_off_time=timedelta(0),
     mark_indeterminate=False,
     reevaluate=False,
+    diagnostics_projector=None,
 ):
     runtime, source, delivery_port, sensor_id, _ = create_heat_delivery_runtime(
         indeterminate_grace_period=indeterminate_grace_period,
@@ -375,11 +382,29 @@ def run_non_interference_scenario(
             Measurement(sensor_id=sensor_id, value=Temperature(temperature), timestamp=NOW)
         )
         evaluations.append(result.heat_demand_evaluation)
+        project_runtime_diagnostics(runtime, diagnostics_projector)
     if reevaluate:
         evaluations.append(runtime.reevaluate_heat_demand())
+        project_runtime_diagnostics(runtime, diagnostics_projector)
     if mark_indeterminate:
         evaluations.append(runtime.mark_measurement_indeterminate())
+        project_runtime_diagnostics(runtime, diagnostics_projector)
     return control_trace(runtime, source, delivery_port, evaluations)
+
+
+def project_runtime_diagnostics(runtime, projector) -> None:
+    if projector is None:
+        return
+    try:
+        projector.project(
+            zone_ids=tuple(zone.zone_id for zone in runtime.zone_repository.list_all()),
+            active_episodes=runtime.heating_episode_observer.active_episodes,
+            completed_episodes=runtime.heating_episode_observer.completed_episodes,
+            monitor=runtime.heating_performance_monitor.diagnostic_snapshot(),
+            observation_errors=tuple(runtime.heating_episode_observation_error_evidence.values()),
+        )
+    except Exception:
+        pass
 
 
 def test_shadow_assessment_enabled_disabled_and_failed_have_identical_commands() -> None:
@@ -446,14 +471,20 @@ def test_shadow_assessment_enabled_and_disabled_have_identical_full_control_cont
     for scenario in scenarios:
         enabled_trace = run_non_interference_scenario(
             monitor=ShadowHeatingPerformanceMonitor(enabled=True),
+            diagnostics_projector=HeatingDiagnosticsProjector(),
             **scenario,
         )
         disabled_trace = run_non_interference_scenario(
             monitor=ShadowHeatingPerformanceMonitor(enabled=False),
             **scenario,
         )
+        failed_trace = run_non_interference_scenario(
+            monitor=ShadowHeatingPerformanceMonitor(enabled=True),
+            diagnostics_projector=FailingDiagnosticsProjector(),
+            **scenario,
+        )
 
-        assert enabled_trace == disabled_trace
+        assert enabled_trace == disabled_trace == failed_trace
 
 
 def test_blocking_assessment_begins_only_after_control_commands_execute() -> None:
