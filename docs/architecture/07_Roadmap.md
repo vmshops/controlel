@@ -39,7 +39,8 @@ and safety policies remain global. The current Home Assistant `0.7.0` adapter
 continues exposing its released one-zone configuration contract during this
 core Phase A work. No priorities, weights, or source duplication are included.
 
-Milestone 29 is complete. Milestone 30 introduces capability-based,
+Milestone 29 is complete, and its core boundary is published as immutable
+`controlel==0.5.0`. Milestone 30 introduces capability-based,
 vendor-independent zone heat-delivery actuators separately from building demand
 and shared-source protection. The core supports native control, deterministic
 setpoint assist, configured direct position, binary valves, optional valid-only
@@ -48,9 +49,16 @@ multiple-actuator identity/order. The first Home Assistant slice exposes one
 generic climate setpoint-assist actuator per entry. It does not retroactively
 make actuators part of the Milestone 29 aggregation rule.
 
-Milestone 31 will cover adaptive assist and zone-performance observation using
-current heating-episode evidence. Learning, persistence, actuator travel/open
-verification, and source-water-temperature optimization remain future layers.
+Milestone 30.1A adds bounded, in-memory heating-episode observation without a
+new control loop. Milestone 30.1B adds deterministic shadow-only performance
+assessment. Milestone 30.1C projects that evidence through an immutable,
+bounded application diagnostic contract for read-only Home Assistant
+presentation. These stages create no actuator or source commands and do not
+feed control decisions.
+
+Adaptive assistance remains future work. Learning, persistence, actuator
+travel/open verification, and source-water-temperature optimization also
+remain future layers.
 
 ## Milestone 23: Home Assistant one-zone host vertical slice
 

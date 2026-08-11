@@ -1,3 +1,5 @@
+"""Tests for deterministic application-level heating performance assessment."""
+
 from dataclasses import FrozenInstanceError
 from datetime import UTC, datetime, timedelta
 
