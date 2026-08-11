@@ -29,6 +29,12 @@ from controlel.application.runtime.runtime_processing_result import (
 from controlel.application.services.heat_demand_safety_policy import (
     HeatDemandSafetyPhase,
 )
+from controlel.application.services.heating_diagnostics_boundary import (
+    HeatingDiagnosticsBoundary,
+)
+from controlel.application.state.heating_diagnostics import (
+    empty_heating_diagnostics_snapshot,
+)
 from controlel.application.state.source_control_state import (
     SourceControlState as CoreSourceControlState,
 )
@@ -111,6 +117,8 @@ class HomeAssistantControlelHost:
         state_getter: StateGetter | None = None,
         shutdown_subscriber: ShutdownSubscriber | None = None,
         interval_subscriber: IntervalSubscriber | None = None,
+        heating_diagnostics_boundary: HeatingDiagnosticsBoundary | None = None,
+        heating_diagnostics_enabled: bool = True,
     ) -> None:
         self._hass = hass
         self._runtime = runtime
@@ -124,6 +132,9 @@ class HomeAssistantControlelHost:
         self._state_getter = state_getter or self._default_state_getter
         self._shutdown_subscriber = shutdown_subscriber or _default_shutdown_subscriber
         self._interval_subscriber = interval_subscriber or _default_interval_subscriber
+        self._heating_diagnostics_boundary = heating_diagnostics_boundary or HeatingDiagnosticsBoundary()
+        self._heating_diagnostics_enabled = heating_diagnostics_enabled
+        initial_heating_diagnostics = empty_heating_diagnostics_snapshot(config.zone_id.value)
         diagnostic = config.diagnostic_configuration
         self.snapshot_source = OperationalSnapshotSource(
             initial_snapshot(
@@ -148,6 +159,7 @@ class HomeAssistantControlelHost:
                 trace_capacity=TRACE_LIMITS[diagnostic.profile],
                 integration_version=INTEGRATION_VERSION,
                 core_version=core_version,
+                heating_diagnostics=initial_heating_diagnostics,
             ),
             trace_limit=TRACE_LIMITS[diagnostic.profile],
         )
@@ -173,6 +185,8 @@ class HomeAssistantControlelHost:
         self._live_drain_task: asyncio.Task[Any] | None = None
         self._accepted_callback_tasks: set[asyncio.Task[Any]] = set()
         self._shadow_assessment_tasks: set[asyncio.Task[Any]] = set()
+        self._heating_diagnostics_tasks: set[asyncio.Task[Any]] = set()
+        self._heating_diagnostics_generation = 0
         self._fatal_shutdown_task: asyncio.Task[Any] | None = None
         self._fatal_error: Exception | None = None
         self._last_state_version: StateVersion | None = None
@@ -511,6 +525,7 @@ class HomeAssistantControlelHost:
                     self._failure_sink.handle_synchronous_failure(error)
                 finally:
                     await self._async_wait_for_shadow_assessments()
+                    await self._async_wait_for_heating_diagnostics()
                     await self._executor.async_close()
 
             self._buffer.clear()
@@ -664,6 +679,7 @@ class HomeAssistantControlelHost:
         try:
             return await self._executor.async_submit(operation, *args)
         finally:
+            self._schedule_heating_diagnostics_projection(refresh_runtime_evidence=True)
             self._schedule_shadow_assessment_drain()
 
     def _schedule_shadow_assessment_drain(self) -> None:
@@ -687,6 +703,8 @@ class HomeAssistantControlelHost:
             await asyncio.to_thread(assess_pending)
         except Exception:
             self._logger.exception("Controlel shadow heating assessment failed")
+        finally:
+            self._schedule_heating_diagnostics_projection()
 
     async def _async_wait_for_shadow_assessments(self) -> None:
         while self._shadow_assessment_tasks:
@@ -695,6 +713,63 @@ class HomeAssistantControlelHost:
                 return
             await asyncio.gather(*tasks, return_exceptions=True)
             self._shadow_assessment_tasks.difference_update(tasks)
+
+    def _schedule_heating_diagnostics_projection(
+        self,
+        *,
+        refresh_runtime_evidence: bool = False,
+    ) -> None:
+        if not self._heating_diagnostics_enabled:
+            return
+        self._heating_diagnostics_generation += 1
+        generation = self._heating_diagnostics_generation
+        task = self._create_task(
+            self._async_project_heating_diagnostics(
+                generation,
+                refresh_runtime_evidence=refresh_runtime_evidence,
+            ),
+            "Controlel heating diagnostics projection",
+        )
+        self._heating_diagnostics_tasks.add(task)
+        task.add_done_callback(self._heating_diagnostics_tasks.discard)
+
+    async def _async_project_heating_diagnostics(
+        self,
+        generation: int,
+        *,
+        refresh_runtime_evidence: bool,
+    ) -> None:
+        result = await asyncio.to_thread(
+            self._heating_diagnostics_boundary.project,
+            runtime=self._runtime,
+            zone_ids=(self._config.zone_id,),
+            current=self.snapshot_source.current.heating_diagnostics,
+            refresh_runtime_evidence=refresh_runtime_evidence,
+        )
+        if result.failure_exception_type is not None:
+            self._logger.error(
+                "Controlel heating diagnostics projection failed (%s)",
+                result.failure_exception_type,
+            )
+        if generation != self._heating_diagnostics_generation:
+            return
+        try:
+            current = self.snapshot_source.current
+            if result.snapshot != current.heating_diagnostics:
+                self.snapshot_source.update(
+                    now=current.updated_at,
+                    heating_diagnostics=result.snapshot,
+                )
+        except Exception:
+            self._logger.exception("Controlel heating diagnostics publication failed")
+
+    async def _async_wait_for_heating_diagnostics(self) -> None:
+        while self._heating_diagnostics_tasks:
+            tasks = [task for task in self._heating_diagnostics_tasks if task is not asyncio.current_task()]
+            if not tasks:
+                return
+            await asyncio.gather(*tasks, return_exceptions=True)
+            self._heating_diagnostics_tasks.difference_update(tasks)
 
     def _handle_synchronous_failure(self, error: Exception) -> None:
         self._failure_sink.handle_synchronous_failure(error)

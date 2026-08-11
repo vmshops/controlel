@@ -10,6 +10,8 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 
+from controlel.application.state.heating_diagnostics import heating_diagnostics_to_dict
+
 from . import ControlelEntryRuntime
 from .config import HomeAssistantIntegrationConfig
 from .const import (
@@ -311,6 +313,7 @@ async def async_get_config_entry_diagnostics(
         "decision_trace": trace_to_dict(host.snapshot_source.trace),
         "observability": host.observability.diagnostics(datetime.now(UTC)),
         "heat_delivery": [_heat_delivery_state(state) for state in host.heat_delivery_states],
+        "heating_diagnostics": heating_diagnostics_to_dict(snapshot.heating_diagnostics),
         "counters": {
             "snapshot_revision": snapshot.revision,
             "decision_trace_records": len(host.snapshot_source.trace),
