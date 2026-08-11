@@ -101,8 +101,8 @@ HACS-store entry exists. End-user
 installation instructions are in
 [HomeAssistantInstallation.md](HomeAssistantInstallation.md).
 
-Core versions `0.1.0`, `0.2.0`, `0.3.0`, and `0.4.0` are immutable public releases. Any core
-correction requires a new version; never rebuild and re-upload an existing
-version. See the
+Core versions `0.1.0`, `0.2.0`, `0.3.0`, `0.4.0`, and `0.5.0` are immutable
+public releases. Any core correction requires a new version; never rebuild
+and re-upload an existing version. See the
 [release guide](../development/ReleaseGuide.md) for its exact source commit and
 published hashes.

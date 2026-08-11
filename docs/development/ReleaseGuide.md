@@ -15,10 +15,12 @@ Phase A prepared core `0.4.0` while retaining the integration's public
 `controlel==0.3.0` dependency. Phase B published and independently verified
 immutable core `0.4.0` from annotated tag `core-v0.4.0`.
 
-Phase C now sets the manifest and `INTEGRATION_VERSION` to `0.7.0`, pins
-exactly `controlel==0.4.0`, and validates separate local-source and public-PyPI
-compositions. It prepares but does not create integration tag `v0.7.0`, a
-GitHub Release, or an upload. Core tags remain `core-vX.Y.Z`; integration tags
+At the Milestone 28 boundary, Phase C set the manifest and
+`INTEGRATION_VERSION` to `0.7.0`, pinned exactly `controlel==0.4.0`, and
+validated separate local-source and public-PyPI compositions. M30.1C later
+moved that same integration candidate to published `controlel==0.5.0` after
+the separate core release. No integration tag `v0.7.0`, GitHub Release, or
+upload has been created. Core tags remain `core-vX.Y.Z`; integration tags
 remain `vX.Y.Z`.
 
 ## Milestone 26 sequencing

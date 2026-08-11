@@ -130,7 +130,7 @@ during Milestone 28 Phase C. Normal supported
 installation lets Home Assistant obtain that dependency automatically; users
 do not need to install it manually. If setup reports a missing core, confirm
 that the environment can reach PyPI and that `python -m pip show controlel`
-reports version `0.4.0`.
+reports version `0.5.0`.
 
 Local development may install the checkout with `python -m pip install
 --no-deps -e .`. Public-package framework validation must use a different
