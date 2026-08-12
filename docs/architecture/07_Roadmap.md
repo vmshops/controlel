@@ -70,7 +70,7 @@ manual recovery defaults to two hours with explicit reload cancellation.
 Source safety remains authoritative. A capability-gated `WATER_TARGET` value is
 intent only, and physical water-target dispatch remains unsupported.
 
-Core `0.6.0` is published and immutable. Integration `0.8.1` consumes it in a
+Core `0.6.0` is published and immutable. Integration `0.8.2` consumes it in a
 focused stabilization boundary that binds reported-source evidence and core
 runtime supervision into the existing Home Assistant host. It also fixes
 worker-thread diagnostic refresh publication without adding polling or new

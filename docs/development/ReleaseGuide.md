@@ -1,12 +1,13 @@
 # Release guide
 
-## Integration 0.8.1 stabilization boundary
+## Integration 0.8.2 stabilization boundary
 
-Core `0.6.0` is published and immutable. Integration `0.8.1` consumes it to
-bind reported-source reconciliation and M30.2D supervision into the Home
-Assistant host. This patch also marshals elapsed/debug entity publication onto
-the HA event loop. It adds no operating-mode UI and preserves config-entry
-version 1 and all existing entity identities.
+Core `0.6.0` and integration `0.8.1` are published and immutable. Integration
+`0.8.2` keeps that exact core dependency and fixes the one installed-core
+metadata lookup so it runs once through Home Assistant's executor. It also
+adds the authoritative entity reference and a descriptor-key documentation
+coverage contract. It changes no control policy, config-entry schema, or
+entity identity.
 
 ## Milestone 30.2 core 0.6.0 boundary (historical)
 
@@ -101,8 +102,8 @@ version is the static `project.version` in `pyproject.toml`. Runtime access uses
 `0.0.0+uninstalled`; it never pretends to be a release.
 
 The custom-component manifest version is a separate integration version. The
-current candidate is `0.8.1`; it is not a second source for the core package
-version and evolves independently. Candidate `0.8.1` is not published.
+current candidate is `0.8.2`; it is not a second source for the core package
+version and evolves independently. Candidate `0.8.2` is not published.
 
 ## Permanent tag namespaces
 
@@ -390,7 +391,7 @@ must not upload rebuilt artifacts for an already published version.
 
 ## Home Assistant dependency contract
 
-Integration `0.8.1` pins exactly `controlel==0.6.0`. CI keeps local editable
+Integration `0.8.2` pins exactly `controlel==0.6.0`. CI keeps local editable
 compatibility and public-package framework jobs isolated. The public job never
 installs the repository as a distribution and proves the core resolves from
 `site-packages`. Normal supported integration installation can obtain the core
@@ -400,10 +401,10 @@ automatically.
 
 Integration releases use a separate version stream:
 
-- manifest and `INTEGRATION_VERSION`: `0.8.1`;
-- future integration tag: `v0.8.1`;
+- manifest and `INTEGRATION_VERSION`: `0.8.2`;
+- future integration tag: `v0.8.2`;
 - GitHub Release name:
-  `Controlel Home Assistant Integration v0.8.1`;
+  `Controlel Home Assistant Integration v0.8.2`;
 - HACS asset: `controlel.zip`;
 - checksum asset: `controlel.zip.sha256`;
 - exact core dependency: `controlel==0.6.0`.
@@ -428,9 +429,9 @@ Every remote step requires explicit approval:
 3. Build the archive twice and require byte-identical output.
 4. Run the independent validator and manually inspect the member list.
 5. Record the ZIP SHA-256.
-6. Create annotated tag `v0.8.1` at the reviewed commit.
+6. Create annotated tag `v0.8.2` at the reviewed commit.
 7. Create GitHub Release
-   `Controlel Home Assistant Integration v0.8.1`.
+   `Controlel Home Assistant Integration v0.8.2`.
 8. Attach `controlel.zip` and `controlel.zip.sha256`; download them again and
    verify their hashes.
 9. Install through HACS in a clean supported Home Assistant instance.

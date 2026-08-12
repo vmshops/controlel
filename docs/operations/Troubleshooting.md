@@ -29,7 +29,7 @@ The current switch state is never used to fabricate it.
 Confirm that the exact custom-repository URL is
 `https://github.com/vmshops/controlel` and the selected category is
 **Integration**. The repository must be publicly accessible. Use the latest
-published release; `0.8.1` remains an unpublished candidate.
+published release; `0.8.2` remains an unpublished candidate.
 
 If a zone stays in `confirmation_pending`, check measurement validity and the
 confirmation deadline/remaining entities. Unknown, unavailable, invalid,
@@ -94,7 +94,7 @@ database volume; Controlel does not alter Recorder configuration.
 
 Scheduler installation/cancellation failure, clock regression, re-entrancy,
 invalid provenance/configuration state, and unexpected programming failures
-create or update one stable ERROR Repairs issue. In 0.8.1 the supervisor
+create or update one stable ERROR Repairs issue. In 0.8.2 the supervisor
 quarantines the failed normal generation and transfers exclusive authority to
 the core failsafe while Home Assistant remains alive. It then owns the bounded
 three-attempt, five-minute restart campaign and truthful handover to a newly
@@ -128,7 +128,7 @@ second.
 
 ## Core dependency installation
 
-Integration candidate `0.8.1` requires exactly `controlel==0.6.0`. Normal supported
+Integration candidate `0.8.2` requires exactly `controlel==0.6.0`. Normal supported
 installation lets Home Assistant obtain that dependency automatically; users
 do not need to install it manually. If setup reports a missing core, confirm
 that the environment can reach PyPI and that `python -m pip show controlel`

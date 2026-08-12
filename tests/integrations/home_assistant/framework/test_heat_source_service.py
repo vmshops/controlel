@@ -20,7 +20,10 @@ from custom_components.controlel.config import (
     HomeAssistantServiceCall,
 )
 from custom_components.controlel.const import (
+    CONF_HEAT_DEMAND_CONFIRMATION_DURATION,
     CONF_INDETERMINATE_GRACE_PERIOD,
+    CONF_MINIMUM_HEATING_OFF_TIME,
+    CONF_MINIMUM_HEATING_ON_TIME,
     CONF_TEMPERATURE_ENTITY_ID,
     DOMAIN,
 )
@@ -241,4 +244,114 @@ async def test_service_caused_state_change_queues_behind_active_runtime_without_
         assert calls == ["turn_on", "turn_off"]
         assert host.accepting is True
         assert host._fatal_error is None
+        assert await hass.config_entries.async_unload(entry.entry_id) is True
+
+
+@pytest.mark.asyncio
+async def test_manual_on_transition_establishes_minimum_on_before_correction(
+    hass,
+    entry_data,
+) -> None:
+    calls: list[str] = []
+    temperature_entity_id = entry_data[CONF_TEMPERATURE_ENTITY_ID]
+    entry_data.update(
+        {
+            CONF_HEAT_DEMAND_CONFIRMATION_DURATION: 0.0,
+            CONF_MINIMUM_HEATING_ON_TIME: 60.0,
+            CONF_MINIMUM_HEATING_OFF_TIME: 60.0,
+        }
+    )
+
+    async def turn_off(call) -> None:
+        calls.append(call.service)
+        hass.states.async_set("switch.boiler", "off")
+
+    hass.services.async_register("switch", "turn_off", turn_off)
+    hass.states.async_set(
+        temperature_entity_id,
+        "22",
+        {ATTR_UNIT_OF_MEASUREMENT: UnitOfTemperature.CELSIUS},
+    )
+    entry = MockConfigEntry(domain=DOMAIN, data=entry_data)
+    entry.add_to_hass(hass)
+    clock = MutableClock(datetime.now(UTC))
+
+    with patch.object(component, "SystemClock", return_value=clock):
+        assert await hass.config_entries.async_setup(entry.entry_id) is True
+        await hass.async_block_till_done()
+        host = entry.runtime_data.host
+
+        hass.states.async_set("switch.boiler", "on")
+        source_state = hass.states.get("switch.boiler")
+        assert source_state is not None
+        changed_at = source_state.last_changed
+        clock.current = changed_at + timedelta(microseconds=1)
+        await hass.async_block_till_done()
+
+        expected_deadline = changed_at + timedelta(seconds=60)
+        assert calls == []
+        assert host._reported_source_evidence.transition_at == changed_at
+        assert host._runtime.source_control_state.active_lockout_type.value == "minimum_on"
+        assert host._runtime.source_control_state.active_lockout_deadline == expected_deadline
+
+        clock.current = expected_deadline
+        await host.async_reevaluate()
+        await hass.async_block_till_done()
+        assert calls == ["turn_off"]
+
+        assert await hass.config_entries.async_unload(entry.entry_id) is True
+
+
+@pytest.mark.asyncio
+async def test_manual_off_transition_establishes_minimum_off_before_corrective_enable(
+    hass,
+    entry_data,
+) -> None:
+    calls: list[str] = []
+    temperature_entity_id = entry_data[CONF_TEMPERATURE_ENTITY_ID]
+    entry_data.update(
+        {
+            CONF_HEAT_DEMAND_CONFIRMATION_DURATION: 0.0,
+            CONF_MINIMUM_HEATING_ON_TIME: 60.0,
+            CONF_MINIMUM_HEATING_OFF_TIME: 60.0,
+        }
+    )
+
+    async def turn_on(call) -> None:
+        calls.append(call.service)
+
+    hass.services.async_register("switch", "turn_on", turn_on)
+    hass.states.async_set("switch.boiler", "on")
+    hass.states.async_set(
+        temperature_entity_id,
+        "20",
+        {ATTR_UNIT_OF_MEASUREMENT: UnitOfTemperature.CELSIUS},
+    )
+    entry = MockConfigEntry(domain=DOMAIN, data=entry_data)
+    entry.add_to_hass(hass)
+    clock = MutableClock(datetime.now(UTC))
+
+    with patch.object(component, "SystemClock", return_value=clock):
+        assert await hass.config_entries.async_setup(entry.entry_id) is True
+        await hass.async_block_till_done()
+        host = entry.runtime_data.host
+        assert calls == []
+
+        hass.states.async_set("switch.boiler", "off")
+        source_state = hass.states.get("switch.boiler")
+        assert source_state is not None
+        changed_at = source_state.last_changed
+        clock.current = changed_at + timedelta(microseconds=1)
+        await hass.async_block_till_done()
+
+        expected_deadline = changed_at + timedelta(seconds=60)
+        assert calls == []
+        assert host._reported_source_evidence.transition_at == changed_at
+        assert host._runtime.source_control_state.active_lockout_type.value == "minimum_off"
+        assert host._runtime.source_control_state.active_lockout_deadline == expected_deadline
+
+        clock.current = expected_deadline
+        await host.async_reevaluate()
+        await hass.async_block_till_done()
+        assert calls == ["turn_on"]
         assert await hass.config_entries.async_unload(entry.entry_id) is True

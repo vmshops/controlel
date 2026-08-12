@@ -37,7 +37,7 @@ false. No raw sample history, arbitrary exception message, secret, or physical
 burner/heat confirmation is included. Successful command dispatch and reported
 controller state remain separate fields.
 
-Home Assistant integration `0.8.1` consumes core `0.6.0` and adds the bounded
+Home Assistant integration `0.8.2` consumes core `0.6.0` and includes the bounded
 runtime-supervision projection to downloaded diagnostics. It reports phase,
 command authority, normalized fatal cause, restart attempts/budget/deadline,
 and recovery timestamps without arbitrary exception text or physical-state
@@ -48,3 +48,6 @@ active command authority, normal generation, normalized fatal cause code,
 failsafe mode/reason, restart attempts and budget, next eligibility, exhaustion,
 manual-recovery deadline, and last successful normal recovery. The projection
 is fixed-size and contains no traceback or arbitrary error message.
+
+The authoritative per-entity quick reference, including diagnostics-only
+M30.2/M30.2D fields, is [EntityReference.md](EntityReference.md).

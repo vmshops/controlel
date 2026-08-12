@@ -24,11 +24,12 @@ Project phase: Home Assistant one-zone host vertical slice
 
 Core package version: 0.6.0 (published and immutable)
 
-Home Assistant integration candidate version: 0.8.1
+Home Assistant integration candidate version: 0.8.2
 
 Use the latest published release for HACS custom-repository installation.
-Core `0.6.0` is published and immutable. Integration `0.8.1` pins exactly to
-`controlel==0.6.0` and is a focused stabilization candidate.
+Core `0.6.0` and integration `0.8.1` are published and immutable. Integration
+`0.8.2` remains pinned exactly to `controlel==0.6.0` and is a focused
+blocking-I/O/documentation stabilization candidate.
 Controlel is not listed in the default HACS store.
 
 ## Home Assistant installation
@@ -124,7 +125,7 @@ Core 0.6.0 also includes M30.2D Runtime Supervision & Failsafe Recovery. An
 application-level supervisor quarantines a failed normal-runtime generation,
 transfers exclusive command authority to a minimal failsafe controller, and
 uses protected `SAFE_HEATING` or `EMERGENCY_OFF` decisions while attempting a
-bounded restart campaign. The 0.8.1 Home Assistant host binds this supervisor
+bounded restart campaign. The 0.8.2 Home Assistant host binds this supervisor
 to its one-shot scheduler, failsafe and normal-runtime factories, and explicit
 reported-source evidence. Supervision works only while the Home Assistant
 process remains alive; it cannot protect against complete HA, OS, power, or
@@ -135,7 +136,9 @@ operational summary and stable operational/diagnostic entities. The summary
 describes logical demand, safety, deferred commands, requested commands, and
 command outcomes; it never claims physical heat-source state. Configured
 durations remain visible, while deadline and remaining entities are unavailable
-when their countdown is inactive.
+when their countdown is inactive. Every public entity, value domain, source
+projection, control relevance, and truthfulness warning is indexed in the
+[Home Assistant entity reference](docs/operations/EntityReference.md).
 
 The Options Flow offers Basic, Detailed, and Debug diagnostic profiles. New
 0.5.0 and later entries default to Basic. Existing entries without a stored profile
@@ -162,7 +165,7 @@ The isolated, hashed environment is defined by `requirements/ha-test.in` and
 `requirements/ha-test.txt`; setup and suite commands are in the
 [development guide](docs/development/DevelopmentGuide.md). The compatibility
 harness is separate from HACS release validation. HACS metadata and
-deterministic release packaging are prepared for `0.8.1`, but that candidate
+deterministic release packaging are prepared for `0.8.2`, but that candidate
 has not been published and no default-store publication exists.
 
 ## Core package artifacts
