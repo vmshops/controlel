@@ -6,6 +6,7 @@ from controlel.application.services.heat_demand_safety_policy import (
     HeatDemandSafetyAssessment,
     HeatDemandSafetyPhase,
 )
+from controlel.application.services.operating_mode_policy import OperatingModeAssessment
 from controlel.application.services.source_control_policy import (
     SourceControlAssessment,
 )
@@ -15,6 +16,10 @@ from controlel.application.services.temperature_hysteresis_policy import (
 from controlel.application.services.zone_heat_demand_confirmation_policy import (
     ZoneHeatDemandConfirmationAssessment,
 )
+from controlel.application.state.source_reconciliation_state import (
+    SourceReconciliationAssessment,
+)
+from controlel.application.state.source_recovery_state import SourceRecoveryAssessment
 from controlel.domain.commands.heat_source_command import HeatSourceCommand
 from controlel.domain.commands.heating_action import HeatingAction
 from controlel.domain.demands.building_heat_demand import BuildingHeatDemand
@@ -38,6 +43,11 @@ class HeatDemandEvaluationStatus(StrEnum):
     SAFETY_COMMAND_SUPPRESSED = "safety_command_suppressed"
     DEMAND_COMMAND_DEFERRED = "demand_command_deferred"
     SAFETY_COMMAND_DEFERRED = "safety_command_deferred"
+    RESILIENCE_COMMAND_EXECUTED = "resilience_command_executed"
+    RESILIENCE_COMMAND_SUPPRESSED = "resilience_command_suppressed"
+    RESILIENCE_COMMAND_DEFERRED = "resilience_command_deferred"
+    RESILIENCE_COMMAND_HELD = "resilience_command_held"
+    RESILIENCE_INDETERMINATE = "resilience_indeterminate"
 
 
 @dataclass(frozen=True)
@@ -52,6 +62,9 @@ class HeatDemandEvaluationResult:
     hysteresis_assessment: TemperatureHysteresisAssessment | None = None
     confirmation_assessment: ZoneHeatDemandConfirmationAssessment | None = None
     source_control_assessment: SourceControlAssessment | None = None
+    source_reconciliation_assessment: SourceReconciliationAssessment | None = None
+    source_recovery_assessment: SourceRecoveryAssessment | None = None
+    operating_mode_assessment: OperatingModeAssessment | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.trigger, HeatDemandEvaluationTrigger):
@@ -79,9 +92,45 @@ class HeatDemandEvaluationResult:
             ZoneHeatDemandConfirmationAssessment,
         ):
             raise TypeError("confirmation_assessment must be a ZoneHeatDemandConfirmationAssessment or None")
+        if self.source_reconciliation_assessment is not None and not isinstance(
+            self.source_reconciliation_assessment,
+            SourceReconciliationAssessment,
+        ):
+            raise TypeError("source_reconciliation_assessment must be a SourceReconciliationAssessment or None")
+        if self.source_recovery_assessment is not None and not isinstance(
+            self.source_recovery_assessment,
+            SourceRecoveryAssessment,
+        ):
+            raise TypeError("source_recovery_assessment must be a SourceRecoveryAssessment or None")
+        if self.operating_mode_assessment is not None and not isinstance(
+            self.operating_mode_assessment,
+            OperatingModeAssessment,
+        ):
+            raise TypeError("operating_mode_assessment must be an OperatingModeAssessment or None")
         if self.confirmation_assessment is not None:
             if self.confirmation_assessment.state.last_evaluated_at != self.building_heat_demand.evaluated_at:
                 raise ValueError("confirmation assessment and building demand evaluation times must match")
+
+        resilience_statuses = {
+            HeatDemandEvaluationStatus.RESILIENCE_COMMAND_EXECUTED,
+            HeatDemandEvaluationStatus.RESILIENCE_COMMAND_SUPPRESSED,
+            HeatDemandEvaluationStatus.RESILIENCE_COMMAND_DEFERRED,
+            HeatDemandEvaluationStatus.RESILIENCE_COMMAND_HELD,
+            HeatDemandEvaluationStatus.RESILIENCE_INDETERMINATE,
+        }
+        if self.status in resilience_statuses:
+            if self.operating_mode_assessment is None or (
+                self.source_reconciliation_assessment is None and self.source_recovery_assessment is None
+            ):
+                raise ValueError("resilience status requires operating-mode and resilience assessment evidence")
+            if self.status is HeatDemandEvaluationStatus.RESILIENCE_COMMAND_HELD:
+                if self.next_evaluation_at is None:
+                    raise ValueError("held resilience evaluation requires a next evaluation")
+            elif self.status is HeatDemandEvaluationStatus.RESILIENCE_INDETERMINATE:
+                if self.command is not None:
+                    raise ValueError("indeterminate resilience evaluation cannot contain a command")
+            elif self.command is None:
+                raise ValueError("resilience command result requires a command")
 
         for field_name, value in (
             ("scheduled_for", self.scheduled_for),
@@ -112,6 +161,9 @@ class HeatDemandEvaluationResult:
                     "INDETERMINATE_GRACE requires indeterminate demand, grace assessment, "
                     "no command, and a next evaluation"
                 )
+            return
+
+        if self.status in resilience_statuses:
             return
 
         demand_statuses = {

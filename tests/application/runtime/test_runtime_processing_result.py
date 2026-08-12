@@ -110,6 +110,11 @@ def test_runtime_processing_status_has_stable_string_values():
         "SAFETY_COMMAND_SUPPRESSED": "safety_command_suppressed",
         "COMMAND_DEFERRED": "command_deferred",
         "SAFETY_COMMAND_DEFERRED": "safety_command_deferred",
+        "RESILIENCE_COMMAND_EXECUTED": "resilience_command_executed",
+        "RESILIENCE_COMMAND_SUPPRESSED": "resilience_command_suppressed",
+        "RESILIENCE_COMMAND_DEFERRED": "resilience_command_deferred",
+        "RESILIENCE_COMMAND_HELD": "resilience_command_held",
+        "RESILIENCE_INDETERMINATE": "resilience_indeterminate",
     }
 
 

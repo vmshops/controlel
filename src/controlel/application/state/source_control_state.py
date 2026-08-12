@@ -39,6 +39,7 @@ class SourceControlReason(StrEnum):
     DEFERRED_COMMAND_CANCELLED = "deferred_command_cancelled"
     LOCKOUT_EXPIRED_REEVALUATION = "lockout_expired_reevaluation"
     SAFETY_DISABLE_BYPASSED_LOCKOUT = "safety_disable_bypassed_lockout"
+    CORRECTIVE_RECONCILIATION = "corrective_reconciliation"
 
 
 class ActiveLockoutType(StrEnum):

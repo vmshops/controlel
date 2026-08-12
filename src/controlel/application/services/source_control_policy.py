@@ -11,6 +11,7 @@ from controlel.application.state.source_control_state import (
     SourceControlState,
 )
 from controlel.domain.commands.heating_action import HeatingAction
+from controlel.domain.source_control import ReportedSourceEvidence, ReportedSourceState
 
 
 class SourceControlOutcome(StrEnum):
@@ -71,6 +72,8 @@ class SourceControlPolicy:
         current_state: SourceControlState | None,
         safety_command: bool = False,
         lockout_expiry_reevaluation: bool = False,
+        corrective_reconciliation: bool = False,
+        reported_source_evidence: ReportedSourceEvidence | None = None,
     ) -> SourceControlAssessment:
         if not isinstance(desired_command, HeatingAction):
             raise TypeError("desired_command must be a HeatingAction")
@@ -81,6 +84,14 @@ class SourceControlPolicy:
 
         active_lockout, lockout_deadline = self._protection_boundary(state, now)
         blocking_lockout, blocking_deadline = self._blocking_lockout(state, desired_command, now)
+        if corrective_reconciliation and blocking_lockout is None:
+            blocking_lockout, blocking_deadline = self._reported_blocking_lockout(
+                reported_source_evidence,
+                desired_command,
+                now,
+            )
+            if active_lockout is None:
+                active_lockout, lockout_deadline = blocking_lockout, blocking_deadline
         bypass = (
             safety_command
             and desired_command is HeatingAction.DISABLE_HEATING
@@ -106,7 +117,7 @@ class SourceControlPolicy:
                 safety_bypassed_lockout=True,
             )
 
-        if state.last_dispatched_command is desired_command:
+        if state.last_dispatched_command is desired_command and not corrective_reconciliation:
             cancelled = state.deferred_command is not None
             updated = _clear_deferred(
                 state,
@@ -176,7 +187,9 @@ class SourceControlPolicy:
             )
 
         reason = (
-            SourceControlReason.LOCKOUT_EXPIRED_REEVALUATION
+            SourceControlReason.CORRECTIVE_RECONCILIATION
+            if corrective_reconciliation
+            else SourceControlReason.LOCKOUT_EXPIRED_REEVALUATION
             if lockout_expiry_reevaluation or state.deferred_command is desired_command
             else SourceControlReason.NORMAL_DEMAND
         )
@@ -345,6 +358,26 @@ class SourceControlPolicy:
             return boundary, deadline
         if boundary is ActiveLockoutType.MINIMUM_OFF and desired_command is HeatingAction.ENABLE_HEATING:
             return boundary, deadline
+        return None, None
+
+    def _reported_blocking_lockout(
+        self,
+        evidence: ReportedSourceEvidence | None,
+        desired_command: HeatingAction,
+        now: datetime,
+    ) -> tuple[ActiveLockoutType | None, datetime | None]:
+        """Apply protection to a known reported transition without making it command history."""
+
+        if evidence is None or evidence.transition_at is None:
+            return None, None
+        if evidence.state is ReportedSourceState.ENABLED and desired_command is HeatingAction.DISABLE_HEATING:
+            deadline = evidence.transition_at + self.minimum_on_time
+            if now < deadline:
+                return ActiveLockoutType.MINIMUM_ON, deadline
+        if evidence.state is ReportedSourceState.DISABLED and desired_command is HeatingAction.ENABLE_HEATING:
+            deadline = evidence.transition_at + self.minimum_off_time
+            if now < deadline:
+                return ActiveLockoutType.MINIMUM_OFF, deadline
         return None, None
 
 

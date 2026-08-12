@@ -13,9 +13,13 @@ class HeatSourceCommandDispatcher:
         self.heat_source_port = heat_source_port
         self.state_store = state_store
 
-    def dispatch(self, command: HeatSourceCommand) -> bool:
+    def dispatch(self, command: HeatSourceCommand, *, corrective_reconciliation: bool = False) -> bool:
         current_state = self.state_store.get()
-        if current_state is not None and current_state.applied_action == command.action:
+        if (
+            not corrective_reconciliation
+            and current_state is not None
+            and current_state.applied_action == command.action
+        ):
             return False
 
         self.heat_source_port.execute(command)

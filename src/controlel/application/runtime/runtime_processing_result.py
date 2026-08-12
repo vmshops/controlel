@@ -19,6 +19,11 @@ class RuntimeProcessingStatus(StrEnum):
     SAFETY_COMMAND_SUPPRESSED = "safety_command_suppressed"
     COMMAND_DEFERRED = "command_deferred"
     SAFETY_COMMAND_DEFERRED = "safety_command_deferred"
+    RESILIENCE_COMMAND_EXECUTED = "resilience_command_executed"
+    RESILIENCE_COMMAND_SUPPRESSED = "resilience_command_suppressed"
+    RESILIENCE_COMMAND_DEFERRED = "resilience_command_deferred"
+    RESILIENCE_COMMAND_HELD = "resilience_command_held"
+    RESILIENCE_INDETERMINATE = "resilience_indeterminate"
 
 
 class TemperatureNoDecisionReason(StrEnum):
@@ -70,6 +75,17 @@ class RuntimeProcessingResult:
             RuntimeProcessingStatus.SAFETY_COMMAND_SUPPRESSED: HeatDemandEvaluationStatus.SAFETY_COMMAND_SUPPRESSED,
             RuntimeProcessingStatus.COMMAND_DEFERRED: HeatDemandEvaluationStatus.DEMAND_COMMAND_DEFERRED,
             RuntimeProcessingStatus.SAFETY_COMMAND_DEFERRED: HeatDemandEvaluationStatus.SAFETY_COMMAND_DEFERRED,
+            RuntimeProcessingStatus.RESILIENCE_COMMAND_EXECUTED: (
+                HeatDemandEvaluationStatus.RESILIENCE_COMMAND_EXECUTED
+            ),
+            RuntimeProcessingStatus.RESILIENCE_COMMAND_SUPPRESSED: (
+                HeatDemandEvaluationStatus.RESILIENCE_COMMAND_SUPPRESSED
+            ),
+            RuntimeProcessingStatus.RESILIENCE_COMMAND_DEFERRED: (
+                HeatDemandEvaluationStatus.RESILIENCE_COMMAND_DEFERRED
+            ),
+            RuntimeProcessingStatus.RESILIENCE_COMMAND_HELD: HeatDemandEvaluationStatus.RESILIENCE_COMMAND_HELD,
+            RuntimeProcessingStatus.RESILIENCE_INDETERMINATE: (HeatDemandEvaluationStatus.RESILIENCE_INDETERMINATE),
         }.get(self.status)
         if expected_evaluation_status is None:
             raise ValueError(f"Unhandled RuntimeProcessingStatus: {self.status!r}")

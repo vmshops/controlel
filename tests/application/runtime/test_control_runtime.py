@@ -155,6 +155,13 @@ def test_control_runtime_constructor_uses_shared_source_contract_only():
         "minimum_heating_off_time",
         "demand_arbitrator",
         "heat_delivery_controller",
+        "source_ownership",
+        "source_capabilities",
+        "source_reconciliation_hold",
+        "source_correction_retry_interval",
+        "source_recovery_window",
+        "safe_heating_profile",
+        "manual_recovery_duration",
     ]
     assert "actuator_routes" not in parameters
     assert "actuator" not in parameters

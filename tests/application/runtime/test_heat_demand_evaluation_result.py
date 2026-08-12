@@ -92,6 +92,11 @@ def test_enum_values_are_stable_strings():
         "safety_command_suppressed",
         "demand_command_deferred",
         "safety_command_deferred",
+        "resilience_command_executed",
+        "resilience_command_suppressed",
+        "resilience_command_deferred",
+        "resilience_command_held",
+        "resilience_indeterminate",
     ]
     assert all(isinstance(item, str) for item in (*HeatDemandEvaluationTrigger, *HeatDemandEvaluationStatus))
 

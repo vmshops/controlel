@@ -14,6 +14,7 @@ from controlel.application.state.source_control_state import (
     SourceControlReason,
 )
 from controlel.domain.commands.heating_action import HeatingAction
+from controlel.domain.source_control import ReportedSourceEvidence, ReportedSourceState
 
 NOW = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)
 
@@ -410,3 +411,50 @@ def test_restart_initial_state_has_no_inferred_dispatch_or_protection_history() 
     assert state.last_successful_disable_dispatch is None
     assert state.earliest_next_enable_time is None
     assert state.earliest_next_disable_time is None
+
+
+def test_corrective_reconciliation_bypasses_only_duplicate_suppression() -> None:
+    configured = policy()
+    normal = configured.evaluate(
+        desired_command=HeatingAction.DISABLE_HEATING,
+        now=NOW,
+        current_state=configured.initial_state(NOW),
+    )
+    dispatched = configured.record_dispatched(normal, dispatched_at=NOW, safety_command=False)
+
+    duplicate = configured.evaluate(
+        desired_command=HeatingAction.DISABLE_HEATING,
+        now=NOW + timedelta(seconds=1),
+        current_state=dispatched,
+    )
+    corrective = configured.evaluate(
+        desired_command=HeatingAction.DISABLE_HEATING,
+        now=NOW + timedelta(seconds=1),
+        current_state=dispatched,
+        corrective_reconciliation=True,
+    )
+
+    assert duplicate.outcome is SourceControlOutcome.SUPPRESS_DUPLICATE
+    assert corrective.outcome is SourceControlOutcome.DISPATCH
+    assert corrective.reason is SourceControlReason.CORRECTIVE_RECONCILIATION
+
+
+def test_corrective_reconciliation_respects_known_reported_transition_protection() -> None:
+    configured = policy(minimum_on=timedelta(minutes=10))
+    evidence = ReportedSourceEvidence(
+        state=ReportedSourceState.ENABLED,
+        observed_at=NOW + timedelta(minutes=1),
+        transition_at=NOW,
+    )
+
+    assessment = configured.evaluate(
+        desired_command=HeatingAction.DISABLE_HEATING,
+        now=NOW + timedelta(minutes=1),
+        current_state=None,
+        corrective_reconciliation=True,
+        reported_source_evidence=evidence,
+    )
+
+    assert assessment.outcome is SourceControlOutcome.DEFER
+    assert assessment.active_lockout is ActiveLockoutType.MINIMUM_ON
+    assert assessment.lockout_deadline == NOW + timedelta(minutes=10)
