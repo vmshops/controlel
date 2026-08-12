@@ -9,6 +9,7 @@ from unittest.mock import patch
 from homeassistant.const import ATTR_UNIT_OF_MEASUREMENT, EntityCategory, UnitOfTemperature
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import translation
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 import custom_components.controlel as component
@@ -143,6 +144,49 @@ async def _setup_entry(hass, entry_data) -> MockConfigEntry:
     return entry
 
 
+async def test_core_version_metadata_lookup_runs_off_loop_and_reaches_publication(
+    hass,
+    entry_data,
+    service_calls,
+) -> None:
+    loop_thread = get_ident()
+    lookup_threads: list[int] = []
+    executor_submissions: list[tuple[object, tuple[object, ...]]] = []
+
+    def installed_version(distribution: str) -> str:
+        assert distribution == "controlel"
+        lookup_threads.append(get_ident())
+        return "0.6.0-executor-test"
+
+    async def run_in_executor(target, *args):
+        executor_submissions.append((target, args))
+        return await asyncio.to_thread(target, *args)
+
+    with (
+        patch.object(component.metadata, "version", side_effect=installed_version) as lookup_mock,
+        patch.object(hass, "async_add_executor_job", side_effect=run_in_executor),
+    ):
+        entry = await _setup_entry(hass, entry_data)
+
+    metadata_submissions = [args for target, args in executor_submissions if target is lookup_mock]
+    assert metadata_submissions == [("controlel",)]
+    assert len(lookup_threads) == 1
+    assert lookup_threads[0] != loop_thread
+    host = entry.runtime_data.host
+    assert host is not None
+    assert host.snapshot_source.current.core_version == "0.6.0-executor-test"
+    registry = er.async_get(hass)
+    core_version = next(
+        item
+        for item in er.async_entries_for_config_entry(registry, entry.entry_id)
+        if item.unique_id.endswith("_core_version")
+    )
+    assert hass.states.get(core_version.entity_id).state == "0.6.0-executor-test"
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+    assert diagnostics["versions"]["core"] == "0.6.0-executor-test"
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
 async def test_snapshot_publication_is_loop_safe_coalesced_and_invalidated_on_unload(
     hass,
     entry_data,
@@ -216,6 +260,7 @@ async def test_device_entities_states_unique_ids_and_unload(
     assert len(devices) == 1
     assert devices[0].identifiers == {(DOMAIN, entry.entry_id)}
     assert devices[0].name == "Controlel — Living room"
+    assert isinstance(devices[0].sw_version, str)
 
     assert hass.states.get(by_key["current_temperature"].entity_id).state == "20.0"
     assert hass.states.get(by_key["target_temperature"].entity_id).state == "21.0"
@@ -223,7 +268,7 @@ async def test_device_entities_states_unique_ids_and_unload(
     assert hass.states.get(by_key["heat_demand"].entity_id).state == "heat_required"
     assert hass.states.get(by_key["heat_required"].entity_id).state == "on"
     assert hass.states.get(by_key["runtime_active"].entity_id).state == "on"
-    assert hass.states.get(by_key["integration_version"].entity_id).state == "0.8.1"
+    assert hass.states.get(by_key["integration_version"].entity_id).state == "0.8.2"
     assert hass.states.get(by_key["core_version"].entity_id).state == expected_framework_core_version
     assert hass.states.get(by_key["diagnostic_profile"].entity_id).state == (DIAGNOSTIC_PROFILE_DETAILED)
     assert hass.states.get(by_key["grace_remaining"].entity_id).state == "unavailable"
@@ -243,6 +288,54 @@ async def test_device_entities_states_unique_ids_and_unload(
     await hass.async_block_till_done()
     assert all(hass.states.get(entity_id).state == "unavailable" for entity_id in entity_ids)
     assert not hasattr(entry, "runtime_data")
+
+
+async def test_binary_entities_keep_raw_states_and_use_yes_no_entity_translations(
+    hass,
+    entry_data,
+    service_calls,
+) -> None:
+    entry = await _setup_entry(hass, entry_data)
+    registry = er.async_get(hass)
+    binary_entries = {
+        _key(entry.entry_id, item.unique_id): item
+        for item in er.async_entries_for_config_entry(registry, entry.entry_id)
+        if item.domain == "binary_sensor"
+    }
+    expected_unique_ids = {f"{entry.entry_id}_{key}" for key in EXPECTED_BINARY_SENSOR_KEYS}
+    assert set(binary_entries) == EXPECTED_BINARY_SENSOR_KEYS
+    assert {item.unique_id for item in binary_entries.values()} == expected_unique_ids
+    assert {hass.states.get(item.entity_id).state for item in binary_entries.values()} <= {"on", "off"}
+
+    resources = await translation.async_get_translations(hass, "en", "entity", {DOMAIN})
+    for key in EXPECTED_BINARY_SENSOR_KEYS:
+        prefix = f"component.{DOMAIN}.entity.binary_sensor.{key}.state"
+        assert resources[f"{prefix}.on"] == "Yes"
+        assert resources[f"{prefix}.off"] == "No"
+        assert (
+            translation.async_translate_state(
+                hass,
+                "on",
+                "binary_sensor",
+                DOMAIN,
+                key,
+                None,
+            )
+            == "Yes"
+        )
+        assert (
+            translation.async_translate_state(
+                hass,
+                "off",
+                "binary_sensor",
+                DOMAIN,
+                key,
+                None,
+            )
+            == "No"
+        )
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
 
 
 async def test_reload_rename_and_target_change_keep_one_stable_entity_set(
@@ -550,7 +643,7 @@ async def test_diagnostics_are_allowlisted_json_safe_and_redact_unknown_entry_da
     serialized = json.dumps(diagnostics, sort_keys=True)
 
     assert diagnostics["versions"] == {
-        "integration": "0.8.1",
+        "integration": "0.8.2",
         "core": expected_framework_core_version,
     }
     assert diagnostics["operational_snapshot"]["runtime_status"] == "active"

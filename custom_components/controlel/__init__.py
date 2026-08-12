@@ -65,6 +65,7 @@ async def async_setup_entry(
     entry: ControlelConfigEntry,
 ) -> bool:
     """Set up one Controlel runtime from a config entry."""
+    core_version = await hass.async_add_executor_job(metadata.version, "controlel")
     config = integration_config_from_entry(entry.data, entry.options)
     zone_control = config.zone_control
     heat_source_configuration = config.heat_source_configuration
@@ -229,7 +230,7 @@ async def async_setup_entry(
             measurement_mapper=HomeAssistantMeasurementMapper(config.sensor_binding),
             failure_sink=failure_sink,
             config=config,
-            core_version=metadata.version("controlel"),
+            core_version=core_version,
             logger=LOGGER,
             runtime_supervisor=supervisor,
             scheduled_callback_cleanup=scheduler.cancel_all,

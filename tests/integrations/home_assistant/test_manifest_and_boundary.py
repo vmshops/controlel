@@ -27,7 +27,7 @@ def test_manifest_has_required_custom_component_contract():
         "iot_class": "local_push",
         "requirements": ["controlel==0.6.0"],
         "single_config_entry": True,
-        "version": "0.8.1",
+        "version": "0.8.2",
     }
 
 
@@ -37,7 +37,7 @@ def test_core_and_integration_versions_are_intentionally_independent():
         core_version = tomllib.load(pyproject_file)["project"]["version"]
 
     assert core_version == "0.6.0"
-    assert manifest["version"] == INTEGRATION_VERSION == "0.8.1"
+    assert manifest["version"] == INTEGRATION_VERSION == "0.8.2"
     assert manifest["requirements"] == ["controlel==0.6.0"]
     assert manifest["version"] != manifest["requirements"][0].partition("==")[2]
 
@@ -80,13 +80,22 @@ def test_operational_translations_are_truthful_and_action_oriented():
     binary_sensors = strings["entity"]["binary_sensor"]
 
     assert binary_sensors == {
-        "heat_required": {"name": "Heating is requested"},
-        "measurement_valid": {"name": "Measurement is valid"},
-        "runtime_active": {"name": "Runtime is active"},
-        "recoverable_failure": {"name": "Recoverable failure is active"},
-        "fatal_failure": {"name": "Fatal failure is active"},
-        "safety_bypassed_lockout": {"name": "Safety command bypassed source lockout"},
-        "emergency_disable_attempted": {"name": "Emergency heating-off command was attempted"},
+        "heat_required": {"name": "Heating is requested", "state": {"on": "Yes", "off": "No"}},
+        "measurement_valid": {"name": "Measurement is valid", "state": {"on": "Yes", "off": "No"}},
+        "runtime_active": {"name": "Runtime is active", "state": {"on": "Yes", "off": "No"}},
+        "recoverable_failure": {
+            "name": "Recoverable failure is active",
+            "state": {"on": "Yes", "off": "No"},
+        },
+        "fatal_failure": {"name": "Fatal failure is active", "state": {"on": "Yes", "off": "No"}},
+        "safety_bypassed_lockout": {
+            "name": "Safety command bypassed source lockout",
+            "state": {"on": "Yes", "off": "No"},
+        },
+        "emergency_disable_attempted": {
+            "name": "Emergency heating-off command was attempted",
+            "state": {"on": "Yes", "off": "No"},
+        },
     }
     assert sensors["grace_remaining"]["name"] == ("Sensor failure grace time remaining")
     assert sensors["grace_deadline"]["name"] == "Sensor failure grace deadline"

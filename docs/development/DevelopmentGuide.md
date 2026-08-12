@@ -126,10 +126,10 @@ Build and independently validate the fixed-name release candidate from the
 repository root:
 
 ```text
-python scripts/packaging/build_hacs_release.py --version 0.8.1
+python scripts/packaging/build_hacs_release.py --version 0.8.2
 python scripts/packaging/validate_hacs_release.py \
   dist/hacs/controlel.zip \
-  --version 0.8.1 \
+  --version 0.8.2 \
   --checksum dist/hacs/controlel.zip.sha256
 ```
 
@@ -144,7 +144,7 @@ rejection behavior. Generated files remain below ignored `dist/hacs/`.
 
 ## Configuration and options development
 
-The integration candidate version is `0.8.1`; its manifest pins the published,
+The integration candidate version is `0.8.2`; its manifest pins the published,
 immutable core `controlel==0.6.0`.
 
 New-entry configuration defaults are 0.3/0.1 Â°C hysteresis and 10/5-minute

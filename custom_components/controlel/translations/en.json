@@ -584,13 +584,13 @@
       "duplicate_commands_suppressed": {"name": "Duplicate commands suppressed"}
     },
     "binary_sensor": {
-      "heat_required": {"name": "Heating is requested"},
-      "measurement_valid": {"name": "Measurement is valid"},
-      "runtime_active": {"name": "Runtime is active"},
-      "recoverable_failure": {"name": "Recoverable failure is active"},
-      "fatal_failure": {"name": "Fatal failure is active"},
-      "safety_bypassed_lockout": {"name": "Safety command bypassed source lockout"},
-      "emergency_disable_attempted": {"name": "Emergency heating-off command was attempted"}
+      "heat_required": {"name": "Heating is requested", "state": {"on": "Yes", "off": "No"}},
+      "measurement_valid": {"name": "Measurement is valid", "state": {"on": "Yes", "off": "No"}},
+      "runtime_active": {"name": "Runtime is active", "state": {"on": "Yes", "off": "No"}},
+      "recoverable_failure": {"name": "Recoverable failure is active", "state": {"on": "Yes", "off": "No"}},
+      "fatal_failure": {"name": "Fatal failure is active", "state": {"on": "Yes", "off": "No"}},
+      "safety_bypassed_lockout": {"name": "Safety command bypassed source lockout", "state": {"on": "Yes", "off": "No"}},
+      "emergency_disable_attempted": {"name": "Emergency heating-off command was attempted", "state": {"on": "Yes", "off": "No"}}
     }
   },
   "issues": {

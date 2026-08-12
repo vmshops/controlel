@@ -25,6 +25,7 @@ class StateLike(Protocol):
     state: str
     attributes: Mapping[str, object]
     last_updated: datetime | None
+    last_changed: datetime | None
 
 
 class MeasurementRejectionReason(StrEnum):

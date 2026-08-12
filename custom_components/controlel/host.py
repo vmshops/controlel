@@ -87,7 +87,7 @@ from .runtime_executor import (
 )
 
 type Unsubscribe = Callable[[], None]
-type StateListener = Callable[[StateLike | None], None]
+type StateListener = Callable[[StateLike | None, StateLike | None], None]
 type StateSubscriber = Callable[[object, str, StateListener], Unsubscribe]
 type StateGetter = Callable[[str], StateLike | None]
 type ShutdownSubscriber = Callable[[object, Callable[[], None]], Unsubscribe]
@@ -632,7 +632,11 @@ class HomeAssistantControlelHost:
     def clear_transient_issues(self) -> None:
         self._failure_sink.clear_transient_issues()
 
-    def _on_state_change(self, state: StateLike | None) -> None:
+    def _on_state_change(
+        self,
+        state: StateLike | None,
+        previous_state: StateLike | None = None,
+    ) -> None:
         if not self._accepting:
             return
         if self._buffering:
@@ -654,18 +658,31 @@ class HomeAssistantControlelHost:
             "Controlel Home Assistant shutdown",
         )
 
-    def _on_source_state_change(self, state: StateLike | None) -> None:
+    def _on_source_state_change(
+        self,
+        state: StateLike | None,
+        previous_state: StateLike | None = None,
+    ) -> None:
         if not self._accepting:
             return
         task = self._create_task(
-            self._async_ingest_reported_source(state),
+            self._async_ingest_reported_source(state, previous_state),
             "Controlel reported source-state ingestion",
         )
         self._accepted_callback_tasks.add(task)
         task.add_done_callback(self._accepted_callback_tasks.discard)
 
-    async def _async_ingest_reported_source(self, state: StateLike | None) -> None:
-        evidence = _reported_source_evidence(state, self._source_entity_id)
+    async def _async_ingest_reported_source(
+        self,
+        state: StateLike | None,
+        previous_state: StateLike | None = None,
+    ) -> None:
+        evidence = _reported_source_evidence(
+            state,
+            self._source_entity_id,
+            previous_state=previous_state,
+            prior_evidence=self._reported_source_evidence,
+        )
         if evidence is None or not self._accepting:
             return
         self._reported_source_evidence = evidence
@@ -1618,7 +1635,7 @@ def _default_state_subscriber(
 
     @callback
     def on_event(event: Any) -> None:
-        listener(event.data["new_state"])
+        listener(event.data["new_state"], event.data["old_state"])
 
     return async_track_state_change_event(hass, entity_id, on_event)
 
@@ -1626,24 +1643,52 @@ def _default_state_subscriber(
 def _reported_source_evidence(
     state: StateLike | None,
     expected_entity_id: str | None,
+    *,
+    previous_state: StateLike | None = None,
+    prior_evidence: ReportedSourceEvidence | None = None,
 ) -> ReportedSourceEvidence | None:
-    """Map explicit HA controller state without inventing transition history."""
+    """Map explicit HA state and only genuine stable transitions."""
 
     if state is None or expected_entity_id is None or state.entity_id != expected_entity_id:
         return None
     observed_at = state.last_updated
     if observed_at is None or observed_at.tzinfo is None or observed_at.utcoffset() is None:
         return None
-    reported = {
+    reported_by_state = {
         "on": ReportedSourceState.ENABLED,
         "off": ReportedSourceState.DISABLED,
         "unknown": ReportedSourceState.UNKNOWN,
         "unavailable": ReportedSourceState.UNAVAILABLE,
-    }.get(state.state.strip().casefold(), ReportedSourceState.UNKNOWN)
+    }
+    reported = reported_by_state.get(state.state.strip().casefold(), ReportedSourceState.UNKNOWN)
+    previous_reported = None
+    if previous_state is not None and previous_state.entity_id == expected_entity_id:
+        previous_reported = reported_by_state.get(
+            previous_state.state.strip().casefold(),
+            ReportedSourceState.UNKNOWN,
+        )
+    stable_states = {ReportedSourceState.ENABLED, ReportedSourceState.DISABLED}
+    transition_at = None
+    if reported in stable_states and previous_reported in stable_states and previous_reported is not reported:
+        candidate = getattr(state, "last_changed", None)
+        if (
+            candidate is not None
+            and candidate.tzinfo is not None
+            and candidate.utcoffset() is not None
+            and candidate <= observed_at
+        ):
+            transition_at = candidate
+    elif (
+        reported in stable_states
+        and previous_reported is reported
+        and prior_evidence is not None
+        and prior_evidence.state is reported
+    ):
+        transition_at = prior_evidence.transition_at
     return ReportedSourceEvidence(
         state=reported,
         observed_at=observed_at,
-        transition_at=None,
+        transition_at=transition_at,
     )
 
 

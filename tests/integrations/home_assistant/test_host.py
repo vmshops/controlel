@@ -34,7 +34,11 @@ from controlel.domain.heat_delivery import (
     HeatSourceObservation,
     ObservedValue,
 )
-from controlel.domain.source_control import ReportedSourceState
+from controlel.domain.source_control import (
+    ReportedSourceEvidence,
+    ReportedSourceState,
+    TransitionHistoryKnowledge,
+)
 from controlel.domain.value_objects.sensor_id import SensorId
 from controlel.domain.value_objects.temperature import Temperature
 from controlel.domain.value_objects.zone_id import ZoneId
@@ -235,13 +239,14 @@ class FakeState:
     state: str
     last_updated: datetime
     entity_id: str = "sensor.room"
+    last_changed: datetime | None = None
 
     @property
     def attributes(self):
         return {"unit_of_measurement": "°C"}
 
 
-def test_reported_source_mapping_is_explicit_and_never_fabricates_transition_history() -> None:
+def test_reported_source_mapping_is_explicit_without_startup_transition_history() -> None:
     for raw, expected in (
         ("on", ReportedSourceState.ENABLED),
         ("off", ReportedSourceState.DISABLED),
@@ -259,6 +264,160 @@ def test_reported_source_mapping_is_explicit_and_never_fabricates_transition_his
 
     assert _reported_source_evidence(None, "switch.boiler") is None
     assert _reported_source_evidence(FakeState("on", NOW), "switch.boiler") is None
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "expected"),
+    (
+        ("off", "on", ReportedSourceState.ENABLED),
+        ("on", "off", ReportedSourceState.DISABLED),
+    ),
+)
+def test_genuine_stable_reported_transition_has_known_ha_timestamp(old, new, expected) -> None:
+    changed_at = NOW + timedelta(seconds=1)
+    evidence = _reported_source_evidence(
+        FakeState(new, changed_at, entity_id="switch.boiler", last_changed=changed_at),
+        "switch.boiler",
+        previous_state=FakeState(old, NOW, entity_id="switch.boiler", last_changed=NOW),
+    )
+
+    assert evidence is not None
+    assert evidence.state is expected
+    assert evidence.transition_at == changed_at
+    assert evidence.transition_history is TransitionHistoryKnowledge.KNOWN
+
+
+@pytest.mark.parametrize("old", ["unknown", "unavailable"])
+@pytest.mark.parametrize("new", ["on", "off"])
+def test_indeterminate_to_stable_report_does_not_invent_transition_age(old, new) -> None:
+    changed_at = NOW + timedelta(seconds=1)
+    evidence = _reported_source_evidence(
+        FakeState(new, changed_at, entity_id="switch.boiler", last_changed=changed_at),
+        "switch.boiler",
+        previous_state=FakeState(old, NOW, entity_id="switch.boiler", last_changed=NOW),
+    )
+
+    assert evidence is not None
+    assert evidence.transition_at is None
+    assert evidence.transition_history is TransitionHistoryKnowledge.UNKNOWN
+
+
+@pytest.mark.parametrize(
+    ("raw", "reported"), (("on", ReportedSourceState.ENABLED), ("off", ReportedSourceState.DISABLED))
+)
+def test_same_state_report_keeps_prior_transition_without_rearming(raw, reported) -> None:
+    original_transition = NOW
+    observed_at = NOW + timedelta(seconds=10)
+    evidence = _reported_source_evidence(
+        FakeState(raw, observed_at, entity_id="switch.boiler", last_changed=original_transition),
+        "switch.boiler",
+        previous_state=FakeState(raw, NOW, entity_id="switch.boiler", last_changed=original_transition),
+        prior_evidence=ReportedSourceEvidence(reported, NOW, original_transition),
+    )
+
+    assert evidence is not None
+    assert evidence.transition_at == original_transition
+
+
+def test_command_echo_keeps_dispatch_and_reported_protection_separate_and_monotonic() -> None:
+    policy = SourceControlPolicy(
+        minimum_on_time=timedelta(seconds=60),
+        minimum_off_time=timedelta(seconds=60),
+    )
+    requested = policy.evaluate(
+        desired_command=HeatingAction.ENABLE_HEATING,
+        now=NOW,
+        current_state=None,
+    )
+    dispatched = policy.record_dispatched(requested, dispatched_at=NOW, safety_command=False)
+    visible_at = NOW + timedelta(seconds=2)
+    evidence = _reported_source_evidence(
+        FakeState("on", visible_at, entity_id="switch.boiler", last_changed=visible_at),
+        "switch.boiler",
+        previous_state=FakeState("off", NOW, entity_id="switch.boiler", last_changed=NOW),
+    )
+    assert evidence is not None
+
+    corrective = policy.evaluate(
+        desired_command=HeatingAction.DISABLE_HEATING,
+        now=NOW + timedelta(seconds=3),
+        current_state=dispatched,
+        corrective_reconciliation=True,
+        reported_source_evidence=evidence,
+    )
+    report_protected = policy.evaluate(
+        desired_command=HeatingAction.DISABLE_HEATING,
+        now=NOW + timedelta(seconds=60),
+        current_state=corrective.state,
+        corrective_reconciliation=True,
+        reported_source_evidence=evidence,
+        lockout_expiry_reevaluation=True,
+    )
+    repeated = _reported_source_evidence(
+        FakeState("on", NOW + timedelta(seconds=10), entity_id="switch.boiler", last_changed=visible_at),
+        "switch.boiler",
+        previous_state=FakeState("on", visible_at, entity_id="switch.boiler", last_changed=visible_at),
+        prior_evidence=evidence,
+    )
+
+    assert dispatched.last_successful_enable_dispatch == NOW
+    assert evidence.transition_at == visible_at
+    assert corrective.outcome is SourceControlOutcome.DEFER
+    assert corrective.lockout_deadline == NOW + timedelta(seconds=60)
+    assert report_protected.outcome is SourceControlOutcome.DEFER
+    assert report_protected.lockout_deadline == visible_at + timedelta(seconds=60)
+    assert repeated is not None
+    assert repeated.transition_at == visible_at
+
+
+def test_three_manual_on_attempts_each_establish_a_fresh_minimum_on_boundary() -> None:
+    policy = SourceControlPolicy(
+        minimum_on_time=timedelta(seconds=60),
+        minimum_off_time=timedelta(seconds=60),
+    )
+    initial_time = NOW - timedelta(seconds=60)
+    initial = policy.evaluate(
+        desired_command=HeatingAction.DISABLE_HEATING,
+        now=initial_time,
+        current_state=None,
+    )
+    state = policy.record_dispatched(initial, dispatched_at=initial_time, safety_command=False)
+
+    for attempt in range(3):
+        transition_at = NOW + timedelta(minutes=2 * attempt)
+        evidence = _reported_source_evidence(
+            FakeState("on", transition_at, entity_id="switch.boiler", last_changed=transition_at),
+            "switch.boiler",
+            previous_state=FakeState(
+                "off",
+                transition_at - timedelta(seconds=1),
+                entity_id="switch.boiler",
+                last_changed=transition_at - timedelta(seconds=1),
+            ),
+        )
+        assert evidence is not None
+        deferred = policy.evaluate(
+            desired_command=HeatingAction.DISABLE_HEATING,
+            now=transition_at + timedelta(seconds=1),
+            current_state=state,
+            corrective_reconciliation=True,
+            reported_source_evidence=evidence,
+        )
+
+        deadline = transition_at + timedelta(seconds=60)
+        assert deferred.outcome is SourceControlOutcome.DEFER
+        assert deferred.lockout_deadline == deadline
+
+        due = policy.evaluate(
+            desired_command=HeatingAction.DISABLE_HEATING,
+            now=deadline,
+            current_state=deferred.state,
+            corrective_reconciliation=True,
+            reported_source_evidence=evidence,
+            lockout_expiry_reevaluation=True,
+        )
+        assert due.outcome is SourceControlOutcome.DISPATCH
+        state = policy.record_dispatched(due, dispatched_at=deadline, safety_command=False)
 
 
 class FakeHass:

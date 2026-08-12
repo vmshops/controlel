@@ -12,5 +12,6 @@ dependency.
 - [Release guide](development/ReleaseGuide.md)
 - [Deployment](operations/Deployment.md)
 - [Home Assistant installation](operations/HomeAssistantInstallation.md)
+- [Home Assistant entity reference](operations/EntityReference.md)
 - [Troubleshooting](operations/Troubleshooting.md)
 - [Roadmap](architecture/07_Roadmap.md)

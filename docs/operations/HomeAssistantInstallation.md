@@ -17,11 +17,11 @@ Protection history is not persisted. After restart or reload, Controlel reads
 the current sensor value deterministically but does not infer prior command
 history or lockout state from the switch.
 
-Controlel `0.8.1` is the current development candidate for one heating zone,
+Controlel `0.8.2` is the current development candidate for one heating zone,
 one primary temperature sensor, and one shared heat source. It requires the
 public core package `controlel==0.6.0`.
 
-Integration `0.8.1` uses published immutable core `0.6.0`. It adds the
+Integration `0.8.2` uses published immutable core `0.6.0`. It retains the
 thread-safe entity publication and runtime-supervision host binding needed for
 M30.2 while retaining the existing configuration surface and entity identity.
 The configured simple switch is explicitly Controlel-owned because this
@@ -53,9 +53,13 @@ High-frequency remaining-time entities may be excluded from Recorder if their
 history is not useful. Passive timestamp entities are low-churn. Controlel does
 not modify Recorder configuration automatically.
 
-Candidate `0.8.1` is not published; use the latest published release for HACS
+Candidate `0.8.2` is not published; use published `0.8.1` for HACS
 custom-repository installation. Controlel is not listed in the default HACS
 store.
+
+After installation, use the
+[Home Assistant entity reference](EntityReference.md) to interpret every
+public entity and downloaded-diagnostics-only resilience field.
 
 Milestone 27 adds **Heat-demand confirmation time** to the zone settings.
 New entries default to 2 minutes. Entries created by 0.5.0 or older that lack
