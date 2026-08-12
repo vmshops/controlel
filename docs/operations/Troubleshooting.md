@@ -29,7 +29,7 @@ The current switch state is never used to fabricate it.
 Confirm that the exact custom-repository URL is
 `https://github.com/vmshops/controlel` and the selected category is
 **Integration**. The repository must be publicly accessible. Use the latest
-published release; `0.8.0` remains an unpublished candidate.
+published release; `0.8.1` remains an unpublished candidate.
 
 If a zone stays in `confirmation_pending`, check measurement validity and the
 confirmation deadline/remaining entities. Unknown, unavailable, invalid,
@@ -94,9 +94,11 @@ database volume; Controlel does not alter Recorder configuration.
 
 Scheduler installation/cancellation failure, clock regression, re-entrancy,
 invalid provenance/configuration state, and unexpected programming failures
-create or update one stable ERROR Repairs issue. The host stops accepting new
-work and terminally shuts down behind already accepted runtime work. Reloading
-constructs a new runtime; the stopped instance is never reused.
+create or update one stable ERROR Repairs issue. In 0.8.1 the supervisor
+quarantines the failed normal generation and transfers exclusive authority to
+the core failsafe while Home Assistant remains alive. It then owns the bounded
+three-attempt, five-minute restart campaign and truthful handover to a newly
+constructed normal runtime.
 
 Before terminal cleanup, fatal shutdown makes at most one best-effort emergency
 heating-off request unless the original failure was already a failed heating-off
@@ -106,7 +108,8 @@ claim the physical heat source is off.
 
 ## Reload and shutdown
 
-Unload first rejects new state and timer submissions, removes listeners, lets
+Unload first rejects new state and timer submissions, removes listeners, cancels
+all adapter-owned one-shot timers, lets
 accepted serialized work finish, calls `ControlRuntime.stop()` on the
 dedicated worker, and closes the executor. A late timer callback is harmless
 because both the host acceptance gate and runtime generation checks reject it.
@@ -125,16 +128,15 @@ second.
 
 ## Core dependency installation
 
-Integration candidate `0.8.0` requires exactly `controlel==0.5.0`
-during M30.1C. Normal supported
+Integration candidate `0.8.1` requires exactly `controlel==0.6.0`. Normal supported
 installation lets Home Assistant obtain that dependency automatically; users
 do not need to install it manually. If setup reports a missing core, confirm
 that the environment can reach PyPI and that `python -m pip show controlel`
-reports version `0.5.0`.
+reports version `0.6.0`.
 
 Local development may install the checkout with `python -m pip install
 --no-deps -e .`. Public-package framework validation must use a different
-environment, install `controlel==0.5.0` from PyPI, and resolve it from
+environment, install `controlel==0.6.0` from PyPI, and resolve it from
 `site-packages`.
 
 ## Framework test environment fails to start
@@ -150,7 +152,7 @@ The supported harness uses Python 3.14.2 or newer, Home Assistant `2026.7.3`,
 and `pytest-homeassistant-custom-component==0.13.347`. Install the hashed lock
 with `python -m pip install --require-hashes -r requirements/ha-test.txt`.
 Then either install the checkout editable for the local composition or install
-`controlel==0.5.0` from PyPI for the isolated public composition.
+`controlel==0.6.0` from PyPI for the isolated public composition.
 
 If native Windows reports `ModuleNotFoundError: No module named 'fcntl'` or
 `No module named 'resource'`, run the framework suite in Linux or WSL. These

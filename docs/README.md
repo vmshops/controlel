@@ -2,7 +2,7 @@
 
 Controlel keeps its platform-independent core and Home Assistant adapter in one
 repository, but releases them independently. The Python core uses versions and
-annotated tags such as `controlel==0.5.0` and `core-v0.5.0`. The Home Assistant
+annotated tags such as `controlel==0.6.0` and `core-v0.6.0`. The Home Assistant
 integration uses the version in `custom_components/controlel/manifest.json`,
 integration tags in the `vX.Y.Z` namespace, and an exact published core
 dependency.

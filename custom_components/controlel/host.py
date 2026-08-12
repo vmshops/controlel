@@ -26,12 +26,14 @@ from controlel.application.runtime.runtime_processing_result import (
     RuntimeProcessingStatus,
     TemperatureNoDecisionReason,
 )
+from controlel.application.runtime.runtime_supervisor import RuntimeSupervisor
 from controlel.application.services.heat_demand_safety_policy import (
     HeatDemandSafetyPhase,
 )
 from controlel.application.services.heating_diagnostics_boundary import (
     HeatingDiagnosticsBoundary,
 )
+from controlel.application.services.source_control_policy import SourceControlOutcome
 from controlel.application.state.heating_diagnostics import (
     empty_heating_diagnostics_snapshot,
 )
@@ -42,7 +44,11 @@ from controlel.domain.commands.heating_action import HeatingAction
 from controlel.domain.demands.building_heat_demand_status import (
     BuildingHeatDemandStatus,
 )
+from controlel.domain.heat_delivery.observation import ObservationQuality
 from controlel.domain.measurements.measurement import Measurement
+from controlel.domain.operating_mode import SafeHeatingTemperatureEvidence
+from controlel.domain.runtime_supervision import CommandAuthority
+from controlel.domain.source_control import ReportedSourceEvidence, ReportedSourceState
 
 from .config import HomeAssistantIntegrationConfig
 from .const import INTEGRATION_VERSION
@@ -119,6 +125,8 @@ class HomeAssistantControlelHost:
         interval_subscriber: IntervalSubscriber | None = None,
         heating_diagnostics_boundary: HeatingDiagnosticsBoundary | None = None,
         heating_diagnostics_enabled: bool = True,
+        runtime_supervisor: RuntimeSupervisor | None = None,
+        scheduled_callback_cleanup: Callable[[], None] | None = None,
     ) -> None:
         self._hass = hass
         self._runtime = runtime
@@ -134,6 +142,10 @@ class HomeAssistantControlelHost:
         self._interval_subscriber = interval_subscriber or _default_interval_subscriber
         self._heating_diagnostics_boundary = heating_diagnostics_boundary or HeatingDiagnosticsBoundary()
         self._heating_diagnostics_enabled = heating_diagnostics_enabled
+        self._runtime_supervisor = runtime_supervisor
+        self._scheduled_callback_cleanup = scheduled_callback_cleanup
+        self._source_entity_id = getattr(config, "controlled_entity_id", None)
+        self._reported_source_evidence: ReportedSourceEvidence | None = None
         initial_heating_diagnostics = empty_heating_diagnostics_snapshot(config.zone_id.value)
         diagnostic = config.diagnostic_configuration
         self.snapshot_source = OperationalSnapshotSource(
@@ -182,6 +194,7 @@ class HomeAssistantControlelHost:
         self._live_queue: deque[StateLike | None] = deque()
         self._unsubscribe: Unsubscribe | None = None
         self._unsubscribe_shutdown: Unsubscribe | None = None
+        self._unsubscribe_source: Unsubscribe | None = None
         self._live_drain_task: asyncio.Task[Any] | None = None
         self._accepted_callback_tasks: set[asyncio.Task[Any]] = set()
         self._shadow_assessment_tasks: set[asyncio.Task[Any]] = set()
@@ -225,9 +238,21 @@ class HomeAssistantControlelHost:
                 self._hass,
                 self._on_home_assistant_stop,
             )
+            if self._source_entity_id is not None:
+                self._unsubscribe_source = self._state_subscriber(
+                    self._hass,
+                    self._source_entity_id,
+                    self._on_source_state_change,
+                )
             snapshot = self._state_getter(self._temperature_entity_id)
+            source_snapshot = self._state_getter(self._source_entity_id) if self._source_entity_id else None
 
             try:
+                begin_recovery = getattr(self._runtime, "begin_source_recovery", None)
+                if callable(begin_recovery):
+                    await self._async_submit_runtime(begin_recovery)
+                if source_snapshot is not None:
+                    await self._async_ingest_reported_source(source_snapshot)
                 startup_result = await self._async_submit_runtime(self._runtime.start)
             except HomeAssistantServiceCallError as error:
                 self._handle_synchronous_failure(error)
@@ -300,6 +325,16 @@ class HomeAssistantControlelHost:
 
     def request_fatal_shutdown(self, error: Exception) -> None:
         """Coordinate terminal shutdown on the HA loop after a fatal failure."""
+        if self._runtime_supervisor is not None:
+            if self._stopping or self._stopped:
+                return
+            task = self._create_task(
+                self._async_enter_supervised_failsafe(error),
+                "Controlel supervised failsafe takeover",
+            )
+            self._accepted_callback_tasks.add(task)
+            task.add_done_callback(self._accepted_callback_tasks.discard)
+            return
         if self._stopping or self._stopped or self._fatal_error is not None:
             return
         self._logger.error(
@@ -351,6 +386,20 @@ class HomeAssistantControlelHost:
         self._fatal_shutdown_task = self._create_task(
             self._async_fatal_shutdown(error, now),
             "Controlel fatal runtime shutdown",
+        )
+
+    async def _async_enter_supervised_failsafe(self, error: Exception) -> None:
+        """Quarantine the failed generation without terminating the HA host."""
+
+        if self._runtime_supervisor is None or self._stopping or self._stopped:
+            return
+        await self._async_submit_runtime(self._runtime_supervisor.report_fatal, error)
+        diagnostics = self._runtime_supervisor.diagnostics()
+        self.snapshot_source.update(
+            now=datetime.now(UTC),
+            runtime_status=RuntimeStatus.ACTIVE,
+            fatal_failure_active=True,
+            original_fatal_cause=diagnostics.last_fatal_cause_code,
         )
 
     async def _async_fatal_shutdown(
@@ -507,6 +556,14 @@ class HomeAssistantControlelHost:
                 except Exception:
                     self._logger.exception("Failed to unsubscribe Controlel shutdown listener")
 
+            unsubscribe_source = self._unsubscribe_source
+            self._unsubscribe_source = None
+            if unsubscribe_source is not None:
+                try:
+                    unsubscribe_source()
+                except Exception:
+                    self._logger.exception("Failed to unsubscribe Controlel source-state listener")
+
             drain_task = self._live_drain_task
             if drain_task is not None and drain_task is not asyncio.current_task():
                 await asyncio.gather(drain_task, return_exceptions=True)
@@ -517,13 +574,23 @@ class HomeAssistantControlelHost:
 
             if not self._executor.closed:
                 try:
-                    await self._async_submit_runtime(self._runtime.stop)
+                    normal_runtime_active = (
+                        self._runtime_supervisor is None
+                        or self._runtime_supervisor.state.command_authority is CommandAuthority.NORMAL
+                    )
+                    if normal_runtime_active:
+                        await self._async_submit_runtime(self._runtime.stop)
                 except RuntimeExecutorClosedError:
                     pass
                 except Exception as error:
                     self._logger.exception("Controlel runtime stop failed; continuing cleanup")
                     self._failure_sink.handle_synchronous_failure(error)
                 finally:
+                    if self._scheduled_callback_cleanup is not None:
+                        try:
+                            await self._async_submit_runtime(self._scheduled_callback_cleanup)
+                        except Exception:
+                            self._logger.exception("Controlel scheduled callback cleanup failed")
                     await self._async_wait_for_shadow_assessments()
                     await self._async_wait_for_heating_diagnostics()
                     await self._executor.async_close()
@@ -587,6 +654,30 @@ class HomeAssistantControlelHost:
             "Controlel Home Assistant shutdown",
         )
 
+    def _on_source_state_change(self, state: StateLike | None) -> None:
+        if not self._accepting:
+            return
+        task = self._create_task(
+            self._async_ingest_reported_source(state),
+            "Controlel reported source-state ingestion",
+        )
+        self._accepted_callback_tasks.add(task)
+        task.add_done_callback(self._accepted_callback_tasks.discard)
+
+    async def _async_ingest_reported_source(self, state: StateLike | None) -> None:
+        evidence = _reported_source_evidence(state, self._source_entity_id)
+        if evidence is None or not self._accepting:
+            return
+        self._reported_source_evidence = evidence
+        if self._runtime_supervisor is not None:
+            await self._async_submit_runtime(self._runtime_supervisor.ingest_reported_source, evidence)
+        try:
+            result = await self._async_submit_runtime(self._runtime.ingest_reported_source_state, evidence)
+        except RuntimeStoppedError:
+            return
+        if isinstance(result, HeatDemandEvaluationResult):
+            self._observe_evaluation_result(result)
+
     async def _async_drain_setup_buffer(self) -> None:
         while self._buffer:
             await self._async_process_state_now(self._buffer.popleft())
@@ -608,6 +699,10 @@ class HomeAssistantControlelHost:
         mapping = self._measurement_mapper.map_state(state)
         if mapping.measurement is None:
             self._observe_rejected_state(state, mapping.rejection_reason)
+            if self._runtime_supervisor is not None:
+                await self._async_submit_runtime(self._runtime_supervisor.update_trusted_evidence, None)
+                if self._runtime_supervisor.state.command_authority is CommandAuthority.FAILSAFE:
+                    return None
             result = await self._async_submit_runtime(self._runtime.mark_measurement_indeterminate)
             if isinstance(result, HeatDemandEvaluationResult):
                 self._observe_evaluation_result(result)
@@ -616,6 +711,17 @@ class HomeAssistantControlelHost:
                 mapping.rejection_reason,
             )
             return None
+
+        if self._runtime_supervisor is not None:
+            safe_evidence = SafeHeatingTemperatureEvidence(
+                sensor_id=mapping.measurement.sensor_id,
+                value=mapping.measurement.value.value,
+                quality=ObservationQuality.VALID,
+                observed_at=mapping.measurement.timestamp,
+            )
+            await self._async_submit_runtime(self._runtime_supervisor.update_trusted_evidence, safe_evidence)
+            if self._runtime_supervisor.state.command_authority is CommandAuthority.FAILSAFE:
+                return None
 
         try:
             result = await self._async_submit_runtime(
@@ -666,6 +772,16 @@ class HomeAssistantControlelHost:
             if not self._stopping and not self._stopped:
                 raise
         else:
+            if self._runtime_supervisor is not None:
+                diagnostics = self._runtime_supervisor.diagnostics()
+                if diagnostics.supervisor_state == "normal":
+                    if self._failure_sink.fatal_failure_active:
+                        self._failure_sink.clear_fatal_issue_after_successful_reload()
+                    self.snapshot_source.update(
+                        now=datetime.now(UTC),
+                        runtime_status=RuntimeStatus.ACTIVE,
+                        fatal_failure_active=False,
+                    )
             if heat_source_state_store is not None:
                 self._observe_scheduled_state(previous_state, previous_failure)
 
@@ -779,6 +895,32 @@ class HomeAssistantControlelHost:
             return
         if isinstance(error, RuntimeReentrancyError):
             self.request_fatal_shutdown(error)
+
+    def replace_runtime_after_handover(self, runtime: ControlRuntime) -> None:
+        """Publish a fully reconstructed runtime before NORMAL authority returns."""
+
+        self._runtime = runtime
+
+    def runtime_supervision_diagnostics(self) -> dict[str, object] | None:
+        """Return bounded core supervision diagnostics for HA diagnostics."""
+
+        if self._runtime_supervisor is None:
+            return None
+        diagnostics = self._runtime_supervisor.diagnostics()
+        projected = {name: getattr(diagnostics, name) for name in diagnostics.__dataclass_fields__}
+        projected["command_authority"] = projected.pop("active_command_authority")
+        projected["reported_source_state"] = (
+            self._reported_source_evidence.state.value if self._reported_source_evidence is not None else None
+        )
+        return projected
+
+    async def async_source_resilience_diagnostics(self) -> dict[str, object] | None:
+        """Project bounded core resilience evidence on the runtime executor."""
+
+        if self._executor.closed:
+            return None
+        diagnostics = await self._async_submit_runtime(self._runtime.source_resilience_diagnostics)
+        return {name: getattr(diagnostics, name) for name in diagnostics.__dataclass_fields__}
 
     def _observe_rejected_state(
         self,
@@ -942,16 +1084,17 @@ class HomeAssistantControlelHost:
             HeatDemandSafetyPhase.INDETERMINATE_GRACE: SafetyState.INDETERMINATE_GRACE,
             HeatDemandSafetyPhase.INDETERMINATE_TIMED_OUT: SafetyState.TIMEOUT_ACTION_APPLIED,
         }[result.safety_assessment.phase]
-        outcome = {
-            HeatDemandEvaluationStatus.INDETERMINATE_GRACE: CommandOutcome.NONE,
-            HeatDemandEvaluationStatus.DEMAND_COMMAND_EXECUTED: CommandOutcome.DISPATCHED,
-            HeatDemandEvaluationStatus.DEMAND_COMMAND_SUPPRESSED: (CommandOutcome.SUPPRESSED_DUPLICATE),
-            HeatDemandEvaluationStatus.SAFETY_COMMAND_EXECUTED: CommandOutcome.DISPATCHED,
-            HeatDemandEvaluationStatus.SAFETY_COMMAND_SUPPRESSED: (CommandOutcome.SUPPRESSED_DUPLICATE),
-            HeatDemandEvaluationStatus.DEMAND_COMMAND_DEFERRED: CommandOutcome.DEFERRED,
-            HeatDemandEvaluationStatus.SAFETY_COMMAND_DEFERRED: CommandOutcome.DEFERRED,
-        }[result.status]
-        if result.status is HeatDemandEvaluationStatus.INDETERMINATE_GRACE:
+        outcome = _command_outcome_for_evaluation(result)
+        resilience_code = {
+            HeatDemandEvaluationStatus.RESILIENCE_COMMAND_EXECUTED: DecisionCode.RESILIENCE_COMMAND_EXECUTED,
+            HeatDemandEvaluationStatus.RESILIENCE_COMMAND_SUPPRESSED: DecisionCode.RESILIENCE_COMMAND_SUPPRESSED,
+            HeatDemandEvaluationStatus.RESILIENCE_COMMAND_DEFERRED: DecisionCode.RESILIENCE_COMMAND_DEFERRED,
+            HeatDemandEvaluationStatus.RESILIENCE_COMMAND_HELD: DecisionCode.RESILIENCE_COMMAND_HELD,
+            HeatDemandEvaluationStatus.RESILIENCE_INDETERMINATE: DecisionCode.RESILIENCE_INDETERMINATE,
+        }.get(result.status)
+        if resilience_code is not None:
+            code = resilience_code
+        elif result.status is HeatDemandEvaluationStatus.INDETERMINATE_GRACE:
             code = DecisionCode.INDETERMINATE_PRESERVE_PREVIOUS
         elif result.status in {
             HeatDemandEvaluationStatus.SAFETY_COMMAND_EXECUTED,
@@ -1417,6 +1560,29 @@ class HomeAssistantControlelHost:
         return self._hass.async_create_task(coroutine, name=name)
 
 
+def _command_outcome_for_evaluation(result: HeatDemandEvaluationResult) -> CommandOutcome:
+    """Project every public core evaluation status without inventing dispatch."""
+
+    if result.status is HeatDemandEvaluationStatus.RESILIENCE_COMMAND_SUPPRESSED:
+        source = result.source_control_assessment
+        if source is not None and source.outcome is SourceControlOutcome.SUPPRESS_DUPLICATE:
+            return CommandOutcome.SUPPRESSED_DUPLICATE
+        return CommandOutcome.SUPPRESSED
+    return {
+        HeatDemandEvaluationStatus.INDETERMINATE_GRACE: CommandOutcome.NONE,
+        HeatDemandEvaluationStatus.DEMAND_COMMAND_EXECUTED: CommandOutcome.DISPATCHED,
+        HeatDemandEvaluationStatus.DEMAND_COMMAND_SUPPRESSED: CommandOutcome.SUPPRESSED_DUPLICATE,
+        HeatDemandEvaluationStatus.SAFETY_COMMAND_EXECUTED: CommandOutcome.DISPATCHED,
+        HeatDemandEvaluationStatus.SAFETY_COMMAND_SUPPRESSED: CommandOutcome.SUPPRESSED_DUPLICATE,
+        HeatDemandEvaluationStatus.DEMAND_COMMAND_DEFERRED: CommandOutcome.DEFERRED,
+        HeatDemandEvaluationStatus.SAFETY_COMMAND_DEFERRED: CommandOutcome.DEFERRED,
+        HeatDemandEvaluationStatus.RESILIENCE_COMMAND_EXECUTED: CommandOutcome.DISPATCHED,
+        HeatDemandEvaluationStatus.RESILIENCE_COMMAND_DEFERRED: CommandOutcome.DEFERRED,
+        HeatDemandEvaluationStatus.RESILIENCE_COMMAND_HELD: CommandOutcome.HELD,
+        HeatDemandEvaluationStatus.RESILIENCE_INDETERMINATE: CommandOutcome.NONE,
+    }[result.status]
+
+
 def _source_control_snapshot_changes(state: CoreSourceControlState) -> dict[str, object]:
     """Project one normalized core source-control snapshot into HA fields."""
 
@@ -1455,6 +1621,30 @@ def _default_state_subscriber(
         listener(event.data["new_state"])
 
     return async_track_state_change_event(hass, entity_id, on_event)
+
+
+def _reported_source_evidence(
+    state: StateLike | None,
+    expected_entity_id: str | None,
+) -> ReportedSourceEvidence | None:
+    """Map explicit HA controller state without inventing transition history."""
+
+    if state is None or expected_entity_id is None or state.entity_id != expected_entity_id:
+        return None
+    observed_at = state.last_updated
+    if observed_at is None or observed_at.tzinfo is None or observed_at.utcoffset() is None:
+        return None
+    reported = {
+        "on": ReportedSourceState.ENABLED,
+        "off": ReportedSourceState.DISABLED,
+        "unknown": ReportedSourceState.UNKNOWN,
+        "unavailable": ReportedSourceState.UNAVAILABLE,
+    }.get(state.state.strip().casefold(), ReportedSourceState.UNKNOWN)
+    return ReportedSourceEvidence(
+        state=reported,
+        observed_at=observed_at,
+        transition_at=None,
+    )
 
 
 def _default_shutdown_subscriber(

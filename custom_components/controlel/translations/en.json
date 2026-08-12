@@ -494,6 +494,11 @@
           "command_dispatched": "Command dispatched",
           "command_deferred": "Command deferred by source protection",
           "command_failed": "Command failed",
+          "resilience_command_executed": "Resilience command dispatched",
+          "resilience_command_suppressed": "Resilience command suppressed using reported-source evidence",
+          "resilience_command_deferred": "Resilience command deferred by source protection",
+          "resilience_command_held": "Source command held while resilience evidence is incomplete",
+          "resilience_indeterminate": "Resilience evaluation remains indeterminate",
           "runtime_started": "Runtime started",
           "runtime_stopped": "Runtime stopped",
           "heat_demand_confirmation_started": "Heat-demand confirmation started",
@@ -557,8 +562,10 @@
           "dispatched": "Service call dispatched",
           "suppressed_duplicate": "Duplicate command suppressed because it was already requested",
           "failed_recoverable": "Recoverable service failure",
-          "failed_fatal": "Fatal runtime failure"
-          ,"deferred": "Deferred by minimum-time protection"
+          "failed_fatal": "Fatal runtime failure",
+          "deferred": "Deferred by minimum-time protection",
+          "held": "Held while source resilience evidence is incomplete",
+          "suppressed": "Suppressed using explicit reported-source evidence"
         }
       },
       "last_command_time": {"name": "Last command time"},

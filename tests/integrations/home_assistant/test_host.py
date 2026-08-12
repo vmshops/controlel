@@ -23,7 +23,7 @@ from controlel.application.services.heating_diagnostics_boundary import (
 from controlel.application.services.heating_diagnostics_projector import HeatingDiagnosticsProjector
 from controlel.application.services.heating_performance_assessor import HeatingPerformanceAssessor
 from controlel.application.services.shadow_heating_performance_monitor import ShadowHeatingPerformanceMonitor
-from controlel.application.services.source_control_policy import SourceControlPolicy
+from controlel.application.services.source_control_policy import SourceControlOutcome, SourceControlPolicy
 from controlel.domain.commands.heating_action import HeatingAction
 from controlel.domain.demands.building_heat_demand_status import BuildingHeatDemandStatus
 from controlel.domain.heat_delivery import (
@@ -34,6 +34,7 @@ from controlel.domain.heat_delivery import (
     HeatSourceObservation,
     ObservedValue,
 )
+from controlel.domain.source_control import ReportedSourceState
 from controlel.domain.value_objects.sensor_id import SensorId
 from controlel.domain.value_objects.temperature import Temperature
 from controlel.domain.value_objects.zone_id import ZoneId
@@ -46,14 +47,45 @@ from custom_components.controlel.event_loop_bridge import HomeAssistantEventLoop
 from custom_components.controlel.failure_sink import HomeAssistantScheduledFailureSink
 from custom_components.controlel.host import (
     HomeAssistantControlelHost,
+    _command_outcome_for_evaluation,
+    _reported_source_evidence,
     _source_control_snapshot_changes,
 )
 from custom_components.controlel.measurement_ingestion import (
     HomeAssistantMeasurementMapper,
 )
+from custom_components.controlel.operational import CommandOutcome
 from custom_components.controlel.runtime_executor import HomeAssistantRuntimeExecutor
 
 NOW = datetime(2026, 7, 23, 10, 0, tzinfo=UTC)
+
+
+@pytest.mark.parametrize(
+    ("status", "source_outcome", "expected"),
+    (
+        (HeatDemandEvaluationStatus.RESILIENCE_COMMAND_EXECUTED, None, CommandOutcome.DISPATCHED),
+        (HeatDemandEvaluationStatus.RESILIENCE_COMMAND_SUPPRESSED, None, CommandOutcome.SUPPRESSED),
+        (
+            HeatDemandEvaluationStatus.RESILIENCE_COMMAND_SUPPRESSED,
+            SourceControlOutcome.SUPPRESS_DUPLICATE,
+            CommandOutcome.SUPPRESSED_DUPLICATE,
+        ),
+        (HeatDemandEvaluationStatus.RESILIENCE_COMMAND_DEFERRED, None, CommandOutcome.DEFERRED),
+        (HeatDemandEvaluationStatus.RESILIENCE_COMMAND_HELD, None, CommandOutcome.HELD),
+        (HeatDemandEvaluationStatus.RESILIENCE_INDETERMINATE, None, CommandOutcome.NONE),
+    ),
+)
+def test_core_0_6_resilience_statuses_have_truthful_ha_command_outcomes(
+    status,
+    source_outcome,
+    expected,
+) -> None:
+    source_assessment = None
+    if source_outcome is not None:
+        source_assessment = SimpleNamespace(outcome=source_outcome)
+    result = SimpleNamespace(status=status, source_control_assessment=source_assessment)
+
+    assert _command_outcome_for_evaluation(result) is expected
 
 
 def _disabled_source_state(policy: SourceControlPolicy):
@@ -207,6 +239,26 @@ class FakeState:
     @property
     def attributes(self):
         return {"unit_of_measurement": "°C"}
+
+
+def test_reported_source_mapping_is_explicit_and_never_fabricates_transition_history() -> None:
+    for raw, expected in (
+        ("on", ReportedSourceState.ENABLED),
+        ("off", ReportedSourceState.DISABLED),
+        ("unknown", ReportedSourceState.UNKNOWN),
+        ("unavailable", ReportedSourceState.UNAVAILABLE),
+    ):
+        evidence = _reported_source_evidence(
+            FakeState(raw, NOW, entity_id="switch.boiler"),
+            "switch.boiler",
+        )
+        assert evidence is not None
+        assert evidence.state is expected
+        assert evidence.observed_at == NOW
+        assert evidence.transition_at is None
+
+    assert _reported_source_evidence(None, "switch.boiler") is None
+    assert _reported_source_evidence(FakeState("on", NOW), "switch.boiler") is None
 
 
 class FakeHass:
@@ -387,7 +439,7 @@ def create_shadow_test_host(
         ),
         failure_sink=failure_sink,
         config=host_config(),
-        core_version="0.5.0",
+        core_version="0.6.0",
         logger=logging.getLogger(__name__),
         state_subscriber=lambda hass, entity_id, listener: lambda: None,
         state_getter=lambda entity_id: None,

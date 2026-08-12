@@ -298,6 +298,7 @@ async def async_get_config_entry_diagnostics(
     snapshot = host.snapshot_source.snapshot_at(datetime.now(UTC))
     registry = er.async_get(hass)
     entity_ids = sorted(item.entity_id for item in er.async_entries_for_config_entry(registry, entry.entry_id))
+    source_resilience = await host.async_source_resilience_diagnostics()
     return {
         "configuration": _normalized_config(runtime_data.config),
         "configuration_provenance": _configuration_provenance(
@@ -314,6 +315,8 @@ async def async_get_config_entry_diagnostics(
         "observability": host.observability.diagnostics(datetime.now(UTC)),
         "heat_delivery": [_heat_delivery_state(state) for state in host.heat_delivery_states],
         "heating_diagnostics": heating_diagnostics_to_dict(snapshot.heating_diagnostics),
+        "runtime_supervision": host.runtime_supervision_diagnostics(),
+        "source_resilience": source_resilience,
         "counters": {
             "snapshot_revision": snapshot.revision,
             "decision_trace_records": len(host.snapshot_source.trace),

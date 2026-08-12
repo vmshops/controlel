@@ -56,7 +56,7 @@ def test_timer_installation_callback_and_cancellation_cross_the_correct_boundari
     assert installed[0][0] == "hass"
     assert installed[0][2] == NOW + timedelta(minutes=1)
     assert installed[0][3] == loop_thread
-    assert cancelled == [None]
+    assert cancelled == []
     assert len(set(callback_threads)) == 1
     assert callback_threads[0] != loop_thread
 
@@ -113,3 +113,38 @@ def test_cancellation_failure_preserves_original_exception():
 
     assert raised.original_error is original
     assert raised.__cause__ is original
+
+
+def test_cancel_all_invalidates_every_timer_and_rejects_stale_callbacks():
+    async def scenario():
+        executor = HomeAssistantRuntimeExecutor()
+        timer_actions = []
+        cancellations = []
+        submitted = []
+
+        def installer(hass, action, when):
+            timer_actions.append(action)
+            return lambda: cancellations.append(when)
+
+        scheduler = HomeAssistantScheduler(
+            "hass",
+            HomeAssistantEventLoopBridge(asyncio.get_running_loop()),
+            submitted.append,
+            timer_installer=installer,
+        )
+        await executor.async_submit(scheduler.schedule_at, NOW, lambda: None)
+        await executor.async_submit(
+            scheduler.schedule_at,
+            NOW + timedelta(minutes=5),
+            lambda: None,
+        )
+        await executor.async_submit(scheduler.cancel_all)
+        for action in timer_actions:
+            action(NOW)
+        await executor.async_close()
+        return cancellations, submitted
+
+    cancellations, submitted = asyncio.run(scenario())
+
+    assert len(cancellations) == 2
+    assert submitted == []

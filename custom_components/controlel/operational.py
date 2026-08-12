@@ -92,6 +92,11 @@ class DecisionCode(StrEnum):
     COMMAND_DISPATCHED = "command_dispatched"
     COMMAND_DEFERRED = "command_deferred"
     COMMAND_FAILED = "command_failed"
+    RESILIENCE_COMMAND_EXECUTED = "resilience_command_executed"
+    RESILIENCE_COMMAND_SUPPRESSED = "resilience_command_suppressed"
+    RESILIENCE_COMMAND_DEFERRED = "resilience_command_deferred"
+    RESILIENCE_COMMAND_HELD = "resilience_command_held"
+    RESILIENCE_INDETERMINATE = "resilience_indeterminate"
     FATAL_SHUTDOWN_DISABLE_DISPATCHED = "fatal_shutdown_disable_dispatched"
     FATAL_SHUTDOWN_DISABLE_FAILED = "fatal_shutdown_disable_failed"
     FATAL_SHUTDOWN_DISABLE_SKIPPED_ALREADY_FAILED = "fatal_shutdown_disable_skipped_already_failed"
@@ -154,6 +159,8 @@ class CommandOutcome(StrEnum):
     FAILED_RECOVERABLE = "failed_recoverable"
     FAILED_FATAL = "failed_fatal"
     DEFERRED = "deferred"
+    HELD = "held"
+    SUPPRESSED = "suppressed"
 
 
 class EmergencyDisableOutcome(StrEnum):

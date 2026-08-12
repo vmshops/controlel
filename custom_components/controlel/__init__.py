@@ -11,14 +11,20 @@ if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant
 
+from controlel.application.ports.heat_source_port import HeatSourcePort
 from controlel.application.runtime.control_runtime import ControlRuntime as CoreControlRuntime
+from controlel.application.runtime.failsafe_runtime import FailsafeRuntime
+from controlel.application.runtime.runtime_supervisor import RuntimeSupervisor
+from controlel.application.state.runtime_supervision_state import RuntimeHandoverEvidence
 from controlel.domain.capabilities.temperature_capability import (
     TemperatureCapability,
 )
 from controlel.domain.entities.zone import Zone
+from controlel.domain.operating_mode import SafeHeatingProfile
 from controlel.domain.repositories.sensor_repository import SensorRepository
 from controlel.domain.repositories.zone_repository import ZoneRepository
 from controlel.domain.sensors.sensor import Sensor
+from controlel.domain.source_control import SourceCapabilities, SourceOwnership
 from controlel.infrastructure.time.system_clock import SystemClock
 
 from .config import HomeAssistantIntegrationConfig, integration_config_from_entry
@@ -152,7 +158,6 @@ async def async_setup_entry(
         runtime_arguments: dict[str, Any] = dict(
             sensor_repository=sensor_repository,
             zone_repository=zone_repository,
-            heat_source_port=heat_source_port,
             clock=SystemClock(),
             scheduler=scheduler,
             scheduled_failure_sink=failure_sink,
@@ -167,7 +172,56 @@ async def async_setup_entry(
         )
         if heat_delivery_controller is not None:
             runtime_arguments["heat_delivery_controller"] = heat_delivery_controller
-        runtime = ControlRuntime(**runtime_arguments)
+
+        def build_runtime(
+            source_port: HeatSourcePort,
+            handover: RuntimeHandoverEvidence | None = None,
+        ) -> ControlRuntime:
+            runtime = ControlRuntime(
+                heat_source_port=source_port,
+                source_ownership=SourceOwnership.CONTROLEL_OWNED,
+                source_capabilities=SourceCapabilities(),
+                **runtime_arguments,
+            )
+            if handover is not None:
+                runtime.reported_source_evidence = handover.reported_source
+                runtime.source_control_state = handover.source_control_state
+                runtime.source_reconciliation_state = handover.reconciliation_state
+            return runtime
+
+        def failsafe_factory(source_port: HeatSourcePort) -> FailsafeRuntime:
+            return FailsafeRuntime(
+                source_port,
+                SafeHeatingProfile(
+                    room_target_temperature=zone_control.target_temperature.value,
+                    turn_on_differential=zone_control.heating_turn_on_differential,
+                    turn_off_differential=zone_control.heating_turn_off_differential,
+                    preferred_sensor_id=zone_control.sensor_id,
+                ),
+                minimum_on_time=heat_source_configuration.minimum_heating_on_time,
+                minimum_off_time=heat_source_configuration.minimum_heating_off_time,
+                capabilities=SourceCapabilities(),
+                ownership=SourceOwnership.CONTROLEL_OWNED,
+            )
+
+        def restart_factory(source_port: HeatSourcePort, handover: RuntimeHandoverEvidence) -> ControlRuntime:
+            candidate = build_runtime(source_port, handover)
+            candidate.begin_source_recovery()
+            candidate.start()
+            if host is None:
+                raise RuntimeError("Controlel host is unavailable during runtime restart")
+            host.replace_runtime_after_handover(candidate)
+            return candidate
+
+        supervisor = RuntimeSupervisor(
+            source=heat_source_port,
+            clock=runtime_arguments["clock"],
+            scheduler=scheduler,
+            failsafe_factory=failsafe_factory,
+            restart_factory=restart_factory,
+        )
+        runtime = build_runtime(supervisor.normal_port())
+        supervisor.attach_normal_runtime(runtime)
         host = HomeAssistantControlelHost(
             hass=hass,
             runtime=runtime,
@@ -177,6 +231,8 @@ async def async_setup_entry(
             config=config,
             core_version=metadata.version("controlel"),
             logger=LOGGER,
+            runtime_supervisor=supervisor,
+            scheduled_callback_cleanup=scheduler.cancel_all,
         )
         failure_sink.bind_fatal_handler(host.request_fatal_shutdown)
         await host.async_initialize()

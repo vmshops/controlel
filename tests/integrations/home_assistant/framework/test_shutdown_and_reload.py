@@ -177,7 +177,7 @@ async def test_real_reload_fully_unloads_then_constructs_fresh_in_memory_runtime
     assert second_measurement is not None
     assert first_measurement is not second_measurement
     assert first_measurement.timestamp == second_measurement.timestamp
-    assert [service for service, _ in service_calls] == ["turn_on", "turn_on"]
+    assert service_calls == []
 
 
 @pytest.mark.asyncio

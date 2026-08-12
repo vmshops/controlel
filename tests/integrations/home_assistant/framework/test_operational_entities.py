@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from datetime import UTC, datetime, timedelta
+from threading import Thread, get_ident
 from unittest.mock import patch
 
 from homeassistant.const import ATTR_UNIT_OF_MEASUREMENT, EntityCategory, UnitOfTemperature
@@ -29,6 +30,7 @@ from custom_components.controlel.const import (
     DOMAIN,
 )
 from custom_components.controlel.diagnostics import async_get_config_entry_diagnostics
+from custom_components.controlel.entity import ControlelSnapshotEntity
 from custom_components.controlel.operational import SafetyState
 
 EXPECTED_SENSOR_KEYS = {
@@ -141,6 +143,53 @@ async def _setup_entry(hass, entry_data) -> MockConfigEntry:
     return entry
 
 
+async def test_snapshot_publication_is_loop_safe_coalesced_and_invalidated_on_unload(
+    hass,
+    entry_data,
+    service_calls,
+) -> None:
+    entry = await _setup_entry(hass, entry_data)
+    host = entry.runtime_data.host
+    assert host is not None
+    loop_thread = get_ident()
+    publication_threads: list[int] = []
+
+    def record_publication(entity) -> None:
+        publication_threads.append(get_ident())
+
+    with patch.object(ControlelSnapshotEntity, "async_write_ha_state", record_publication):
+        host.snapshot_source.refresh_elapsed(datetime.now(UTC))
+        assert publication_threads
+        assert set(publication_threads) == {loop_thread}
+
+        publication_threads.clear()
+        await asyncio.to_thread(host.snapshot_source.refresh_elapsed, datetime.now(UTC))
+        await hass.async_block_till_done()
+        single_refresh_count = len(publication_threads)
+        assert single_refresh_count > 0
+        assert set(publication_threads) == {loop_thread}
+
+        publication_threads.clear()
+
+        def burst() -> None:
+            for _ in range(25):
+                host.snapshot_source.refresh_elapsed(datetime.now(UTC))
+
+        worker = Thread(target=burst)
+        worker.start()
+        worker.join()
+        await hass.async_block_till_done()
+        assert len(publication_threads) == single_refresh_count
+        assert set(publication_threads) == {loop_thread}
+
+        stale_callbacks = tuple(item[0] for item in host.snapshot_source._subscribers.values())
+        assert await hass.config_entries.async_unload(entry.entry_id)
+        publication_threads.clear()
+        await asyncio.to_thread(lambda: [callback(host.snapshot_source.current) for callback in stale_callbacks])
+        await hass.async_block_till_done()
+        assert publication_threads == []
+
+
 async def test_device_entities_states_unique_ids_and_unload(
     hass,
     entry_data,
@@ -174,7 +223,7 @@ async def test_device_entities_states_unique_ids_and_unload(
     assert hass.states.get(by_key["heat_demand"].entity_id).state == "heat_required"
     assert hass.states.get(by_key["heat_required"].entity_id).state == "on"
     assert hass.states.get(by_key["runtime_active"].entity_id).state == "on"
-    assert hass.states.get(by_key["integration_version"].entity_id).state == "0.8.0"
+    assert hass.states.get(by_key["integration_version"].entity_id).state == "0.8.1"
     assert hass.states.get(by_key["core_version"].entity_id).state == expected_framework_core_version
     assert hass.states.get(by_key["diagnostic_profile"].entity_id).state == (DIAGNOSTIC_PROFILE_DETAILED)
     assert hass.states.get(by_key["grace_remaining"].entity_id).state == "unavailable"
@@ -243,7 +292,7 @@ async def test_reload_rename_and_target_change_keep_one_stable_entity_set(
     devices = dr.async_entries_for_config_entry(dr.async_get(hass), entry.entry_id)
     assert len(devices) == 1
     assert devices[0].name == "Controlel — Upstairs"
-    assert [service for service, _ in service_calls] == ["turn_on"] * 4
+    assert service_calls == []
     assert await hass.config_entries.async_unload(entry.entry_id)
 
 
@@ -322,6 +371,7 @@ async def test_hysteresis_hold_and_minimum_on_deferred_command_are_visible(
         "21.5",
         {ATTR_UNIT_OF_MEASUREMENT: UnitOfTemperature.CELSIUS},
     )
+    hass.states.async_set("switch.boiler", "unavailable")
     clock = MutableClock(datetime.now(UTC) + timedelta(seconds=1))
     entry = MockConfigEntry(domain=DOMAIN, title="Living room", data=entry_data)
     entry.add_to_hass(hass)
@@ -331,6 +381,10 @@ async def test_hysteresis_hold_and_minimum_on_deferred_command_are_visible(
         await hass.async_block_till_done()
         host = entry.runtime_data.host
         assert host is not None
+        assert service_calls == []
+        clock.current += timedelta(seconds=30)
+        await host.async_reevaluate()
+        await hass.async_block_till_done()
         assert [service for service, _ in service_calls] == ["turn_on"]
 
         clock.current += timedelta(seconds=60)
@@ -363,7 +417,8 @@ async def test_hysteresis_hold_and_minimum_on_deferred_command_are_visible(
         assert deferred.deferred_since is not None
         assert deferred.active_lockout_remaining_seconds == deferred.deferred_remaining_seconds
         assert deferred.lockout_remaining_seconds is not None
-        assert 0 < deferred.lockout_remaining_seconds <= 121
+        assert deferred.active_lockout_deadline is not None
+        assert 0 < (deferred.active_lockout_deadline - clock.current).total_seconds() <= 121
 
         clock.current = deferred.active_lockout_deadline
         await host.async_reevaluate()
@@ -398,7 +453,7 @@ async def test_stale_timeout_duplicate_suppression_and_recovery_are_truthful(
     assert hass.states.get(by_key["heat_demand"]).state == "indeterminate"
     assert hass.states.get(by_key["safety_state"]).state == "timeout_action_applied"
     assert hass.states.get(by_key["last_requested_command"]).state == "disable_heating"
-    assert hass.states.get(by_key["last_command_outcome"]).state == "suppressed_duplicate"
+    assert hass.states.get(by_key["last_command_outcome"]).state == "suppressed"
     assert int(hass.states.get(by_key["duplicate_commands_suppressed"]).state) == (initial_suppressions + 1)
 
     hass.states.async_set(
@@ -413,12 +468,9 @@ async def test_stale_timeout_duplicate_suppression_and_recovery_are_truthful(
     assert hass.states.get(by_key["measurement_status"]).state == "valid"
     assert hass.states.get(by_key["heat_demand"]).state == "heat_required"
     assert hass.states.get(by_key["safety_state"]).state == "normal"
-    assert hass.states.get(by_key["last_command_outcome"]).state == "dispatched"
-    assert [service for service, _ in service_calls] == [
-        "turn_on",
-        "turn_off",
-        "turn_on",
-    ]
+    assert hass.states.get(by_key["last_command_outcome"]).state == "held"
+    assert host.snapshot_source.current.deferred_command is None
+    assert service_calls == []
     assert await hass.config_entries.async_unload(entry.entry_id)
 
 
@@ -478,9 +530,9 @@ async def test_exact_sixty_second_safety_sequence_is_visible_in_diagnostics(
         assert snapshot["zone_heat_demand"] == "indeterminate"
         assert snapshot["safety_state"] == "timeout_action_applied"
         assert snapshot["last_requested_command"] == "disable_heating"
-        assert snapshot["last_command_outcome"] == "suppressed_duplicate"
-        assert diagnostics["counters"]["duplicate_commands_suppressed"] == (initial_suppressions + 1)
-        assert [service for service, _ in service_calls] == ["turn_off"]
+        assert snapshot["last_command_outcome"] == "suppressed"
+        assert diagnostics["counters"]["duplicate_commands_suppressed"] == initial_suppressions
+        assert service_calls == []
         assert await hass.config_entries.async_unload(entry.entry_id)
 
 
@@ -498,7 +550,7 @@ async def test_diagnostics_are_allowlisted_json_safe_and_redact_unknown_entry_da
     serialized = json.dumps(diagnostics, sort_keys=True)
 
     assert diagnostics["versions"] == {
-        "integration": "0.8.0",
+        "integration": "0.8.1",
         "core": expected_framework_core_version,
     }
     assert diagnostics["operational_snapshot"]["runtime_status"] == "active"
@@ -524,6 +576,12 @@ async def test_diagnostics_are_allowlisted_json_safe_and_redact_unknown_entry_da
     assert diagnostics["heating_diagnostics"]["schema_version"] == 1
     assert len(diagnostics["heating_diagnostics"]["zones"]) == 1
     assert len(json.dumps(diagnostics["heating_diagnostics"])) < 65_536
+    assert diagnostics["runtime_supervision"]["supervisor_state"] == "normal"
+    assert diagnostics["runtime_supervision"]["command_authority"] == "normal"
+    assert diagnostics["runtime_supervision"]["reported_source_state"] == "disabled"
+    assert diagnostics["source_resilience"]["schema_version"] == 1
+    assert diagnostics["source_resilience"]["source_ownership"] == "controlel_owned"
+    assert diagnostics["source_resilience"]["reported_source_state"] == "disabled"
     assert diagnostics["active_issue_ids"] == []
     provenance = diagnostics["configuration_provenance"]
     assert diagnostics["configuration"]["diagnostic_profile"] == (DIAGNOSTIC_PROFILE_DETAILED)
