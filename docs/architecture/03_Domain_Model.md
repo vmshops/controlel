@@ -43,6 +43,15 @@ while `SafeHeatingTemperatureEvidence` is observed input with explicit quality.
 `WaterTargetIntent` is capability-gated requested intent and is deliberately
 separate from command outcome and physical water temperature.
 
+`CommandAuthority` explicitly identifies the sole source-command owner as
+`NORMAL` or `FAILSAFE`. A fatal normal-runtime transition advances its
+generation before failsafe authority is granted, so ports retained by the
+quarantined generation cannot dispatch. `RestartPolicy` is a finite,
+deterministic contract: the default campaign permits three attempts at a fixed
+five-minute interval. Handover carries only known command, reported-state,
+transition, ownership, capability, reconciliation, and protection evidence;
+missing evidence remains unknown and no history is fabricated.
+
 ## Requested heating demand
 
 An actionable decision maps to an immutable `ZoneDemand` containing:

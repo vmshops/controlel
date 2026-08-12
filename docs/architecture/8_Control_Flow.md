@@ -144,6 +144,32 @@ physical water-target dispatch is not implemented. `EMERGENCY_OFF` uses the
 existing safety-disable bypass. `MANUAL_RECOVERY_HEAT` is bounded to two hours
 by default, and reload explicitly cancels it without recreating its deadline.
 
+Every heat-demand result also enforces temporal coherence: the confirmation
+assessment evaluation time must equal the building-demand evaluation time for
+that current evaluation. Scheduled stale, grace, reconciliation, and
+source-protection evaluations therefore refresh unchanged confirmation state
+at the current aggregate evaluation time instead of reusing an older
+assessment timestamp.
+
+## Fatal runtime supervision and recovery
+
+When the active normal runtime fails fatally, `RuntimeSupervisor` first revokes
+NORMAL command authority and advances the runtime generation. It then stops
+the quarantined runtime best-effort, transfers truthful source protection and
+reported evidence, grants sole authority to `FailsafeRuntime`, and evaluates
+either `SAFE_HEATING` from valid trusted temperature evidence or
+`EMERGENCY_OFF` otherwise. The resulting action still passes through the
+existing source-control safety and minimum-time policy before dispatch.
+
+The supervisor schedules one restart attempt at the next fixed five-minute
+eligibility boundary. A default campaign permits three attempts. Campaign and
+generation tokens make early, cancelled, or stale callbacks inert, and
+failsafe retains authority while a candidate normal runtime is constructed.
+On success, the candidate receives an immutable handover of reported evidence,
+ownership, capabilities, reconciliation state, and source-control protection
+state before NORMAL authority is restored. Unknown evidence stays unknown;
+successful dispatch or transition history is never invented.
+
 ## Serialized execution and shutdown
 
 The Home Assistant host submits every public call and scheduled callback

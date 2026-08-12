@@ -5,15 +5,24 @@
 Milestone 30.2 prepares core candidate `0.6.0` with source ownership and
 capabilities, reported-source evidence, bounded reconciliation and recovery,
 explicit operating modes, and reason-coded source-resilience diagnostics. It
-does not change the Home Assistant integration release boundary. Published
-immutable `controlel==0.5.0` remains the current public core, and integration
-`0.8.0` remains pinned to it. The integration may move to `0.6.0` only in a
+also includes M30.2D runtime supervision, exclusive normal/failsafe command
+authority, fatal fallback, generation quarantine, truthful state handover, and
+a bounded default restart campaign of three attempts at fixed five-minute
+intervals. It does not change the Home Assistant integration release boundary.
+Published immutable `controlel==0.5.0` remains the current public core, and
+integration `0.8.0` remains pinned to it. The integration may move to `0.6.0` only in a
 later separate change after the core artifacts are published and independently
 verified.
 
 The 0.6.0 release-boundary commit changes core metadata, core packaging
 contracts, and documentation only. It does not create artifacts, tag, upload,
 publication, or a core GitHub Release.
+
+The earlier pre-tag build bound to
+`d7bfe426db90a21fed9cb9cae6591c310c0c9d42` predates M30.2D and is obsolete.
+Neither those artifact bytes nor their hashes may be reused for publication.
+Final core 0.6.0 artifacts must be rebuilt from the future exact reviewed
+release `HEAD` after this boundary is committed, merged, and validated.
 
 ## Milestone 29 Phase A boundary
 

@@ -48,6 +48,14 @@ recovery defaults to two hours. Reload explicitly cancels manual recovery. No
 host polling loop is required. `WATER_TARGET` is capability-gated intent only;
 physical water-target dispatch remains unsupported in core 0.6.0.
 
+M30.2D runtime supervision additionally requires host composition of a
+`Scheduler`, a failsafe-runtime factory, and a normal-runtime restart factory.
+The supervisor protects source-command authority when `ControlRuntime` fails
+while the host process remains alive. It does not protect against complete Home
+Assistant process failure, operating-system failure, power failure, or physical
+hardware failure; those boundaries still require host, device, and hardware
+safety mechanisms.
+
 ## Custom-component packaging
 
 The integration source is `custom_components/controlel`. Integration version
