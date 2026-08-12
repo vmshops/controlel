@@ -74,6 +74,14 @@ Core `0.6.0` is being prepared and is not yet public. Immutable `0.5.0` remains
 the published core consumed by integration `0.8.0`. Moving the integration to
 public core `0.6.0` is a separate later change after publication verification.
 
+M30.2D stops the earlier 0.6.0 release candidate after a real scheduled
+timestamp-coherence fatal. It refreshes unchanged confirmation evidence on
+every aggregate evaluation and adds explicit normal/failsafe command authority,
+generation quarantine, bounded fixed-interval restart campaigns, minimal safe
+heating/emergency-off control, and bounded reason-code supervision diagnostics.
+The earlier `d7bfe426db90a21fed9cb9cae6591c310c0c9d42` pre-tag artifacts are obsolete
+and must never be published.
+
 Adaptive assistance remains future work. Learning, persistence, actuator
 travel/open verification, and source-water-temperature optimization also
 remain future layers.
