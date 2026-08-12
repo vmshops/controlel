@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from controlel.application.runtime.control_runtime import ControlRuntime
+from controlel.application.runtime.failsafe_runtime import FailsafeRuntime
 from controlel.application.runtime.heat_demand_evaluation_result import (
     HeatDemandEvaluationStatus,
     HeatDemandEvaluationTrigger,
@@ -12,6 +13,7 @@ from controlel.application.runtime.runtime_processing_result import (
     RuntimeProcessingStatus,
     TemperatureNoDecisionReason,
 )
+from controlel.application.runtime.runtime_supervisor import RuntimeSupervisor
 from controlel.application.services.demand_arbitrator import IdentityDemandArbitrator
 from controlel.application.services.heat_demand_safety_policy import (
     HeatDemandClockRegressionError,
@@ -26,6 +28,7 @@ from controlel.domain.demands.building_heat_demand_status import (
 from controlel.domain.entities.zone import Zone
 from controlel.domain.events.decision_event import DecisionCreatedEvent
 from controlel.domain.measurements.measurement import Measurement
+from controlel.domain.operating_mode import OperatingMode, SafeHeatingProfile
 from controlel.domain.repositories.sensor_repository import SensorRepository
 from controlel.domain.repositories.zone_repository import ZoneRepository
 from controlel.domain.sensors.sensor import Sensor
@@ -141,6 +144,7 @@ def create_runtime(
     minimum_on: timedelta = timedelta(0),
     minimum_off: timedelta = timedelta(0),
     demand_arbitrator=None,
+    scheduled_failure_sink=None,
 ) -> tuple[ControlRuntime, MutableClock, ManualScheduler, RecordingHeatSource]:
     configured_clock = clock or MutableClock()
     configured_scheduler = scheduler or ManualScheduler()
@@ -166,7 +170,7 @@ def create_runtime(
         heat_source_port=configured_port,
         clock=configured_clock,
         scheduler=configured_scheduler,
-        scheduled_failure_sink=RecordingScheduledFailureSink(),
+        scheduled_failure_sink=scheduled_failure_sink or RecordingScheduledFailureSink(),
         max_future_skew=timedelta(0),
         indeterminate_grace_period=grace,
         indeterminate_timeout_action=timeout_action,
@@ -314,6 +318,120 @@ def test_startup_inside_hysteresis_deadband_uses_raw_no_heat_without_confirmatio
     assert result.heat_demand_evaluation.confirmation_assessment.state.phase.value == "no_heat_required"
     assert result.heat_demand_evaluation.confirmation_assessment.state.confirmation_deadline is None
     assert [task.when for task in scheduler.active] == [NOW + MAX_AGE + datetime.resolution]
+
+
+def test_unchanged_confirmation_is_temporally_refreshed_across_stale_and_grace_deadlines() -> None:
+    runtime, clock, scheduler, port = create_runtime(
+        grace=timedelta(minutes=15),
+        confirmation_duration=timedelta(minutes=2),
+    )
+    initial = runtime.process_temperature(measurement(23))
+    stale_at = NOW + MAX_AGE + datetime.resolution
+
+    assert initial.heat_demand_evaluation.confirmation_assessment.state.last_evaluated_at == NOW
+    clock.current_time = stale_at
+    next(task for task in scheduler.active if task.when == stale_at).invoke()
+
+    refreshed = runtime.zone_heat_demand_confirmation_assessment
+    grace_at = stale_at + timedelta(minutes=15)
+    assert refreshed is not None
+    assert refreshed.state.last_evaluated_at == stale_at
+    assert runtime._stopped is False
+    assert runtime.scheduled_failure_sink.failures == []
+    assert next(task for task in scheduler.active if task.when == grace_at)
+
+    clock.current_time = grace_at
+    next(task for task in scheduler.active if task.when == grace_at).invoke()
+
+    assert runtime.zone_heat_demand_confirmation_assessment.state.last_evaluated_at == grace_at
+    assert runtime._stopped is False
+    assert runtime.scheduled_failure_sink.failures == []
+    assert [command.action for command in port.commands] == [HeatingAction.DISABLE_HEATING]
+
+
+def test_unchanged_confirmation_is_temporally_refreshed_at_source_control_deadline() -> None:
+    runtime, clock, scheduler, port = create_runtime(
+        confirmation_duration=timedelta(0),
+        minimum_off=timedelta(minutes=4),
+    )
+    runtime.process_temperature(measurement(23))
+    clock.current_time = NOW + timedelta(minutes=1)
+    deferred = runtime.process_temperature(measurement(19, timestamp=clock.current_time))
+    source_deadline = deferred.heat_demand_evaluation.next_evaluation_at
+
+    clock.current_time = source_deadline
+    next(task for task in scheduler.active if task.when == source_deadline).invoke()
+
+    assert runtime.zone_heat_demand_confirmation_assessment.state.last_evaluated_at == source_deadline
+    assert runtime.scheduled_failure_sink.failures == []
+    assert [command.action for command in port.commands] == [
+        HeatingAction.DISABLE_HEATING,
+        HeatingAction.ENABLE_HEATING,
+    ]
+
+
+def test_multi_zone_unchanged_confirmations_share_scheduled_evaluation_time() -> None:
+    runtime, clock, scheduler, _ = create_runtime(
+        zone_names=("living_room", "bedroom"),
+        grace=timedelta(minutes=15),
+        confirmation_duration=timedelta(minutes=2),
+    )
+    runtime.process_temperature(measurement(23))
+    runtime.process_temperature(measurement(23, sensor="bedroom_temperature"))
+    stale_at = NOW + MAX_AGE + datetime.resolution
+
+    clock.current_time = stale_at
+    next(task for task in scheduler.active if task.when == stale_at).invoke()
+
+    assert {
+        assessment.state.last_evaluated_at for assessment in runtime.zone_heat_demand_confirmation_assessments.values()
+    } == {stale_at}
+    assert runtime.scheduled_failure_sink.failures == []
+
+
+def test_scheduled_control_runtime_fatal_automatically_hands_source_protection_to_failsafe() -> None:
+    class FailingAfterInitialEvaluation:
+        calls = 0
+
+        def resolve(self, aggregate_demand):
+            self.calls += 1
+            if self.calls > 1:
+                raise RuntimeError("scheduled runtime failed")
+            return aggregate_demand
+
+    clock, scheduler, source = MutableClock(), ManualScheduler(), RecordingHeatSource()
+
+    def create_failsafe(port):
+        return FailsafeRuntime(
+            port,
+            SafeHeatingProfile(21, 0.3, 0.1, SensorId("fallback")),
+            minimum_on_time=timedelta(minutes=10),
+            minimum_off_time=timedelta(minutes=5),
+        )
+
+    supervisor = RuntimeSupervisor(source, clock, scheduler=scheduler, failsafe_factory=create_failsafe)
+    runtime, _, _, _ = create_runtime(
+        clock=clock,
+        scheduler=scheduler,
+        port=supervisor.normal_port(),
+        minimum_on=timedelta(minutes=10),
+        minimum_off=timedelta(minutes=5),
+        demand_arbitrator=FailingAfterInitialEvaluation(),
+        scheduled_failure_sink=supervisor.scheduled_failure_sink(),
+    )
+    supervisor.attach_normal_runtime(runtime)
+    runtime.process_temperature(measurement(19))
+    stale = scheduler.active[0]
+
+    clock.current_time = stale.when
+    stale.invoke()
+
+    assert supervisor.state.failsafe_mode is OperatingMode.EMERGENCY_OFF
+    assert supervisor._failsafe.source_control_state.last_successful_enable_dispatch == NOW
+    assert [item.action for item in source.commands] == [
+        HeatingAction.ENABLE_HEATING,
+        HeatingAction.DISABLE_HEATING,
+    ]
 
 
 def test_restart_with_changed_duration_starts_one_fresh_confirmation_interval() -> None:
@@ -921,7 +1039,8 @@ def test_two_zones_keep_independent_confirmation_deadlines_and_cancellation() ->
 
     assert runtime.zone_heat_demand_confirmation_states[zone_a].confirmation_deadline == a_deadline
     assert runtime.zone_heat_demand_confirmation_states[zone_a].confirmation_started_at == a_started_at
-    assert runtime.zone_heat_demand_confirmation_states[zone_a] is a_confirmation_state
+    assert runtime.zone_heat_demand_confirmation_states[zone_a] is not a_confirmation_state
+    assert runtime.zone_heat_demand_confirmation_states[zone_a].last_evaluated_at == clock.current_time
     assert runtime.temperature_hysteresis_states[zone_a] is a_hysteresis
     assert runtime.source_control_state.last_successful_disable_dispatch == source_disable_at
     assert runtime.source_control_state.earliest_next_enable_time == source_enable_boundary

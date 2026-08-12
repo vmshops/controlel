@@ -684,29 +684,21 @@ class ControlRuntime:
                 and current_state is not None
                 and current_state.confirmation_deadline == scheduled_for
             )
-            input_changed = self._zone_confirmation_inputs.get(zone_input.zone_id) is not zone_input.demand
-            current_zone_event = (
-                trigger is HeatDemandEvaluationTrigger.ACTIONABLE_DECISION
-                and zone_input.zone_id == self._last_processed_zone_id
+            assessment = self.zone_heat_demand_confirmation_policy.evaluate(
+                hysteresis_demand=zone_input.demand,
+                now=aggregate_demand.evaluated_at,
+                current_state=current_state,
+                deadline_reevaluation=deadline_reevaluation,
             )
+            self.zone_heat_demand_confirmation_states[zone_input.zone_id] = assessment.state
+            confirmation_assessments[zone_input.zone_id] = assessment
             if (
                 current_state is None
-                or input_changed
+                or current_state != assessment.state
                 or deadline_reevaluation
-                or current_zone_event
                 or trigger in {HeatDemandEvaluationTrigger.STARTUP, HeatDemandEvaluationTrigger.MANUAL}
             ):
-                assessment = self.zone_heat_demand_confirmation_policy.evaluate(
-                    hysteresis_demand=zone_input.demand,
-                    now=aggregate_demand.evaluated_at,
-                    current_state=current_state,
-                    deadline_reevaluation=deadline_reevaluation,
-                )
-                self.zone_heat_demand_confirmation_states[zone_input.zone_id] = assessment.state
-                confirmation_assessments[zone_input.zone_id] = assessment
                 evaluated_zone_ids.append(zone_input.zone_id)
-            else:
-                assessment = confirmation_assessments[zone_input.zone_id]
             self._zone_confirmation_inputs[zone_input.zone_id] = zone_input.demand
             confirmed_inputs.append(
                 zone_input.model_copy(

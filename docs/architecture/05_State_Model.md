@@ -108,6 +108,15 @@ episode or transition continuity.
 resilience evidence. It has schema version 1, scalar/tuple JSON-safe fields,
 stable reason codes, and no raw history or arbitrary exception text.
 
+`RuntimeSupervisionState` separately records supervisor phase, sole command
+authority, normal generation, normalized fatal cause code, failsafe mode/reason,
+finite restart usage and eligibility, bounded manual-recovery deadline, and the
+last successful return to normal. It stores no traceback or arbitrary exception
+message. Generation changes invalidate authority held by older runtimes.
+`RuntimeHandoverEvidence` is a separate immutable snapshot used before a
+candidate normal runtime receives authority; it preserves reported evidence
+and minimum-time boundaries without treating either as physical confirmation.
+
 ## Indeterminate safety orchestration state
 
 `HeatDemandSafetyStateStore` holds one immutable

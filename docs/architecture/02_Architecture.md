@@ -146,6 +146,38 @@ That object is requested intent, not a dispatched command or physical water
 temperature. Physical water-target dispatch remains intentionally unsupported
 in core 0.6.0.
 
+## Runtime supervision and failsafe authority
+
+M30.2D places an application-level `RuntimeSupervisor` above the complex normal
+runtime. It owns the normal generation and one explicit source-command
+authority. A fatal synchronous or scheduled failure first revokes that
+generation's authority, then stops it best-effort so its callbacks are
+invalidated. Authority-token checks reject any late command from the failed
+generation. Normal and failsafe controllers can therefore never command the
+source concurrently.
+
+The independent `FailsafeRuntime` is deliberately smaller: trusted fallback
+temperature evidence, configured target/hysteresis, and the existing
+`SourceControlPolicy` minimum-time/safety rules. Valid evidence selects
+`SAFE_HEATING`; absent or invalid evidence selects `EMERGENCY_OFF`. Manual
+recovery remains a bounded two-hour mode and cannot bypass source protection.
+
+Automatic restoration uses a finite default budget of three attempts separated
+by fixed five-minute eligibility boundaries. Failed attempts leave failsafe
+authority active. Exhaustion requires an explicit reset before a new campaign.
+A successful factory/health boundary explicitly transfers sole authority back
+to the new normal generation only after the candidate receives an immutable
+handover containing the latest reported evidence, ownership, capabilities,
+reconciliation state, and source-control protection state. Missing evidence
+stays unknown; transition history and successful dispatches are never
+fabricated. Failed failsafe dispatch is recorded as failed command evidence and
+does not prevent the bounded restart callback from being installed.
+
+This supervision protects against `ControlRuntime` failures only while the host
+process remains alive. Home Assistant process failure, operating-system or
+power failure, and physical hardware failure remain outside this mechanism and
+must rely on device/hardware safety.
+
 ## Integration observability controller
 
 The integration owns presentation policy separately from the core runtime.

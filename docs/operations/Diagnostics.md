@@ -40,3 +40,9 @@ controller state remain separate fields.
 This application-level contract is part of the core release only. Home
 Assistant integration `0.8.0` remains pinned to core `0.5.0` and does not adopt
 or publish the new source-resilience projection in this release boundary.
+
+M30.2D adds immutable `RuntimeSupervisionDiagnosticsV1` for supervisor state,
+active command authority, normal generation, normalized fatal cause code,
+failsafe mode/reason, restart attempts and budget, next eligibility, exhaustion,
+manual-recovery deadline, and last successful normal recovery. The projection
+is fixed-size and contains no traceback or arbitrary error message.
