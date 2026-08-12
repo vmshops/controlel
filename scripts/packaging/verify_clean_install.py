@@ -23,11 +23,26 @@ import sys
 
 import controlel
 from controlel.application.runtime.control_runtime import ControlRuntime
+from controlel.application.services.source_reconciliation_policy import SourceReconciliationPolicy
+from controlel.application.services.source_recovery_policy import SourceRecoveryPolicy
+from controlel.application.state.source_resilience_diagnostics import (
+    SOURCE_RESILIENCE_DIAGNOSTICS_SCHEMA_VERSION,
+    SourceResilienceDiagnosticsV1,
+)
 from controlel.domain.commands.heating_action import HeatingAction
 from controlel.domain.entities.zone import Zone
+from controlel.domain.operating_mode import OperatingMode
 from controlel.domain.repositories.sensor_repository import SensorRepository
 from controlel.domain.repositories.zone_repository import ZoneRepository
 from controlel.domain.sensors.sensor import Sensor
+from controlel.domain.source_control import (
+    ReportedSourceEvidence,
+    ReportedSourceState,
+    SourceCapabilities,
+    SourceCapability,
+    SourceOwnership,
+    TransitionHistoryKnowledge,
+)
 from controlel.domain.value_objects.sensor_id import SensorId
 from controlel.domain.value_objects.temperature import Temperature
 from controlel.domain.value_objects.zone_id import ZoneId
@@ -47,6 +62,23 @@ assert all(
 assert importlib.util.find_spec("homeassistant") is None
 assert importlib.util.find_spec("custom_components") is None
 assert not any(name == "homeassistant" or name.startswith("homeassistant.") for name in sys.modules)
+
+observed_at = datetime(2026, 1, 1, tzinfo=UTC)
+capabilities = SourceCapabilities(
+    frozenset({SourceCapability.ENABLE_DISABLE, SourceCapability.WATER_TARGET})
+)
+reported = ReportedSourceEvidence(
+    state=ReportedSourceState.UNKNOWN,
+    observed_at=observed_at,
+)
+assert SourceOwnership.CONTROLEL_OWNED.value == "controlel_owned"
+assert capabilities.supports(SourceCapability.WATER_TARGET)
+assert reported.transition_history is TransitionHistoryKnowledge.UNKNOWN
+assert OperatingMode.NORMAL.value == "normal"
+assert SourceReconciliationPolicy() is not None
+assert SourceRecoveryPolicy() is not None
+assert SOURCE_RESILIENCE_DIAGNOSTICS_SCHEMA_VERSION == 1
+assert SourceResilienceDiagnosticsV1.__dataclass_params__.frozen is True
 
 sensor_id = SensorId("living_room_temperature")
 zone_id = ZoneId("living_room")

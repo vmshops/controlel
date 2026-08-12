@@ -115,8 +115,13 @@ def validate_wheel(wheel: Path, *, distribution: str, version: str) -> None:
 
         required = {
             "controlel/__init__.py",
+            "controlel/application/services/source_reconciliation_policy.py",
+            "controlel/application/services/source_recovery_policy.py",
             "controlel/application/services/zone_heat_demand_confirmation_policy.py",
+            "controlel/application/state/source_resilience_diagnostics.py",
             "controlel/application/state/zone_heat_demand_confirmation_state.py",
+            "controlel/domain/operating_mode/__init__.py",
+            "controlel/domain/source_control/__init__.py",
             f"{dist_info}/METADATA",
             f"{dist_info}/RECORD",
             f"{dist_info}/WHEEL",
@@ -159,8 +164,13 @@ def validate_sdist(sdist: Path, *, distribution: str, version: str) -> None:
             "README.md",
             "pyproject.toml",
             "src/controlel/__init__.py",
+            "src/controlel/application/services/source_reconciliation_policy.py",
+            "src/controlel/application/services/source_recovery_policy.py",
             "src/controlel/application/services/zone_heat_demand_confirmation_policy.py",
+            "src/controlel/application/state/source_resilience_diagnostics.py",
             "src/controlel/application/state/zone_heat_demand_confirmation_state.py",
+            "src/controlel/domain/operating_mode/__init__.py",
+            "src/controlel/domain/source_control/__init__.py",
         }
         if missing := required - relative_names:
             raise ArtifactValidationError(f"{sdist.name} is missing required files: {sorted(missing)}")

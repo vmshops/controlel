@@ -38,7 +38,7 @@ def test_project_metadata_and_runtime_dependencies_match_release_contract() -> N
     project = load_pyproject()["project"]
 
     assert project["name"] == "controlel"
-    assert project["version"] == "0.5.0"
+    assert project["version"] == "0.6.0"
     assert project["readme"] == "README.md"
     assert project["requires-python"] == ">=3.13"
     assert project["license"] == "MIT"
@@ -85,7 +85,7 @@ def test_project_version_is_the_only_release_version_source() -> None:
         path for path in (ROOT / "src" / "controlel").rglob("*.py") if "__version__" in path.read_text(encoding="utf-8")
     ]
 
-    assert project_version == "0.5.0"
+    assert project_version == "0.6.0"
     assert controlel.__version__ == project_version
     assert importlib.metadata.version("controlel") == project_version
     assert version_files == [ROOT / "src" / "controlel" / "__init__.py"]
@@ -98,11 +98,35 @@ def test_manifest_pins_published_core_and_keeps_version_independent() -> None:
     manifest = json.loads((ROOT / "custom_components" / "controlel" / "manifest.json").read_text(encoding="utf-8"))
     core_version = load_pyproject()["project"]["version"]
 
-    assert core_version == "0.5.0"
+    assert core_version == "0.6.0"
     assert manifest["requirements"] == ["controlel==0.5.0"]
     assert manifest["version"] == "0.8.0"
     assert manifest["version"] != core_version
     assert manifest["issue_tracker"] == "https://github.com/vmshops/controlel/issues"
+
+
+def test_core_artifact_verification_binds_representative_m30_2_contracts() -> None:
+    validator = (ROOT / "scripts" / "packaging" / "validate_artifacts.py").read_text(encoding="utf-8")
+    clean_install = (ROOT / "scripts" / "packaging" / "verify_clean_install.py").read_text(encoding="utf-8")
+
+    required_contracts = {
+        "SourceOwnership",
+        "SourceCapabilities",
+        "ReportedSourceEvidence",
+        "OperatingMode",
+        "SourceReconciliationPolicy",
+        "SourceRecoveryPolicy",
+        "SourceResilienceDiagnosticsV1",
+    }
+    assert all(contract in clean_install for contract in required_contracts)
+    for module in (
+        "domain/source_control/__init__.py",
+        "domain/operating_mode/__init__.py",
+        "application/services/source_reconciliation_policy.py",
+        "application/services/source_recovery_policy.py",
+        "application/state/source_resilience_diagnostics.py",
+    ):
+        assert module in validator
 
 
 def test_packaging_tools_are_pinned_and_isolated() -> None:

@@ -20,3 +20,23 @@ entities from Recorder; Controlel never changes Recorder automatically.
 
 None of these fields is physical source feedback. A successful dispatch proves
 only that the configured adapter call completed without error.
+
+## Core 0.6.0 source-resilience diagnostics
+
+The core 0.6.0 candidate adds immutable
+`SourceResilienceDiagnosticsV1`. Its fixed bounded projection contains schema
+version 1, evidence-derived update time, operating mode and reason, desired and
+reported source state, observation time, last successful command, ownership,
+capabilities, drift/reconciliation state, transition-history knowledge,
+recovery state, corrective intent or blocking boundary, manual-recovery timing,
+safe-heating degradation, and optional water-target intent.
+
+Values use stable reason codes and JSON-safe scalars or bounded tuples. Unknown
+evidence remains null or an explicit unknown code; it is never rendered as
+false. No raw sample history, arbitrary exception message, secret, or physical
+burner/heat confirmation is included. Successful command dispatch and reported
+controller state remain separate fields.
+
+This application-level contract is part of the core release only. Home
+Assistant integration `0.8.0` remains pinned to core `0.5.0` and does not adopt
+or publish the new source-resilience projection in this release boundary.

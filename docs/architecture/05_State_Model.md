@@ -83,6 +83,31 @@ failed execution was never recorded. There is no dedicated retry timer.
 The existing per-zone `ControlState` and `StateRepository` remain the separate
 zone-actuator applied-state model and are not reused for the shared source.
 
+## Source reconciliation and recovery state
+
+`SourceReconciliationState` keeps desired and last successful commands,
+reported evidence, drift start, conservative hold, corrective intent, next
+reevaluation, and stable status/reason codes separate. For Controlel-owned
+external-on/no-heat drift with unknown transition age, the conservative hold is
+five minutes. A failed correction does not become successful state; it remains
+retryable after the bounded 30-second retry interval. Successful dispatch also
+does not imply reported agreement or physical state.
+
+`SourceRecoveryState` is a bounded startup/reload evidence gate. It completes
+when demand and reported-source evidence are ready, or after its 30-second
+deadline with incomplete evidence recorded truthfully. No transition timestamp,
+previous command, or physical state is reconstructed during recovery.
+
+`OperatingModeState` records the explicit mode, stable reason, activation time,
+and optional manual-recovery deadline. Manual recovery defaults to two hours.
+Extension creates a new deadline; expiry reevaluates normal demand. Reload
+cancellation clears the deadline and records its reason rather than recreating
+episode or transition continuity.
+
+`SourceResilienceDiagnosticsV1` is an immutable bounded projection of current
+resilience evidence. It has schema version 1, scalar/tuple JSON-safe fields,
+stable reason codes, and no raw history or arbitrary exception text.
+
 ## Indeterminate safety orchestration state
 
 `HeatDemandSafetyStateStore` holds one immutable

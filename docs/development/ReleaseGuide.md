@@ -1,5 +1,20 @@
 # Release guide
 
+## Milestone 30.2 core 0.6.0 boundary
+
+Milestone 30.2 prepares core candidate `0.6.0` with source ownership and
+capabilities, reported-source evidence, bounded reconciliation and recovery,
+explicit operating modes, and reason-coded source-resilience diagnostics. It
+does not change the Home Assistant integration release boundary. Published
+immutable `controlel==0.5.0` remains the current public core, and integration
+`0.8.0` remains pinned to it. The integration may move to `0.6.0` only in a
+later separate change after the core artifacts are published and independently
+verified.
+
+The 0.6.0 release-boundary commit changes core metadata, core packaging
+contracts, and documentation only. It does not create artifacts, tag, upload,
+publication, or a core GitHub Release.
+
 ## Milestone 29 Phase A boundary
 
 Milestone 29 Phase A prepared unpublished core candidate `0.5.0` with
@@ -47,6 +62,7 @@ Controlel uses distinct release states:
    out-of-checkout installation checks.
 4. **Published core package** is the verified `controlel==0.5.0` release on
    PyPI.
+   Core `0.6.0` is the candidate being prepared and is not yet public.
 5. **Home Assistant exact dependency pin** is the integration contract
    `"requirements": ["controlel==0.5.0"]`.
 6. **HACS readiness** additionally requires integration release packaging and
@@ -58,6 +74,10 @@ Controlel uses distinct release states:
 The distribution name and Python import package are both `controlel`. Versions
 `0.1.0`, `0.2.0`, `0.3.0`, `0.4.0`, and `0.5.0` are publicly available on PyPI and immutable.
 PyPI versions are immutable; corrections always require a higher version.
+
+The current project release candidate is `0.6.0`. Until its separately
+approved publication completes, all public-integration composition checks and
+the Home Assistant manifest continue to use immutable `0.5.0`.
 
 The first core release is `0.1.0`. The single authoritative release
 version is the static `project.version` in `pyproject.toml`. Runtime access uses
@@ -312,7 +332,7 @@ paths.
 
 ## Future core release checklist
 
-Published core versions `0.1.0`, `0.2.0`, `0.3.0`, and `0.4.0` are immutable. Every
+Published core versions `0.1.0`, `0.2.0`, `0.3.0`, `0.4.0`, and `0.5.0` are immutable. Every
 future core publication follows this order:
 
 1. implementation;
