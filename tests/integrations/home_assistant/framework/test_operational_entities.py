@@ -292,7 +292,7 @@ async def test_reload_rename_and_target_change_keep_one_stable_entity_set(
     devices = dr.async_entries_for_config_entry(dr.async_get(hass), entry.entry_id)
     assert len(devices) == 1
     assert devices[0].name == "Controlel — Upstairs"
-    assert [service for service, _ in service_calls] == ["turn_on"] * 4
+    assert service_calls == []
     assert await hass.config_entries.async_unload(entry.entry_id)
 
 
@@ -371,6 +371,7 @@ async def test_hysteresis_hold_and_minimum_on_deferred_command_are_visible(
         "21.5",
         {ATTR_UNIT_OF_MEASUREMENT: UnitOfTemperature.CELSIUS},
     )
+    hass.states.async_set("switch.boiler", "unavailable")
     clock = MutableClock(datetime.now(UTC) + timedelta(seconds=1))
     entry = MockConfigEntry(domain=DOMAIN, title="Living room", data=entry_data)
     entry.add_to_hass(hass)
@@ -380,6 +381,10 @@ async def test_hysteresis_hold_and_minimum_on_deferred_command_are_visible(
         await hass.async_block_till_done()
         host = entry.runtime_data.host
         assert host is not None
+        assert service_calls == []
+        clock.current += timedelta(seconds=30)
+        await host.async_reevaluate()
+        await hass.async_block_till_done()
         assert [service for service, _ in service_calls] == ["turn_on"]
 
         clock.current += timedelta(seconds=60)
@@ -412,7 +417,8 @@ async def test_hysteresis_hold_and_minimum_on_deferred_command_are_visible(
         assert deferred.deferred_since is not None
         assert deferred.active_lockout_remaining_seconds == deferred.deferred_remaining_seconds
         assert deferred.lockout_remaining_seconds is not None
-        assert 0 < deferred.lockout_remaining_seconds <= 121
+        assert deferred.active_lockout_deadline is not None
+        assert 0 < (deferred.active_lockout_deadline - clock.current).total_seconds() <= 121
 
         clock.current = deferred.active_lockout_deadline
         await host.async_reevaluate()
@@ -447,7 +453,7 @@ async def test_stale_timeout_duplicate_suppression_and_recovery_are_truthful(
     assert hass.states.get(by_key["heat_demand"]).state == "indeterminate"
     assert hass.states.get(by_key["safety_state"]).state == "timeout_action_applied"
     assert hass.states.get(by_key["last_requested_command"]).state == "disable_heating"
-    assert hass.states.get(by_key["last_command_outcome"]).state == "suppressed_duplicate"
+    assert hass.states.get(by_key["last_command_outcome"]).state == "suppressed"
     assert int(hass.states.get(by_key["duplicate_commands_suppressed"]).state) == (initial_suppressions + 1)
 
     hass.states.async_set(
@@ -462,12 +468,9 @@ async def test_stale_timeout_duplicate_suppression_and_recovery_are_truthful(
     assert hass.states.get(by_key["measurement_status"]).state == "valid"
     assert hass.states.get(by_key["heat_demand"]).state == "heat_required"
     assert hass.states.get(by_key["safety_state"]).state == "normal"
-    assert hass.states.get(by_key["last_command_outcome"]).state == "dispatched"
-    assert [service for service, _ in service_calls] == [
-        "turn_on",
-        "turn_off",
-        "turn_on",
-    ]
+    assert hass.states.get(by_key["last_command_outcome"]).state == "held"
+    assert host.snapshot_source.current.deferred_command is None
+    assert service_calls == []
     assert await hass.config_entries.async_unload(entry.entry_id)
 
 
@@ -527,9 +530,9 @@ async def test_exact_sixty_second_safety_sequence_is_visible_in_diagnostics(
         assert snapshot["zone_heat_demand"] == "indeterminate"
         assert snapshot["safety_state"] == "timeout_action_applied"
         assert snapshot["last_requested_command"] == "disable_heating"
-        assert snapshot["last_command_outcome"] == "suppressed_duplicate"
-        assert diagnostics["counters"]["duplicate_commands_suppressed"] == (initial_suppressions + 1)
-        assert [service for service, _ in service_calls] == ["turn_off"]
+        assert snapshot["last_command_outcome"] == "suppressed"
+        assert diagnostics["counters"]["duplicate_commands_suppressed"] == initial_suppressions
+        assert service_calls == []
         assert await hass.config_entries.async_unload(entry.entry_id)
 
 

@@ -1,4 +1,5 @@
 import asyncio
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 import pytest
@@ -6,6 +7,7 @@ from homeassistant.const import ATTR_UNIT_OF_MEASUREMENT, UnitOfTemperature
 from homeassistant.exceptions import HomeAssistantError, ServiceNotFound
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+import custom_components.controlel as component
 from controlel.application.services.heat_source_command_dispatcher import (
     HeatSourceCommandDispatcher,
 )
@@ -28,6 +30,14 @@ from custom_components.controlel.heat_source import (
     HomeAssistantServiceCallError,
 )
 from custom_components.controlel.runtime_executor import HomeAssistantRuntimeExecutor
+
+
+class MutableClock:
+    def __init__(self, current: datetime) -> None:
+        self.current = current
+
+    def now(self) -> datetime:
+        return self.current
 
 
 def binding() -> HomeAssistantHeatSourceBinding:
@@ -213,15 +223,22 @@ async def test_service_caused_state_change_queues_behind_active_runtime_without_
         "20",
         {ATTR_UNIT_OF_MEASUREMENT: UnitOfTemperature.CELSIUS},
     )
+    hass.states.async_set("switch.boiler", "unavailable")
     entry = MockConfigEntry(domain=DOMAIN, data=entry_data)
     entry.add_to_hass(hass)
 
-    assert await hass.config_entries.async_setup(entry.entry_id) is True
-    await hass.async_block_till_done()
+    clock = MutableClock(datetime.now(UTC) + timedelta(seconds=1))
+    with patch.object(component, "SystemClock", return_value=clock):
+        assert await hass.config_entries.async_setup(entry.entry_id) is True
+        await hass.async_block_till_done()
 
-    host = entry.runtime_data.host
-    assert host is not None
-    assert calls == ["turn_on", "turn_off"]
-    assert host.accepting is True
-    assert host._fatal_error is None
-    assert await hass.config_entries.async_unload(entry.entry_id) is True
+        host = entry.runtime_data.host
+        assert host is not None
+        assert calls == []
+        clock.current += timedelta(seconds=30)
+        await host.async_reevaluate()
+        await hass.async_block_till_done()
+        assert calls == ["turn_on", "turn_off"]
+        assert host.accepting is True
+        assert host._fatal_error is None
+        assert await hass.config_entries.async_unload(entry.entry_id) is True

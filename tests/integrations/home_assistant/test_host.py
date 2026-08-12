@@ -23,7 +23,7 @@ from controlel.application.services.heating_diagnostics_boundary import (
 from controlel.application.services.heating_diagnostics_projector import HeatingDiagnosticsProjector
 from controlel.application.services.heating_performance_assessor import HeatingPerformanceAssessor
 from controlel.application.services.shadow_heating_performance_monitor import ShadowHeatingPerformanceMonitor
-from controlel.application.services.source_control_policy import SourceControlPolicy
+from controlel.application.services.source_control_policy import SourceControlOutcome, SourceControlPolicy
 from controlel.domain.commands.heating_action import HeatingAction
 from controlel.domain.demands.building_heat_demand_status import BuildingHeatDemandStatus
 from controlel.domain.heat_delivery import (
@@ -47,15 +47,45 @@ from custom_components.controlel.event_loop_bridge import HomeAssistantEventLoop
 from custom_components.controlel.failure_sink import HomeAssistantScheduledFailureSink
 from custom_components.controlel.host import (
     HomeAssistantControlelHost,
+    _command_outcome_for_evaluation,
     _reported_source_evidence,
     _source_control_snapshot_changes,
 )
 from custom_components.controlel.measurement_ingestion import (
     HomeAssistantMeasurementMapper,
 )
+from custom_components.controlel.operational import CommandOutcome
 from custom_components.controlel.runtime_executor import HomeAssistantRuntimeExecutor
 
 NOW = datetime(2026, 7, 23, 10, 0, tzinfo=UTC)
+
+
+@pytest.mark.parametrize(
+    ("status", "source_outcome", "expected"),
+    (
+        (HeatDemandEvaluationStatus.RESILIENCE_COMMAND_EXECUTED, None, CommandOutcome.DISPATCHED),
+        (HeatDemandEvaluationStatus.RESILIENCE_COMMAND_SUPPRESSED, None, CommandOutcome.SUPPRESSED),
+        (
+            HeatDemandEvaluationStatus.RESILIENCE_COMMAND_SUPPRESSED,
+            SourceControlOutcome.SUPPRESS_DUPLICATE,
+            CommandOutcome.SUPPRESSED_DUPLICATE,
+        ),
+        (HeatDemandEvaluationStatus.RESILIENCE_COMMAND_DEFERRED, None, CommandOutcome.DEFERRED),
+        (HeatDemandEvaluationStatus.RESILIENCE_COMMAND_HELD, None, CommandOutcome.HELD),
+        (HeatDemandEvaluationStatus.RESILIENCE_INDETERMINATE, None, CommandOutcome.NONE),
+    ),
+)
+def test_core_0_6_resilience_statuses_have_truthful_ha_command_outcomes(
+    status,
+    source_outcome,
+    expected,
+) -> None:
+    source_assessment = None
+    if source_outcome is not None:
+        source_assessment = SimpleNamespace(outcome=source_outcome)
+    result = SimpleNamespace(status=status, source_control_assessment=source_assessment)
+
+    assert _command_outcome_for_evaluation(result) is expected
 
 
 def _disabled_source_state(policy: SourceControlPolicy):

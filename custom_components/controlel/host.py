@@ -33,6 +33,7 @@ from controlel.application.services.heat_demand_safety_policy import (
 from controlel.application.services.heating_diagnostics_boundary import (
     HeatingDiagnosticsBoundary,
 )
+from controlel.application.services.source_control_policy import SourceControlOutcome
 from controlel.application.state.heating_diagnostics import (
     empty_heating_diagnostics_snapshot,
 )
@@ -573,7 +574,12 @@ class HomeAssistantControlelHost:
 
             if not self._executor.closed:
                 try:
-                    await self._async_submit_runtime(self._runtime.stop)
+                    normal_runtime_active = (
+                        self._runtime_supervisor is None
+                        or self._runtime_supervisor.state.command_authority is CommandAuthority.NORMAL
+                    )
+                    if normal_runtime_active:
+                        await self._async_submit_runtime(self._runtime.stop)
                 except RuntimeExecutorClosedError:
                     pass
                 except Exception as error:
@@ -902,6 +908,7 @@ class HomeAssistantControlelHost:
             return None
         diagnostics = self._runtime_supervisor.diagnostics()
         projected = {name: getattr(diagnostics, name) for name in diagnostics.__dataclass_fields__}
+        projected["command_authority"] = projected.pop("active_command_authority")
         projected["reported_source_state"] = (
             self._reported_source_evidence.state.value if self._reported_source_evidence is not None else None
         )
@@ -1077,16 +1084,17 @@ class HomeAssistantControlelHost:
             HeatDemandSafetyPhase.INDETERMINATE_GRACE: SafetyState.INDETERMINATE_GRACE,
             HeatDemandSafetyPhase.INDETERMINATE_TIMED_OUT: SafetyState.TIMEOUT_ACTION_APPLIED,
         }[result.safety_assessment.phase]
-        outcome = {
-            HeatDemandEvaluationStatus.INDETERMINATE_GRACE: CommandOutcome.NONE,
-            HeatDemandEvaluationStatus.DEMAND_COMMAND_EXECUTED: CommandOutcome.DISPATCHED,
-            HeatDemandEvaluationStatus.DEMAND_COMMAND_SUPPRESSED: (CommandOutcome.SUPPRESSED_DUPLICATE),
-            HeatDemandEvaluationStatus.SAFETY_COMMAND_EXECUTED: CommandOutcome.DISPATCHED,
-            HeatDemandEvaluationStatus.SAFETY_COMMAND_SUPPRESSED: (CommandOutcome.SUPPRESSED_DUPLICATE),
-            HeatDemandEvaluationStatus.DEMAND_COMMAND_DEFERRED: CommandOutcome.DEFERRED,
-            HeatDemandEvaluationStatus.SAFETY_COMMAND_DEFERRED: CommandOutcome.DEFERRED,
-        }[result.status]
-        if result.status is HeatDemandEvaluationStatus.INDETERMINATE_GRACE:
+        outcome = _command_outcome_for_evaluation(result)
+        resilience_code = {
+            HeatDemandEvaluationStatus.RESILIENCE_COMMAND_EXECUTED: DecisionCode.RESILIENCE_COMMAND_EXECUTED,
+            HeatDemandEvaluationStatus.RESILIENCE_COMMAND_SUPPRESSED: DecisionCode.RESILIENCE_COMMAND_SUPPRESSED,
+            HeatDemandEvaluationStatus.RESILIENCE_COMMAND_DEFERRED: DecisionCode.RESILIENCE_COMMAND_DEFERRED,
+            HeatDemandEvaluationStatus.RESILIENCE_COMMAND_HELD: DecisionCode.RESILIENCE_COMMAND_HELD,
+            HeatDemandEvaluationStatus.RESILIENCE_INDETERMINATE: DecisionCode.RESILIENCE_INDETERMINATE,
+        }.get(result.status)
+        if resilience_code is not None:
+            code = resilience_code
+        elif result.status is HeatDemandEvaluationStatus.INDETERMINATE_GRACE:
             code = DecisionCode.INDETERMINATE_PRESERVE_PREVIOUS
         elif result.status in {
             HeatDemandEvaluationStatus.SAFETY_COMMAND_EXECUTED,
@@ -1550,6 +1558,29 @@ class HomeAssistantControlelHost:
         name: str,
     ) -> asyncio.Task[Any]:
         return self._hass.async_create_task(coroutine, name=name)
+
+
+def _command_outcome_for_evaluation(result: HeatDemandEvaluationResult) -> CommandOutcome:
+    """Project every public core evaluation status without inventing dispatch."""
+
+    if result.status is HeatDemandEvaluationStatus.RESILIENCE_COMMAND_SUPPRESSED:
+        source = result.source_control_assessment
+        if source is not None and source.outcome is SourceControlOutcome.SUPPRESS_DUPLICATE:
+            return CommandOutcome.SUPPRESSED_DUPLICATE
+        return CommandOutcome.SUPPRESSED
+    return {
+        HeatDemandEvaluationStatus.INDETERMINATE_GRACE: CommandOutcome.NONE,
+        HeatDemandEvaluationStatus.DEMAND_COMMAND_EXECUTED: CommandOutcome.DISPATCHED,
+        HeatDemandEvaluationStatus.DEMAND_COMMAND_SUPPRESSED: CommandOutcome.SUPPRESSED_DUPLICATE,
+        HeatDemandEvaluationStatus.SAFETY_COMMAND_EXECUTED: CommandOutcome.DISPATCHED,
+        HeatDemandEvaluationStatus.SAFETY_COMMAND_SUPPRESSED: CommandOutcome.SUPPRESSED_DUPLICATE,
+        HeatDemandEvaluationStatus.DEMAND_COMMAND_DEFERRED: CommandOutcome.DEFERRED,
+        HeatDemandEvaluationStatus.SAFETY_COMMAND_DEFERRED: CommandOutcome.DEFERRED,
+        HeatDemandEvaluationStatus.RESILIENCE_COMMAND_EXECUTED: CommandOutcome.DISPATCHED,
+        HeatDemandEvaluationStatus.RESILIENCE_COMMAND_DEFERRED: CommandOutcome.DEFERRED,
+        HeatDemandEvaluationStatus.RESILIENCE_COMMAND_HELD: CommandOutcome.HELD,
+        HeatDemandEvaluationStatus.RESILIENCE_INDETERMINATE: CommandOutcome.NONE,
+    }[result.status]
 
 
 def _source_control_snapshot_changes(state: CoreSourceControlState) -> dict[str, object]:

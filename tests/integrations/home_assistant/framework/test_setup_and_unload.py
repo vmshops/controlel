@@ -101,12 +101,7 @@ async def test_real_setup_initializes_once_starts_then_processes_snapshot_and_un
     measurement = runtime.state_store.get_latest(SensorId("living_room_temperature"))
     assert measurement is not None
     assert measurement.timestamp is initial_state.last_updated
-    assert service_calls == [
-        (
-            "turn_on",
-            {"entity_id": "switch.boiler"},
-        )
-    ]
+    assert service_calls == []
 
     assert await hass.config_entries.async_unload(entry.entry_id) is True
     assert host.accepting is False
