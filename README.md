@@ -22,13 +22,16 @@ The goal is to create a reliable heating controller capable of optimizing comfor
 
 Project phase: Home Assistant one-zone host vertical slice
 
-Core package version: 0.5.0 (published)
+Core package candidate version: 0.6.0 (not yet published)
 
 Home Assistant integration candidate version: 0.8.0
 
 Use the latest published release for HACS custom-repository installation.
 Core `0.5.0` is published and immutable. Integration `0.8.0` pins exactly to
 `controlel==0.5.0` and remains an unpublished candidate.
+Core `0.6.0` is being prepared as the separate M30.2 release. The integration
+will move to it only in a later integration change after public publication and
+verification.
 Controlel is not listed in the default HACS store.
 
 ## Home Assistant installation
@@ -100,6 +103,26 @@ command. Successful enable/disable dispatch timestamps are command evidence,
 not physical boiler feedback; Controlel does not infer whether a burner or
 boiler is physically running.
 
+Milestone 30.2 adds core-only operational resilience contracts. Source
+ownership distinguishes externally controlled sources from sources Controlel
+may reconcile. Requested commands, successful or failed command outcomes,
+reported controller state, and physical burner state remain separate evidence;
+unknown is never treated as false. A Controlel-owned source with external-on,
+no-heat drift and unknown transition age is held conservatively for five
+minutes before corrective disable is considered. Failed or still-unconfirmed
+correction remains retryable on a bounded 30-second cadence without polling or
+command storms. Restart and reload begin with unknown transition history and
+never reconstruct prior transitions.
+
+The same core boundary adds explicit `NORMAL`, `SAFE_HEATING`,
+`EMERGENCY_OFF`, and `MANUAL_RECOVERY_HEAT` operating modes. Recovery waits at
+most 30 seconds for current demand and reported-source evidence. Manual
+recovery defaults to two hours and is explicitly cancelled across reload.
+Safe heating can produce a capability-gated `WATER_TARGET` intent, but physical
+water-target dispatch is intentionally unsupported. Bounded diagnostics use
+stable reason codes and never reinterpret permission or dispatch as physical
+heat production.
+
 Each entry creates one `Controlel — <Zone name>` device with a translated
 operational summary and stable operational/diagnostic entities. The summary
 describes logical demand, safety, deferred commands, requested commands, and
@@ -138,10 +161,12 @@ has not been published and no default-store publication exists.
 ## Core package artifacts
 
 The reusable core is published as the `controlel` distribution and import
-package at version `0.5.0`. Its static version source and PEP 517 build
-configuration live in `pyproject.toml`; normal installation depends only on
-Pydantic. Packaging validation builds one wheel and one sdist, inspects their
-contents, and installs the wheel into a clean environment outside the checkout.
+package. Version `0.6.0` is the release candidate being prepared; `0.5.0`
+remains the latest public immutable release until publication completes. The
+static version source and PEP 517 build configuration live in `pyproject.toml`;
+normal installation depends only on Pydantic. Packaging validation builds one
+wheel and one sdist, inspects their contents, and installs the wheel into a
+clean environment outside the checkout.
 
 Core versions `0.1.0`, `0.2.0`, `0.3.0`, `0.4.0`, and `0.5.0` are published on
 PyPI and immutable. Future core corrections require a new version; rebuilt artifacts for an already

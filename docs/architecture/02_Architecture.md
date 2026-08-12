@@ -114,6 +114,38 @@ Successful dispatch timestamps prove only that an adapter call returned
 successfully. No state name or timestamp claims physical boiler, burner, relay,
 or circulation state without explicit future feedback.
 
+## Source resilience and operating modes
+
+Core 0.6.0 adds event-driven reconciliation around the existing source-control
+policy. `SourceOwnership.EXTERNAL` observes divergence without fighting another
+controller. `SourceOwnership.CONTROLEL_OWNED` may request a correction, but the
+normal minimum-on/off and safety policy remains authoritative. Requested
+command, dispatch outcome, reported controller state, and physical source state
+are four distinct facts. `UNKNOWN` and `UNAVAILABLE` reports never become
+implicit false values.
+
+When a Controlel-owned source reports enabled while current demand is
+`NO_HEAT_REQUIRED` and reported transition age is unknown, reconciliation holds
+for five minutes. At expiry it reevaluates current evidence and delegates any
+corrective disable to the normal source policy. Successful correction waits for
+reported agreement; failed correction becomes eligible after a 30-second retry
+deadline. One-shot deadlines and generation checks prevent command storms and
+stale callbacks. No periodic reconciliation loop exists.
+
+Recovery is explicit and bounded to 30 seconds while current demand and
+reported-source evidence are gathered. Restart and reload never fabricate
+transition history or restore elapsed protection time. The operating-mode
+model contains `NORMAL`, `SAFE_HEATING`, `EMERGENCY_OFF`, and
+`MANUAL_RECOVERY_HEAT`. Emergency off uses the established safety-disable path.
+Manual recovery defaults to two hours, extension replaces its deadline, and
+reload cancellation returns to normal without reconstructing the old timer.
+
+Safe heating is deterministic and evidence-driven. A configured water target
+can create `WaterTargetIntent` only when `WATER_TARGET` is explicitly advertised.
+That object is requested intent, not a dispatched command or physical water
+temperature. Physical water-target dispatch remains intentionally unsupported
+in core 0.6.0.
+
 ## Integration observability controller
 
 The integration owns presentation policy separately from the core runtime.

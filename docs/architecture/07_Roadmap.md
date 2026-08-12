@@ -60,6 +60,20 @@ Integration `0.8.0` is the M30.1C Home Assistant release candidate. It retains
 the one-zone configuration surface, consumes immutable `controlel==0.5.0`, and
 adds only read-only diagnostic presentation.
 
+Milestone 30.2 is merged and prepares core `0.6.0` with operational resilience
+and recovery. It adds explicit source ownership and capabilities, truthful
+reported-source evidence, bounded external-drift reconciliation, bounded
+restart recovery, four explicit operating modes, and immutable reason-coded
+source-resilience diagnostics. Unknown transition age receives a conservative
+five-minute hold; recovery and corrective retry boundaries are 30 seconds; and
+manual recovery defaults to two hours with explicit reload cancellation.
+Source safety remains authoritative. A capability-gated `WATER_TARGET` value is
+intent only, and physical water-target dispatch remains unsupported.
+
+Core `0.6.0` is being prepared and is not yet public. Immutable `0.5.0` remains
+the published core consumed by integration `0.8.0`. Moving the integration to
+public core `0.6.0` is a separate later change after publication verification.
+
 Adaptive assistance remains future work. Learning, persistence, actuator
 travel/open verification, and source-water-temperature optimization also
 remain future layers.

@@ -35,6 +35,19 @@ All measurements, demands, safety state, applied state, timer ownership, and
 lifecycle state are in memory and lost when the runtime instance or process is
 replaced. Successful port return is not physical source-state confirmation.
 
+Core 0.6.0 hosts may additionally provide explicit reported-source evidence,
+source ownership/capabilities, recovery start, and operating-mode changes
+through the serialized runtime boundary. `UNKNOWN` and `UNAVAILABLE` must be
+forwarded truthfully. A host must not derive reported state from a successful
+command or rebuild transition timestamps during restart/reload.
+
+Reconciliation and recovery reuse the runtime's one-shot deadline ownership.
+The default unknown-transition hold is five minutes, recovery is bounded to 30
+seconds, corrective failure becomes retryable after 30 seconds, and manual
+recovery defaults to two hours. Reload explicitly cancels manual recovery. No
+host polling loop is required. `WATER_TARGET` is capability-gated intent only;
+physical water-target dispatch remains unsupported in core 0.6.0.
+
 ## Custom-component packaging
 
 The integration source is `custom_components/controlel`. Integration version
@@ -106,3 +119,7 @@ public releases. Any core correction requires a new version; never rebuild
 and re-upload an existing version. See the
 [release guide](../development/ReleaseGuide.md) for its exact source commit and
 published hashes.
+
+Core `0.6.0` is currently a release candidate, not a public release. Integration
+`0.8.0` continues to install immutable `controlel==0.5.0`; adoption of 0.6.0
+requires a later separate integration change after public verification.

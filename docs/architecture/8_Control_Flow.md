@@ -18,6 +18,8 @@ Measurement
 -> BuildingHeatDemand
 -> HeatDemandSafetyPolicy
 -> HeatDemandSafetyStateStore
+-> OperatingModePolicy
+-> SourceReconciliationPolicy
 -> earliest eligibility/grace deadline scheduled
 -> indeterminate grace: no command
    determinate: demand HeatSourceCommand
@@ -27,6 +29,11 @@ Measurement
 -> HeatSourceControlState after successful execution
 -> HeatDemandEvaluationResult nested in RuntimeProcessingResult
 ```
+
+Recovery and reported-source ingestion enter through explicit runtime methods
+on the same serialized execution path. They reevaluate current demand and
+source evidence; they do not replay a stored command or create a second control
+loop.
 
 `ControlRuntime` explicitly invokes every functional step. It requires one
 `HeatSourcePort`; it no longer accepts actuator routes and does not construct
@@ -110,8 +117,32 @@ runtime.
 
 The core has no production scheduler implementation. The first Home Assistant
 host supplies a one-shot absolute-time scheduler adapter. There are no polling
-loops, cleanup jobs, persistence, recurring retries, modulation, DHW behavior,
-valve control, source routing, multiple sources, or physical confirmation.
+loops, cleanup jobs, persistence, polling-based retries, modulation, DHW
+behavior, valve control, source routing, multiple sources, or physical
+confirmation.
+
+## Reconciliation, recovery, and operating modes
+
+External ownership produces diagnostics only. For Controlel-owned sources,
+reported divergence is assessed against current desired command and the
+existing source safety state. External-on/no-heat drift with unknown transition
+age schedules a five-minute hold deadline. Expiry reevaluates current evidence;
+if correction is still required, the command passes through minimum-time and
+safety policy. Failed correction schedules one 30-second retry eligibility
+deadline, while successful correction waits for new reported evidence. This is
+deadline-driven retry semantics, not polling.
+
+`begin_source_recovery()` opens a 30-second bounded evidence window.
+`ingest_reported_source_state()` accepts explicit reported state without
+turning it into command success or physical reality. Restart/reload does not
+restore transition history. Stale reported evidence and stale scheduled
+callbacks are rejected by timestamp and generation protection.
+
+`NORMAL` preserves the ordinary demand path. `SAFE_HEATING` uses only configured
+temperature evidence and can form a capability-gated `WATER_TARGET` intent;
+physical water-target dispatch is not implemented. `EMERGENCY_OFF` uses the
+existing safety-disable bypass. `MANUAL_RECOVERY_HEAT` is bounded to two hours
+by default, and reload explicitly cancels it without recreating its deadline.
 
 ## Serialized execution and shutdown
 

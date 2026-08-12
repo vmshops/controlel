@@ -23,6 +23,26 @@ freshness.
 `DecisionAction` describes one zone's regulation intent. Its stable values
 remain `enable_heating`, `disable_heating`, and `observe_only`.
 
+## Source evidence and operating-mode contracts
+
+`SourceOwnership` states whether reconciliation authority belongs to Controlel
+or an external controller. `SourceCapabilities` is an immutable explicit set;
+the current source contract always includes `ENABLE_DISABLE` and may advertise
+`WATER_TARGET`. Capability is permission to form an intent, not proof that an
+adapter dispatched it or that hardware applied it.
+
+`ReportedSourceEvidence` contains one reported controller state and its exact
+observation timestamp. An optional transition timestamp makes history known;
+absence keeps transition history explicitly unknown. `ENABLED`, `DISABLED`,
+`UNKNOWN`, and `UNAVAILABLE` describe only what the controller reported. They
+never represent physical burner, flame, pump, or heat-output confirmation.
+
+`OperatingMode` has stable values `NORMAL`, `SAFE_HEATING`, `EMERGENCY_OFF`,
+and `MANUAL_RECOVERY_HEAT`. `SafeHeatingProfile` is immutable configuration,
+while `SafeHeatingTemperatureEvidence` is observed input with explicit quality.
+`WaterTargetIntent` is capability-gated requested intent and is deliberately
+separate from command outcome and physical water temperature.
+
 ## Requested heating demand
 
 An actionable decision maps to an immutable `ZoneDemand` containing:
