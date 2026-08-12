@@ -73,3 +73,16 @@ def test_failed_transition_preserves_previous_state():
         HeatSourceCommandDispatcher(failing_port, store).dispatch(create_command(HeatingAction.DISABLE_HEATING))
 
     assert store.get() is previous_state
+
+
+def test_corrective_dispatch_bypasses_only_dispatcher_duplicate_cache():
+    port = RecordingHeatSource()
+    store = HeatSourceStateStore()
+    dispatcher = HeatSourceCommandDispatcher(port, store)
+    first = create_command(HeatingAction.DISABLE_HEATING)
+    corrective = create_command(HeatingAction.DISABLE_HEATING)
+
+    assert dispatcher.dispatch(first) is True
+    assert dispatcher.dispatch(corrective, corrective_reconciliation=True) is True
+    assert port.commands == [first, corrective]
+    assert store.get().command_id == corrective.id

@@ -58,6 +58,11 @@ from controlel.application.services.heating_episode_observer import (
 from controlel.application.services.measurement_timestamp_validator import (
     MeasurementTimestampValidator,
 )
+from controlel.application.services.operating_mode_policy import (
+    DEFAULT_MANUAL_RECOVERY_DURATION,
+    OperatingModeAssessment,
+    OperatingModePolicy,
+)
 from controlel.application.services.shadow_heating_performance_monitor import (
     ShadowHeatingPerformanceMonitor,
 )
@@ -65,6 +70,18 @@ from controlel.application.services.source_control_policy import (
     SourceControlAssessment,
     SourceControlOutcome,
     SourceControlPolicy,
+)
+from controlel.application.services.source_reconciliation_policy import (
+    DEFAULT_CORRECTION_RETRY_INTERVAL,
+    DEFAULT_UNKNOWN_TRANSITION_HOLD,
+    SourceReconciliationPolicy,
+)
+from controlel.application.services.source_recovery_policy import (
+    DEFAULT_RECOVERY_WINDOW,
+    SourceRecoveryPolicy,
+)
+from controlel.application.services.source_resilience_diagnostics_projector import (
+    SourceResilienceDiagnosticsProjector,
 )
 from controlel.application.services.temperature_hysteresis_policy import (
     TemperatureHysteresisAssessment,
@@ -82,8 +99,21 @@ from controlel.application.state.heat_demand_safety_state_store import (
     HeatDemandSafetyStateStore,
 )
 from controlel.application.state.heat_source_state_store import HeatSourceStateStore
+from controlel.application.state.operating_mode_state import OperatingModeState
 from controlel.application.state.runtime_state_store import RuntimeStateStore
 from controlel.application.state.source_control_state import SourceControlState
+from controlel.application.state.source_reconciliation_state import (
+    SourceReconciliationAssessment,
+    SourceReconciliationState,
+    SourceReconciliationStatus,
+)
+from controlel.application.state.source_recovery_state import (
+    SourceRecoveryAssessment,
+    SourceRecoveryState,
+)
+from controlel.application.state.source_resilience_diagnostics import (
+    SourceResilienceDiagnosticsV1,
+)
 from controlel.application.state.temperature_hysteresis_state import (
     HysteresisDemandState,
     TemperatureHysteresisState,
@@ -114,8 +144,19 @@ from controlel.domain.heat_delivery import (
     ObservedValue,
 )
 from controlel.domain.measurements.measurement import Measurement
+from controlel.domain.operating_mode import (
+    OperatingMode,
+    SafeHeatingProfile,
+    SafeHeatingTemperatureEvidence,
+)
 from controlel.domain.repositories.sensor_repository import SensorRepository
 from controlel.domain.repositories.zone_repository import ZoneRepository
+from controlel.domain.source_control import (
+    ReportedSourceEvidence,
+    ReportedSourceState,
+    SourceCapabilities,
+    SourceOwnership,
+)
 from controlel.domain.value_objects.zone_id import ZoneId
 
 
@@ -140,6 +181,13 @@ class ControlRuntime:
         minimum_heating_off_time: timedelta = timedelta(0),
         demand_arbitrator: DemandArbitrator | None = None,
         heat_delivery_controller: ZoneHeatDeliveryController | None = None,
+        source_ownership: SourceOwnership = SourceOwnership.EXTERNAL,
+        source_capabilities: SourceCapabilities | None = None,
+        source_reconciliation_hold: timedelta = DEFAULT_UNKNOWN_TRANSITION_HOLD,
+        source_correction_retry_interval: timedelta = DEFAULT_CORRECTION_RETRY_INTERVAL,
+        source_recovery_window: timedelta = DEFAULT_RECOVERY_WINDOW,
+        safe_heating_profile: SafeHeatingProfile | None = None,
+        manual_recovery_duration: timedelta = DEFAULT_MANUAL_RECOVERY_DURATION,
     ) -> None:
         self.clock = clock
         self.scheduler = scheduler
@@ -187,6 +235,22 @@ class ControlRuntime:
             minimum_on_time=minimum_heating_on_time,
             minimum_off_time=minimum_heating_off_time,
         )
+        if not isinstance(source_ownership, SourceOwnership):
+            raise TypeError("source_ownership must be a SourceOwnership")
+        self.source_ownership = source_ownership
+        self.source_capabilities = source_capabilities or SourceCapabilities()
+        self.source_reconciliation_policy = SourceReconciliationPolicy(
+            unknown_transition_hold=source_reconciliation_hold,
+            correction_retry_interval=source_correction_retry_interval,
+        )
+        self.source_recovery_policy = SourceRecoveryPolicy(
+            recovery_window=source_recovery_window,
+        )
+        self.operating_mode_policy = OperatingModePolicy(
+            safe_heating_profile=safe_heating_profile,
+            manual_recovery_duration=manual_recovery_duration,
+        )
+        self.source_resilience_diagnostics_projector = SourceResilienceDiagnosticsProjector()
         self.temperature_hysteresis_state: TemperatureHysteresisState | None = None
         self.temperature_hysteresis_assessment: TemperatureHysteresisAssessment | None = None
         self.temperature_hysteresis_states: dict[ZoneId, TemperatureHysteresisState] = {}
@@ -199,6 +263,15 @@ class ControlRuntime:
         self._last_processed_zone_id: ZoneId | None = None
         self.source_control_state: SourceControlState | None = None
         self.source_control_assessment: SourceControlAssessment | None = None
+        self.reported_source_evidence: ReportedSourceEvidence | None = None
+        self.source_reconciliation_state: SourceReconciliationState | None = None
+        self.source_reconciliation_assessment: SourceReconciliationAssessment | None = None
+        self.source_recovery_state: SourceRecoveryState | None = None
+        self.source_recovery_assessment: SourceRecoveryAssessment | None = None
+        self.operating_mode_state: OperatingModeState | None = None
+        self.operating_mode_assessment: OperatingModeAssessment | None = None
+        self.safe_heating_preferred_evidence: SafeHeatingTemperatureEvidence | None = None
+        self.safe_heating_fallback_evidence: SafeHeatingTemperatureEvidence | None = None
         self.target_resolver = ZoneTargetResolver(
             sensor_repository=sensor_repository,
             zone_repository=zone_repository,
@@ -230,6 +303,114 @@ class ControlRuntime:
     def start(self) -> HeatDemandEvaluationResult:
         with self._runtime_operation("start"):
             return self._evaluate_heat_demand(HeatDemandEvaluationTrigger.STARTUP)
+
+    def begin_source_recovery(
+        self,
+        *,
+        manual_recovery_cancelled: bool = False,
+    ) -> SourceRecoveryState:
+        """Begin bounded reconstruction without evaluating missing inputs as false."""
+
+        with self._runtime_operation("begin_source_recovery"):
+            now = self._now()
+            if manual_recovery_cancelled:
+                self.operating_mode_state = self.operating_mode_policy.recovered_after_manual_reload(now=now)
+            self.source_recovery_state = self.source_recovery_policy.begin(now=now)
+            self.source_recovery_assessment = None
+            self._replace_scheduled_evaluation(self.source_recovery_state.deadline)
+            return self.source_recovery_state
+
+    def ingest_reported_source_state(
+        self,
+        evidence: ReportedSourceEvidence,
+    ) -> HeatDemandEvaluationResult:
+        """Ingest reported controller state and reevaluate current demand."""
+
+        if not isinstance(evidence, ReportedSourceEvidence):
+            raise TypeError("evidence must be ReportedSourceEvidence")
+        with self._runtime_operation("ingest_reported_source_state"):
+            if (
+                self.reported_source_evidence is not None
+                and evidence.observed_at < self.reported_source_evidence.observed_at
+            ):
+                raise ValueError("reported source evidence time must not regress")
+            self.reported_source_evidence = evidence
+            return self._evaluate_heat_demand(HeatDemandEvaluationTrigger.MANUAL)
+
+    def set_operating_mode(
+        self,
+        mode: OperatingMode,
+        *,
+        manual_recovery_duration: timedelta | None = None,
+    ) -> HeatDemandEvaluationResult:
+        """Activate one explicit mode and synchronously reevaluate source intent."""
+
+        with self._runtime_operation("set_operating_mode"):
+            now = self._now()
+            state = self.operating_mode_state or self.operating_mode_policy.initial_state(now=now)
+            self.operating_mode_state = self.operating_mode_policy.activate(
+                state,
+                mode=mode,
+                now=now,
+                manual_recovery_duration=manual_recovery_duration,
+            )
+            return self._evaluate_heat_demand(HeatDemandEvaluationTrigger.MANUAL)
+
+    def ingest_safe_heating_temperature(
+        self,
+        evidence: SafeHeatingTemperatureEvidence,
+    ) -> HeatDemandEvaluationResult:
+        """Record explicit safe-heating evidence without changing normal zone state."""
+
+        if not isinstance(evidence, SafeHeatingTemperatureEvidence):
+            raise TypeError("evidence must be SafeHeatingTemperatureEvidence")
+        with self._runtime_operation("ingest_safe_heating_temperature"):
+            profile = self.operating_mode_policy.safe_heating_profile
+            if profile is None:
+                raise RuntimeError("safe-heating profile is not configured")
+            if evidence.sensor_id == profile.preferred_sensor_id:
+                self.safe_heating_preferred_evidence = evidence
+            elif evidence.sensor_id == profile.fallback_sensor_id:
+                self.safe_heating_fallback_evidence = evidence
+            else:
+                raise ValueError("safe-heating evidence sensor is not configured")
+            return self._evaluate_heat_demand(HeatDemandEvaluationTrigger.MANUAL)
+
+    def cancel_manual_recovery_for_reload(self) -> SourceRecoveryState:
+        """Cancel in-memory manual heat and enter ordinary bounded recovery."""
+
+        with self._runtime_operation("cancel_manual_recovery_for_reload"):
+            now = self._now()
+            state = self.operating_mode_state or self.operating_mode_policy.initial_state(now=now)
+            self.operating_mode_state = self.operating_mode_policy.cancel_for_reload(state, now=now)
+            self.source_recovery_state = self.source_recovery_policy.begin(now=now)
+            self.source_recovery_assessment = None
+            self._replace_scheduled_evaluation(self.source_recovery_state.deadline)
+            return self.source_recovery_state
+
+    def source_resilience_diagnostics(
+        self,
+        *,
+        now: datetime | None = None,
+    ) -> SourceResilienceDiagnosticsV1:
+        """Project passive bounded diagnostics from current resilience evidence."""
+
+        projected_at = now or self._now()
+        mode_state = self.operating_mode_state or self.operating_mode_policy.initial_state(now=projected_at)
+        return self.source_resilience_diagnostics_projector.project(
+            operating_mode_state=mode_state,
+            operating_mode_assessment=self.operating_mode_assessment,
+            ownership=self.source_ownership,
+            capabilities=self.source_capabilities,
+            reported=self.reported_source_evidence,
+            last_successful_command=(
+                self.source_control_state.last_dispatched_command if self.source_control_state is not None else None
+            ),
+            reconciliation=self.source_reconciliation_assessment,
+            recovery=self.source_recovery_assessment,
+            source_control_state=self.source_control_state,
+            now=projected_at,
+        )
 
     def reevaluate_heat_demand(self) -> HeatDemandEvaluationResult:
         with self._runtime_operation("reevaluate_heat_demand"):
@@ -449,6 +630,17 @@ class ControlRuntime:
             HeatDemandEvaluationStatus.SAFETY_COMMAND_SUPPRESSED: RuntimeProcessingStatus.SAFETY_COMMAND_SUPPRESSED,
             HeatDemandEvaluationStatus.DEMAND_COMMAND_DEFERRED: RuntimeProcessingStatus.COMMAND_DEFERRED,
             HeatDemandEvaluationStatus.SAFETY_COMMAND_DEFERRED: RuntimeProcessingStatus.SAFETY_COMMAND_DEFERRED,
+            HeatDemandEvaluationStatus.RESILIENCE_COMMAND_EXECUTED: (
+                RuntimeProcessingStatus.RESILIENCE_COMMAND_EXECUTED
+            ),
+            HeatDemandEvaluationStatus.RESILIENCE_COMMAND_SUPPRESSED: (
+                RuntimeProcessingStatus.RESILIENCE_COMMAND_SUPPRESSED
+            ),
+            HeatDemandEvaluationStatus.RESILIENCE_COMMAND_DEFERRED: (
+                RuntimeProcessingStatus.RESILIENCE_COMMAND_DEFERRED
+            ),
+            HeatDemandEvaluationStatus.RESILIENCE_COMMAND_HELD: RuntimeProcessingStatus.RESILIENCE_COMMAND_HELD,
+            HeatDemandEvaluationStatus.RESILIENCE_INDETERMINATE: RuntimeProcessingStatus.RESILIENCE_INDETERMINATE,
         }
         return RuntimeProcessingResult(
             status=runtime_status_by_evaluation[evaluation.status],
@@ -583,120 +775,230 @@ class ControlRuntime:
             else None
         )
 
+        now = building_heat_demand.evaluated_at
         command: HeatSourceCommand | None = None
         source_assessment: SourceControlAssessment | None = None
         if safety_assessment.phase is HeatDemandSafetyPhase.INDETERMINATE_GRACE:
-            status = HeatDemandEvaluationStatus.INDETERMINATE_GRACE
-            deadlines = [
-                deadline
-                for deadline in (
-                    eligibility_deadline,
-                    grace_deadline,
-                    confirmation_deadline,
-                )
-                if deadline is not None
-            ]
-            next_evaluation_at = min(deadlines) if deadlines else None
+            normal_action = None
+            executed_status = HeatDemandEvaluationStatus.RESILIENCE_COMMAND_EXECUTED
+            suppressed_status = HeatDemandEvaluationStatus.RESILIENCE_COMMAND_SUPPRESSED
+            deferred_status = HeatDemandEvaluationStatus.RESILIENCE_COMMAND_DEFERRED
+            normal_safety_command = False
+        elif safety_assessment.phase is HeatDemandSafetyPhase.DETERMINATE:
+            normal_action = {
+                BuildingHeatDemandStatus.HEAT_REQUIRED: HeatingAction.ENABLE_HEATING,
+                BuildingHeatDemandStatus.NO_HEAT_REQUIRED: HeatingAction.DISABLE_HEATING,
+            }[building_heat_demand.status]
+            executed_status = HeatDemandEvaluationStatus.DEMAND_COMMAND_EXECUTED
+            suppressed_status = HeatDemandEvaluationStatus.DEMAND_COMMAND_SUPPRESSED
+            deferred_status = HeatDemandEvaluationStatus.DEMAND_COMMAND_DEFERRED
+            normal_safety_command = False
+        else:
+            normal_action = safety_assessment.action
+            if normal_action is None:
+                raise RuntimeError("Timed-out safety assessment must contain an action")
+            executed_status = HeatDemandEvaluationStatus.SAFETY_COMMAND_EXECUTED
+            suppressed_status = HeatDemandEvaluationStatus.SAFETY_COMMAND_SUPPRESSED
+            deferred_status = HeatDemandEvaluationStatus.SAFETY_COMMAND_DEFERRED
+            normal_safety_command = True
+
+        mode_state = self.operating_mode_state or self.operating_mode_policy.initial_state(now=now)
+        mode_assessment = self.operating_mode_policy.evaluate(
+            current_state=mode_state,
+            normal_action=normal_action,
+            preferred_evidence=self.safe_heating_preferred_evidence,
+            fallback_evidence=self.safe_heating_fallback_evidence,
+            source_capabilities=self.source_capabilities,
+            now=now,
+        )
+        self.operating_mode_state = mode_assessment.state
+        self.operating_mode_assessment = mode_assessment
+        action = mode_assessment.desired_source_command
+        mode_override = mode_assessment.state.mode is not OperatingMode.NORMAL or (
+            mode_assessment.reason.value.startswith("manual_recovery_")
+        )
+        safety_command = mode_assessment.safety_command or (normal_safety_command and not mode_override)
+        if mode_override:
+            executed_status = HeatDemandEvaluationStatus.RESILIENCE_COMMAND_EXECUTED
+            suppressed_status = HeatDemandEvaluationStatus.RESILIENCE_COMMAND_SUPPRESSED
+            deferred_status = HeatDemandEvaluationStatus.RESILIENCE_COMMAND_DEFERRED
+
+        recovery_assessment: SourceRecoveryAssessment | None = None
+        if self.source_recovery_state is not None:
+            recovery_assessment = self.source_recovery_policy.evaluate(
+                current_state=self.source_recovery_state,
+                demand_known=building_heat_demand.status is not BuildingHeatDemandStatus.INDETERMINATE,
+                reported_source_known=(
+                    self.reported_source_evidence is not None
+                    and self.reported_source_evidence.state
+                    in {ReportedSourceState.ENABLED, ReportedSourceState.DISABLED}
+                ),
+                now=now,
+            )
+            self.source_recovery_state = recovery_assessment.state
+            self.source_recovery_assessment = recovery_assessment
+
+        last_successful_command = (
+            self.source_control_state.last_dispatched_command if self.source_control_state is not None else None
+        )
+        reconciliation_assessment = self.source_reconciliation_policy.evaluate(
+            ownership=self.source_ownership,
+            desired_command=action,
+            last_successful_command=last_successful_command,
+            reported=self.reported_source_evidence,
+            current_state=self.source_reconciliation_state,
+            now=now,
+        )
+        self.source_reconciliation_state = reconciliation_assessment.state
+        self.source_reconciliation_assessment = reconciliation_assessment
+        base_deadlines = [
+            deadline
+            for deadline in (
+                eligibility_deadline,
+                grace_deadline,
+                confirmation_deadline,
+                mode_assessment.next_reevaluation_at,
+                recovery_assessment.deadline if recovery_assessment is not None else None,
+                reconciliation_assessment.next_reevaluation_at,
+            )
+            if deadline is not None and deadline > now
+        ]
+
+        recovery_blocks = recovery_assessment is not None and recovery_assessment.blocks_source_commands
+        authoritative_safety_disable = safety_command and action is HeatingAction.DISABLE_HEATING
+        reconciliation_blocks = reconciliation_assessment.status is SourceReconciliationStatus.CORRECTION_PENDING or (
+            reconciliation_assessment.status is SourceReconciliationStatus.DRIFT_HOLDING
+            and not authoritative_safety_disable
+        )
+        if recovery_blocks or reconciliation_blocks:
+            command = (
+                HeatSourceCommand(command_type=CommandFamily.HEATING, action=action) if action is not None else None
+            )
+            status = HeatDemandEvaluationStatus.RESILIENCE_COMMAND_HELD
+            next_evaluation_at = min(base_deadlines)
+            self._replace_scheduled_evaluation(
+                next_evaluation_at,
+                force=confirmation_callback_invalidated,
+            )
+        elif action is None:
+            if mode_assessment.state.mode is OperatingMode.NORMAL:
+                status = HeatDemandEvaluationStatus.INDETERMINATE_GRACE
+                next_evaluation_at = min(base_deadlines) if base_deadlines else None
+            else:
+                status = HeatDemandEvaluationStatus.RESILIENCE_INDETERMINATE
+                next_evaluation_at = min(base_deadlines) if base_deadlines else None
             self._replace_scheduled_evaluation(
                 next_evaluation_at,
                 force=confirmation_callback_invalidated,
             )
         else:
-            if safety_assessment.phase is HeatDemandSafetyPhase.DETERMINATE:
-                action = {
-                    BuildingHeatDemandStatus.HEAT_REQUIRED: HeatingAction.ENABLE_HEATING,
-                    BuildingHeatDemandStatus.NO_HEAT_REQUIRED: HeatingAction.DISABLE_HEATING,
-                }[building_heat_demand.status]
-                executed_status = HeatDemandEvaluationStatus.DEMAND_COMMAND_EXECUTED
-                suppressed_status = HeatDemandEvaluationStatus.DEMAND_COMMAND_SUPPRESSED
-                deferred_status = HeatDemandEvaluationStatus.DEMAND_COMMAND_DEFERRED
-                safety_command = False
-            else:
-                action = safety_assessment.action
-                if action is None:
-                    raise RuntimeError("Timed-out safety assessment must contain an action")
-                executed_status = HeatDemandEvaluationStatus.SAFETY_COMMAND_EXECUTED
-                suppressed_status = HeatDemandEvaluationStatus.SAFETY_COMMAND_SUPPRESSED
-                deferred_status = HeatDemandEvaluationStatus.SAFETY_COMMAND_DEFERRED
-                safety_command = True
-
-            command = HeatSourceCommand(
-                command_type=CommandFamily.HEATING,
-                action=action,
+            command = HeatSourceCommand(command_type=CommandFamily.HEATING, action=action)
+            corrective = reconciliation_assessment.corrective_command is action
+            if (
+                authoritative_safety_disable
+                and self.source_ownership is SourceOwnership.CONTROLEL_OWNED
+                and self.reported_source_evidence is not None
+                and self.reported_source_evidence.state is ReportedSourceState.ENABLED
+            ):
+                corrective = True
+            reported_agrees_without_history = (
+                self.source_ownership is SourceOwnership.CONTROLEL_OWNED
+                and reconciliation_assessment.status is SourceReconciliationStatus.AGREED
+                and last_successful_command is None
             )
-            source_assessment = self.source_control_policy.evaluate(
-                desired_command=action,
-                now=building_heat_demand.evaluated_at,
-                current_state=self.source_control_state,
-                safety_command=safety_command,
-                lockout_expiry_reevaluation=(
-                    trigger is HeatDemandEvaluationTrigger.SCHEDULED
-                    and self.source_control_state is not None
-                    and self.source_control_state.next_reevaluation_deadline == scheduled_for
-                ),
-            )
-            self.source_control_state = source_assessment.state
-            self.source_control_assessment = source_assessment
-            source_deadline = self.source_control_state.next_reevaluation_deadline
-            deadlines = [
-                deadline
-                for deadline in (
-                    eligibility_deadline,
-                    grace_deadline,
-                    confirmation_deadline,
-                    source_deadline,
+            if reported_agrees_without_history:
+                status = HeatDemandEvaluationStatus.RESILIENCE_COMMAND_SUPPRESSED
+                next_evaluation_at = min(base_deadlines) if base_deadlines else None
+                self._replace_scheduled_evaluation(
+                    next_evaluation_at,
+                    force=confirmation_callback_invalidated,
                 )
-                if deadline is not None
-            ]
-            next_evaluation_at = min(deadlines) if deadlines else None
-            self._replace_scheduled_evaluation(
-                next_evaluation_at,
-                force=confirmation_callback_invalidated,
-            )
-            if source_assessment.outcome is SourceControlOutcome.DEFER:
-                status = deferred_status
-            elif source_assessment.outcome is SourceControlOutcome.SUPPRESS_DUPLICATE:
-                status = suppressed_status
             else:
-                try:
-                    executed = self.heat_source_command_dispatcher.dispatch(command)
-                except Exception:
-                    self.source_control_state = self.source_control_policy.record_failed(
-                        source_assessment,
-                        failed_at=building_heat_demand.evaluated_at,
-                    )
-                    self.source_control_assessment = replace(
-                        source_assessment,
-                        state=self.source_control_state,
-                    )
-                    self._observe_heating_episodes(
-                        tuple(confirmed_inputs),
-                        captured_at=building_heat_demand.evaluated_at,
-                    )
-                    raise
-                if executed:
-                    self.source_control_state = self.source_control_policy.record_dispatched(
-                        source_assessment,
-                        dispatched_at=building_heat_demand.evaluated_at,
-                        safety_command=safety_command,
-                    )
-                    source_assessment = replace(
-                        source_assessment,
-                        state=self.source_control_state,
-                    )
-                    self.source_control_assessment = source_assessment
-                    status = executed_status
-                else:
-                    self.source_control_state = self.source_control_policy.record_suppressed_duplicate(
-                        source_assessment,
-                        evaluated_at=building_heat_demand.evaluated_at,
-                    )
-                    source_assessment = replace(
-                        source_assessment,
-                        state=self.source_control_state,
-                    )
-                    self.source_control_assessment = source_assessment
+                source_assessment = self.source_control_policy.evaluate(
+                    desired_command=action,
+                    now=now,
+                    current_state=self.source_control_state,
+                    safety_command=safety_command,
+                    lockout_expiry_reevaluation=(
+                        trigger is HeatDemandEvaluationTrigger.SCHEDULED
+                        and self.source_control_state is not None
+                        and self.source_control_state.next_reevaluation_deadline == scheduled_for
+                    ),
+                    corrective_reconciliation=corrective,
+                    reported_source_evidence=(self.reported_source_evidence if corrective else None),
+                )
+                self.source_control_state = source_assessment.state
+                self.source_control_assessment = source_assessment
+                source_deadline = self.source_control_state.next_reevaluation_deadline
+                deadlines = [
+                    *base_deadlines,
+                    *([source_deadline] if source_deadline is not None and source_deadline > now else []),
+                ]
+                next_evaluation_at = min(deadlines) if deadlines else None
+                self._replace_scheduled_evaluation(
+                    next_evaluation_at,
+                    force=confirmation_callback_invalidated,
+                )
+                if source_assessment.outcome is SourceControlOutcome.DEFER:
+                    status = HeatDemandEvaluationStatus.RESILIENCE_COMMAND_DEFERRED if corrective else deferred_status
+                elif source_assessment.outcome is SourceControlOutcome.SUPPRESS_DUPLICATE:
                     status = suppressed_status
+                else:
+                    try:
+                        executed = self.heat_source_command_dispatcher.dispatch(
+                            command,
+                            corrective_reconciliation=corrective,
+                        )
+                    except Exception:
+                        self.source_control_state = self.source_control_policy.record_failed(
+                            source_assessment,
+                            failed_at=now,
+                        )
+                        self.source_control_assessment = replace(
+                            source_assessment,
+                            state=self.source_control_state,
+                        )
+                        if corrective:
+                            self.source_reconciliation_state = self.source_reconciliation_policy.record_failed(
+                                reconciliation_assessment,
+                                failed_at=now,
+                                corrective_command=action,
+                            )
+                            self._replace_scheduled_evaluation(self.source_reconciliation_state.next_reevaluation_at)
+                        self._observe_heating_episodes(tuple(confirmed_inputs), captured_at=now)
+                        raise
+                    if executed:
+                        self.source_control_state = self.source_control_policy.record_dispatched(
+                            source_assessment,
+                            dispatched_at=now,
+                            safety_command=safety_command,
+                        )
+                        source_assessment = replace(source_assessment, state=self.source_control_state)
+                        self.source_control_assessment = source_assessment
+                        status = (
+                            HeatDemandEvaluationStatus.RESILIENCE_COMMAND_EXECUTED
+                            if corrective or mode_override
+                            else executed_status
+                        )
+                        if corrective:
+                            self.source_reconciliation_state = self.source_reconciliation_policy.record_dispatched(
+                                reconciliation_assessment,
+                                dispatched_at=now,
+                                corrective_command=action,
+                            )
+                            pending_deadline = self.source_reconciliation_state.next_reevaluation_at
+                            if pending_deadline is not None:
+                                deadlines = [*deadlines, pending_deadline]
+                                next_evaluation_at = min(deadlines)
+                                self._replace_scheduled_evaluation(next_evaluation_at)
+                    else:
+                        self.source_control_state = self.source_control_policy.record_suppressed_duplicate(
+                            source_assessment,
+                            evaluated_at=now,
+                        )
+                        source_assessment = replace(source_assessment, state=self.source_control_state)
+                        self.source_control_assessment = source_assessment
+                        status = suppressed_status
 
         self._observe_heating_episodes(
             tuple(confirmed_inputs),
@@ -713,6 +1015,9 @@ class ControlRuntime:
             hysteresis_assessment=self.temperature_hysteresis_assessment,
             confirmation_assessment=confirmation_assessment,
             source_control_assessment=source_assessment,
+            source_reconciliation_assessment=reconciliation_assessment,
+            source_recovery_assessment=recovery_assessment,
+            operating_mode_assessment=mode_assessment,
         )
 
     def _observe_heating_episodes(
@@ -896,6 +1201,12 @@ class ControlRuntime:
 
         if old_handle is not None:
             old_handle.cancel()
+
+    def _now(self) -> datetime:
+        now = self.clock.now()
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise ValueError("Clock.now() must return a timezone-aware datetime")
+        return now
 
     def _scheduled_callback(
         self,

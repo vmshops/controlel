@@ -1,0 +1,1 @@
+"""Operating-mode domain tests."""
