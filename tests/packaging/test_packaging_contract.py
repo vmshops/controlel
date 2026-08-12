@@ -117,6 +117,13 @@ def test_core_artifact_verification_binds_representative_m30_2_contracts() -> No
         "SourceReconciliationPolicy",
         "SourceRecoveryPolicy",
         "SourceResilienceDiagnosticsV1",
+        "RuntimeSupervisor",
+        "FailsafeRuntime",
+        "CommandAuthority",
+        "SupervisorPhase",
+        "RestartPolicy",
+        "RuntimeSupervisionState",
+        "RuntimeSupervisionDiagnosticsV1",
     }
     assert all(contract in clean_install for contract in required_contracts)
     for module in (
@@ -125,6 +132,10 @@ def test_core_artifact_verification_binds_representative_m30_2_contracts() -> No
         "application/services/source_reconciliation_policy.py",
         "application/services/source_recovery_policy.py",
         "application/state/source_resilience_diagnostics.py",
+        "application/runtime/runtime_supervisor.py",
+        "application/runtime/failsafe_runtime.py",
+        "application/state/runtime_supervision_state.py",
+        "domain/runtime_supervision/__init__.py",
     ):
         assert module in validator
 

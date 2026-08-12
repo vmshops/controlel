@@ -123,6 +123,13 @@ water-target dispatch is intentionally unsupported. Bounded diagnostics use
 stable reason codes and never reinterpret permission or dispatch as physical
 heat production.
 
+Core 0.6.0 also includes M30.2D Runtime Supervision & Failsafe Recovery. An
+application-level supervisor quarantines a failed normal-runtime generation,
+transfers exclusive command authority to a minimal failsafe controller, and
+uses protected `SAFE_HEATING` or `EMERGENCY_OFF` decisions while attempting a
+bounded restart campaign. Core 0.6.0 remains unpublished until its immutable
+release completes; public core 0.5.0 remains current until then.
+
 Each entry creates one `Controlel — <Zone name>` device with a translated
 operational summary and stable operational/diagnostic entities. The summary
 describes logical demand, safety, deferred commands, requested commands, and

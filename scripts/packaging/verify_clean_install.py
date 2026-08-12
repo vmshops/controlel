@@ -14,6 +14,7 @@ from pathlib import Path
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 SMOKE_TEST = """
+import importlib
 import importlib.metadata
 import importlib.util
 from datetime import UTC, datetime, timedelta
@@ -23,15 +24,22 @@ import sys
 
 import controlel
 from controlel.application.runtime.control_runtime import ControlRuntime
+from controlel.application.runtime.failsafe_runtime import FailsafeRuntime
+from controlel.application.runtime.runtime_supervisor import RuntimeSupervisor
 from controlel.application.services.source_reconciliation_policy import SourceReconciliationPolicy
 from controlel.application.services.source_recovery_policy import SourceRecoveryPolicy
 from controlel.application.state.source_resilience_diagnostics import (
     SOURCE_RESILIENCE_DIAGNOSTICS_SCHEMA_VERSION,
     SourceResilienceDiagnosticsV1,
 )
+from controlel.application.state.runtime_supervision_state import (
+    RuntimeSupervisionDiagnosticsV1,
+    RuntimeSupervisionState,
+)
 from controlel.domain.commands.heating_action import HeatingAction
 from controlel.domain.entities.zone import Zone
 from controlel.domain.operating_mode import OperatingMode
+from controlel.domain.runtime_supervision import CommandAuthority, RestartPolicy, SupervisorPhase
 from controlel.domain.repositories.sensor_repository import SensorRepository
 from controlel.domain.repositories.zone_repository import ZoneRepository
 from controlel.domain.sensors.sensor import Sensor
@@ -62,6 +70,29 @@ assert all(
 assert importlib.util.find_spec("homeassistant") is None
 assert importlib.util.find_spec("custom_components") is None
 assert not any(name == "homeassistant" or name.startswith("homeassistant.") for name in sys.modules)
+
+m30_2d_contracts = (
+    RuntimeSupervisor,
+    FailsafeRuntime,
+    CommandAuthority,
+    SupervisorPhase,
+    RestartPolicy,
+    RuntimeSupervisionState,
+    RuntimeSupervisionDiagnosticsV1,
+)
+for contract in m30_2d_contracts:
+    module_path = Path(importlib.import_module(contract.__module__).__file__).resolve()
+    assert module_path.is_relative_to(package_path.parent)
+
+restart_policy = RestartPolicy()
+assert restart_policy.attempt_limit == 3
+assert restart_policy.retry_interval == timedelta(minutes=5)
+assert CommandAuthority.NORMAL.value == "normal"
+assert CommandAuthority.FAILSAFE.value == "failsafe"
+assert SupervisorPhase.NORMAL.value == "normal"
+assert SupervisorPhase.FAILSAFE.value == "failsafe"
+assert RuntimeSupervisionState.__dataclass_params__.frozen is True
+assert RuntimeSupervisionDiagnosticsV1.__dataclass_params__.frozen is True
 
 observed_at = datetime(2026, 1, 1, tzinfo=UTC)
 capabilities = SourceCapabilities(
