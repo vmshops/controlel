@@ -83,7 +83,8 @@ def auto_enable_custom_integrations(enable_custom_integrations: None) -> None:
 
 
 @pytest.fixture
-def entry_data() -> dict[str, object]:
+def entry_data(hass) -> dict[str, object]:
+    hass.states.async_set("switch.boiler", "off")
     return {
         CONF_SENSOR_ID: "living_room_temperature",
         CONF_SENSOR_NAME: "Living room temperature",

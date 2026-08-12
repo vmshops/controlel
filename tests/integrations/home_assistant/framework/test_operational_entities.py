@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from datetime import UTC, datetime, timedelta
+from threading import Thread, get_ident
 from unittest.mock import patch
 
 from homeassistant.const import ATTR_UNIT_OF_MEASUREMENT, EntityCategory, UnitOfTemperature
@@ -29,6 +30,7 @@ from custom_components.controlel.const import (
     DOMAIN,
 )
 from custom_components.controlel.diagnostics import async_get_config_entry_diagnostics
+from custom_components.controlel.entity import ControlelSnapshotEntity
 from custom_components.controlel.operational import SafetyState
 
 EXPECTED_SENSOR_KEYS = {
@@ -141,6 +143,53 @@ async def _setup_entry(hass, entry_data) -> MockConfigEntry:
     return entry
 
 
+async def test_snapshot_publication_is_loop_safe_coalesced_and_invalidated_on_unload(
+    hass,
+    entry_data,
+    service_calls,
+) -> None:
+    entry = await _setup_entry(hass, entry_data)
+    host = entry.runtime_data.host
+    assert host is not None
+    loop_thread = get_ident()
+    publication_threads: list[int] = []
+
+    def record_publication(entity) -> None:
+        publication_threads.append(get_ident())
+
+    with patch.object(ControlelSnapshotEntity, "async_write_ha_state", record_publication):
+        host.snapshot_source.refresh_elapsed(datetime.now(UTC))
+        assert publication_threads
+        assert set(publication_threads) == {loop_thread}
+
+        publication_threads.clear()
+        await asyncio.to_thread(host.snapshot_source.refresh_elapsed, datetime.now(UTC))
+        await hass.async_block_till_done()
+        single_refresh_count = len(publication_threads)
+        assert single_refresh_count > 0
+        assert set(publication_threads) == {loop_thread}
+
+        publication_threads.clear()
+
+        def burst() -> None:
+            for _ in range(25):
+                host.snapshot_source.refresh_elapsed(datetime.now(UTC))
+
+        worker = Thread(target=burst)
+        worker.start()
+        worker.join()
+        await hass.async_block_till_done()
+        assert len(publication_threads) == single_refresh_count
+        assert set(publication_threads) == {loop_thread}
+
+        stale_callbacks = tuple(item[0] for item in host.snapshot_source._subscribers.values())
+        assert await hass.config_entries.async_unload(entry.entry_id)
+        publication_threads.clear()
+        await asyncio.to_thread(lambda: [callback(host.snapshot_source.current) for callback in stale_callbacks])
+        await hass.async_block_till_done()
+        assert publication_threads == []
+
+
 async def test_device_entities_states_unique_ids_and_unload(
     hass,
     entry_data,
@@ -174,7 +223,7 @@ async def test_device_entities_states_unique_ids_and_unload(
     assert hass.states.get(by_key["heat_demand"].entity_id).state == "heat_required"
     assert hass.states.get(by_key["heat_required"].entity_id).state == "on"
     assert hass.states.get(by_key["runtime_active"].entity_id).state == "on"
-    assert hass.states.get(by_key["integration_version"].entity_id).state == "0.8.0"
+    assert hass.states.get(by_key["integration_version"].entity_id).state == "0.8.1"
     assert hass.states.get(by_key["core_version"].entity_id).state == expected_framework_core_version
     assert hass.states.get(by_key["diagnostic_profile"].entity_id).state == (DIAGNOSTIC_PROFILE_DETAILED)
     assert hass.states.get(by_key["grace_remaining"].entity_id).state == "unavailable"
@@ -498,7 +547,7 @@ async def test_diagnostics_are_allowlisted_json_safe_and_redact_unknown_entry_da
     serialized = json.dumps(diagnostics, sort_keys=True)
 
     assert diagnostics["versions"] == {
-        "integration": "0.8.0",
+        "integration": "0.8.1",
         "core": expected_framework_core_version,
     }
     assert diagnostics["operational_snapshot"]["runtime_status"] == "active"
@@ -524,6 +573,12 @@ async def test_diagnostics_are_allowlisted_json_safe_and_redact_unknown_entry_da
     assert diagnostics["heating_diagnostics"]["schema_version"] == 1
     assert len(diagnostics["heating_diagnostics"]["zones"]) == 1
     assert len(json.dumps(diagnostics["heating_diagnostics"])) < 65_536
+    assert diagnostics["runtime_supervision"]["supervisor_state"] == "normal"
+    assert diagnostics["runtime_supervision"]["command_authority"] == "normal"
+    assert diagnostics["runtime_supervision"]["reported_source_state"] == "disabled"
+    assert diagnostics["source_resilience"]["schema_version"] == 1
+    assert diagnostics["source_resilience"]["source_ownership"] == "controlel_owned"
+    assert diagnostics["source_resilience"]["reported_source_state"] == "disabled"
     assert diagnostics["active_issue_ids"] == []
     provenance = diagnostics["configuration_provenance"]
     assert diagnostics["configuration"]["diagnostic_profile"] == (DIAGNOSTIC_PROFILE_DETAILED)

@@ -34,6 +34,7 @@ from controlel.domain.heat_delivery import (
     HeatSourceObservation,
     ObservedValue,
 )
+from controlel.domain.source_control import ReportedSourceState
 from controlel.domain.value_objects.sensor_id import SensorId
 from controlel.domain.value_objects.temperature import Temperature
 from controlel.domain.value_objects.zone_id import ZoneId
@@ -46,6 +47,7 @@ from custom_components.controlel.event_loop_bridge import HomeAssistantEventLoop
 from custom_components.controlel.failure_sink import HomeAssistantScheduledFailureSink
 from custom_components.controlel.host import (
     HomeAssistantControlelHost,
+    _reported_source_evidence,
     _source_control_snapshot_changes,
 )
 from custom_components.controlel.measurement_ingestion import (
@@ -207,6 +209,26 @@ class FakeState:
     @property
     def attributes(self):
         return {"unit_of_measurement": "°C"}
+
+
+def test_reported_source_mapping_is_explicit_and_never_fabricates_transition_history() -> None:
+    for raw, expected in (
+        ("on", ReportedSourceState.ENABLED),
+        ("off", ReportedSourceState.DISABLED),
+        ("unknown", ReportedSourceState.UNKNOWN),
+        ("unavailable", ReportedSourceState.UNAVAILABLE),
+    ):
+        evidence = _reported_source_evidence(
+            FakeState(raw, NOW, entity_id="switch.boiler"),
+            "switch.boiler",
+        )
+        assert evidence is not None
+        assert evidence.state is expected
+        assert evidence.observed_at == NOW
+        assert evidence.transition_at is None
+
+    assert _reported_source_evidence(None, "switch.boiler") is None
+    assert _reported_source_evidence(FakeState("on", NOW), "switch.boiler") is None
 
 
 class FakeHass:
@@ -387,7 +409,7 @@ def create_shadow_test_host(
         ),
         failure_sink=failure_sink,
         config=host_config(),
-        core_version="0.5.0",
+        core_version="0.6.0",
         logger=logging.getLogger(__name__),
         state_subscriber=lambda hass, entity_id, listener: lambda: None,
         state_getter=lambda entity_id: None,

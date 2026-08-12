@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from threading import Lock, get_ident
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import callback
@@ -32,6 +33,10 @@ class ControlelSnapshotEntity(Entity):
         self._always_available = always_available
         self._refresh_elapsed = refresh_elapsed
         self._unsubscribe_snapshot: Callable[[], None] | None = None
+        self._snapshot_lock = Lock()
+        self._event_loop_thread_id: int | None = None
+        self._publication_pending = False
+        self._removed = False
         self._attr_unique_id = f"{entry.entry_id}_{key}"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry.entry_id)},
@@ -52,12 +57,18 @@ class ControlelSnapshotEntity(Entity):
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
+        with self._snapshot_lock:
+            self._event_loop_thread_id = get_ident()
+            self._removed = False
         self._unsubscribe_snapshot = self._source.subscribe(
             self._handle_snapshot,
             elapsed_refresh=self._refresh_elapsed,
         )
 
     async def async_will_remove_from_hass(self) -> None:
+        with self._snapshot_lock:
+            self._removed = True
+            self._publication_pending = False
         if self._unsubscribe_snapshot is not None:
             self._unsubscribe_snapshot()
             self._unsubscribe_snapshot = None
@@ -65,6 +76,34 @@ class ControlelSnapshotEntity(Entity):
 
     @callback
     def _handle_snapshot(self, snapshot: OperationalSnapshot) -> None:
-        self._snapshot = snapshot
-        if self.hass is not None:
+        with self._snapshot_lock:
+            if self._removed:
+                return
+            self._snapshot = snapshot
+            hass = self.hass
+            if hass is None:
+                return
+            if get_ident() == self._event_loop_thread_id:
+                publish_now = True
+            elif self._publication_pending:
+                return
+            else:
+                self._publication_pending = True
+                publish_now = False
+        if publish_now:
+            self.async_write_ha_state()
+        else:
+            hass.loop.call_soon_threadsafe(self._publish_pending_snapshot)
+
+    @callback
+    def _publish_pending_snapshot(self) -> None:
+        """Coalesce worker-thread notifications onto the Home Assistant loop."""
+
+        with self._snapshot_lock:
+            if self._removed:
+                self._publication_pending = False
+                return
+            self._publication_pending = False
+            hass = self.hass
+        if hass is not None:
             self.async_write_ha_state()

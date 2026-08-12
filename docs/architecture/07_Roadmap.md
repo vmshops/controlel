@@ -70,9 +70,11 @@ manual recovery defaults to two hours with explicit reload cancellation.
 Source safety remains authoritative. A capability-gated `WATER_TARGET` value is
 intent only, and physical water-target dispatch remains unsupported.
 
-Core `0.6.0` is being prepared and is not yet public. Immutable `0.5.0` remains
-the published core consumed by integration `0.8.0`. Moving the integration to
-public core `0.6.0` is a separate later change after publication verification.
+Core `0.6.0` is published and immutable. Integration `0.8.1` consumes it in a
+focused stabilization boundary that binds reported-source evidence and core
+runtime supervision into the existing Home Assistant host. It also fixes
+worker-thread diagnostic refresh publication without adding polling or new
+operating-mode controls.
 
 M30.2D stops the earlier 0.6.0 release candidate after a real scheduled
 timestamp-coherence fatal. It refreshes unchanged confirmation evidence on

@@ -23,7 +23,7 @@ only that the configured adapter call completed without error.
 
 ## Core 0.6.0 source-resilience diagnostics
 
-The core 0.6.0 candidate adds immutable
+Core 0.6.0 adds immutable
 `SourceResilienceDiagnosticsV1`. Its fixed bounded projection contains schema
 version 1, evidence-derived update time, operating mode and reason, desired and
 reported source state, observation time, last successful command, ownership,
@@ -37,9 +37,11 @@ false. No raw sample history, arbitrary exception message, secret, or physical
 burner/heat confirmation is included. Successful command dispatch and reported
 controller state remain separate fields.
 
-This application-level contract is part of the core release only. Home
-Assistant integration `0.8.0` remains pinned to core `0.5.0` and does not adopt
-or publish the new source-resilience projection in this release boundary.
+Home Assistant integration `0.8.1` consumes core `0.6.0` and adds the bounded
+runtime-supervision projection to downloaded diagnostics. It reports phase,
+command authority, normalized fatal cause, restart attempts/budget/deadline,
+and recovery timestamps without arbitrary exception text or physical-state
+claims.
 
 M30.2D adds immutable `RuntimeSupervisionDiagnosticsV1` for supervisor state,
 active command authority, normal generation, normalized fatal cause code,
