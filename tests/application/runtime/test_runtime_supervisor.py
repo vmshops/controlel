@@ -5,6 +5,7 @@ import pytest
 from controlel.application.ports.scheduled_runtime_failure_sink import ScheduledRuntimeFailure
 from controlel.application.runtime.failsafe_runtime import FailsafeRuntime
 from controlel.application.runtime.runtime_supervisor import CommandAuthorityError, RuntimeSupervisor
+from controlel.application.services.operational_event_recorder import OperationalEventRecorder
 from controlel.application.services.source_control_policy import SourceControlOutcome, SourceControlPolicy
 from controlel.application.state.source_control_state import SourceCommandOutcome
 from controlel.application.state.source_reconciliation_state import (
@@ -17,6 +18,7 @@ from controlel.domain.commands.heat_source_command import HeatSourceCommand
 from controlel.domain.commands.heating_action import HeatingAction
 from controlel.domain.heat_delivery import ObservationQuality
 from controlel.domain.operating_mode import OperatingMode, SafeHeatingProfile, SafeHeatingTemperatureEvidence
+from controlel.domain.operational_events import OperationalEventCode
 from controlel.domain.runtime_supervision import RestartPolicy, SupervisorPhase
 from controlel.domain.source_control import ReportedSourceEvidence, ReportedSourceState, SourceOwnership
 from controlel.domain.value_objects.sensor_id import SensorId
@@ -333,6 +335,178 @@ def test_restart_callbacks_exhaust_after_three_attempts_without_a_tight_loop():
     assert supervisor.state.restart_budget_exhausted is True
     assert supervisor._restart_handle is None
     assert len(scheduler.tasks) == 3
+
+
+def test_fatal_failsafe_restart_lifecycle_is_ordered_correlated_and_redacted():
+    clock = Clock()
+    recorder = OperationalEventRecorder()
+    supervisor = RuntimeSupervisor(
+        Source(),
+        clock,
+        operational_event_recorder=recorder,
+        failsafe_factory=failsafe_factory(),
+    )
+
+    supervisor.report_fatal(RuntimeError("secret runtime details"))
+    clock.current += timedelta(minutes=5)
+    supervisor.request_restart(lambda port, handover: port)
+
+    events = recorder.stream.snapshot().events
+    codes = [event.event_code for event in events]
+    assert codes == [
+        OperationalEventCode.RUNTIME_FATAL,
+        OperationalEventCode.COMMAND_AUTHORITY_CHANGED,
+        OperationalEventCode.FAILSAFE_ENTERED,
+        OperationalEventCode.SOURCE_DISABLE_REQUESTED,
+        OperationalEventCode.SOURCE_COMMAND_DISPATCHED,
+        OperationalEventCode.RESTART_ATTEMPT_STARTED,
+        OperationalEventCode.COMMAND_AUTHORITY_CHANGED,
+        OperationalEventCode.FAILSAFE_EXITED,
+        OperationalEventCode.RUNTIME_RECOVERED,
+    ]
+    lifecycle_events = [event for event in events if event.category.value in {"runtime", "supervision"}]
+    assert {event.correlation_id for event in lifecycle_events} == {"supervision:00000002"}
+    assert "secret runtime details" not in repr(events)
+
+
+def test_restart_failures_and_exhaustion_keep_one_supervision_campaign_correlation():
+    clock, scheduler = Clock(), Scheduler()
+    recorder = OperationalEventRecorder()
+
+    def fail_restart(port, handover):
+        raise RuntimeError("candidate failed")
+
+    supervisor = RuntimeSupervisor(
+        Source(),
+        clock,
+        scheduler=scheduler,
+        failsafe_factory=failsafe_factory(),
+        restart_factory=fail_restart,
+        operational_event_recorder=recorder,
+    )
+    supervisor.report_fatal(RuntimeError("normal failed"))
+    for _ in range(3):
+        task = scheduler.tasks[-1]
+        clock.current = task.when
+        task.invoke()
+
+    campaign_events = [
+        event for event in recorder.stream.snapshot().events if event.category.value in {"runtime", "supervision"}
+    ]
+    assert OperationalEventCode.RESTART_BUDGET_EXHAUSTED in {event.event_code for event in campaign_events}
+    assert {event.correlation_id for event in campaign_events} == {"supervision:00000002"}
+
+
+def test_second_independent_fatal_campaign_gets_a_new_correlation():
+    clock = Clock()
+    recorder = OperationalEventRecorder()
+    supervisor = RuntimeSupervisor(
+        Source(),
+        clock,
+        failsafe_factory=failsafe_factory(),
+        operational_event_recorder=recorder,
+    )
+
+    supervisor.report_fatal(RuntimeError("first"))
+    clock.current += timedelta(minutes=5)
+    supervisor.request_restart(lambda port, handover: port)
+    supervisor.report_fatal(RuntimeError("second"))
+
+    fatal_events = [
+        event for event in recorder.stream.snapshot().events if event.event_code is OperationalEventCode.RUNTIME_FATAL
+    ]
+    assert [event.correlation_id for event in fatal_events] == [
+        "supervision:00000002",
+        "supervision:00000003",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("trusted_evidence", "expected_action"),
+    (
+        (evidence(19), HeatingAction.ENABLE_HEATING),
+        (None, HeatingAction.DISABLE_HEATING),
+    ),
+)
+def test_failsafe_command_request_and_dispatch_use_shared_stream(trusted_evidence, expected_action):
+    recorder = OperationalEventRecorder()
+    supervisor = RuntimeSupervisor(
+        Source(),
+        Clock(),
+        failsafe_factory=failsafe_factory(),
+        operational_event_recorder=recorder,
+    )
+    supervisor.update_trusted_evidence(trusted_evidence)
+
+    supervisor.report_fatal(RuntimeError("normal failed"))
+
+    events = recorder.stream.snapshot().events
+    request_code = (
+        OperationalEventCode.SOURCE_ENABLE_REQUESTED
+        if expected_action is HeatingAction.ENABLE_HEATING
+        else OperationalEventCode.SOURCE_DISABLE_REQUESTED
+    )
+    command_events = [
+        event
+        for event in events
+        if event.event_code
+        in {
+            OperationalEventCode.SOURCE_ENABLE_REQUESTED,
+            OperationalEventCode.SOURCE_DISABLE_REQUESTED,
+            OperationalEventCode.SOURCE_COMMAND_DISPATCHED,
+            OperationalEventCode.SOURCE_COMMAND_FAILED,
+        }
+    ]
+    assert supervisor.operational_event_stream is recorder.stream
+    assert [event.event_code for event in command_events] == [
+        request_code,
+        OperationalEventCode.SOURCE_COMMAND_DISPATCHED,
+    ]
+    assert {event.requested_command for event in command_events} == {expected_action.value}
+    assert len({event.correlation_id for event in command_events}) == 1
+
+
+def test_failsafe_command_failure_is_recorded_without_fabricating_dispatch():
+    recorder = OperationalEventRecorder()
+    supervisor = RuntimeSupervisor(
+        FailingSource(),
+        Clock(),
+        failsafe_factory=failsafe_factory(),
+        operational_event_recorder=recorder,
+    )
+
+    supervisor.report_fatal(RuntimeError("normal failed"))
+
+    command_events = [event for event in recorder.stream.snapshot().events if event.category.value == "source_control"]
+    assert [event.event_code for event in command_events] == [
+        OperationalEventCode.SOURCE_DISABLE_REQUESTED,
+        OperationalEventCode.SOURCE_COMMAND_FAILED,
+    ]
+    assert [event.command_outcome for event in command_events] == ["requested", "failed"]
+    assert len({event.correlation_id for event in command_events}) == 1
+    assert "source dispatch failed" not in repr(command_events)
+
+
+def test_failsafe_event_recorder_failure_cannot_block_source_command():
+    class FailingCommandRecorder(OperationalEventRecorder):
+        def command_requested(self, *args, **kwargs):
+            raise RuntimeError("event recording failed")
+
+        def command_dispatched(self, *args, **kwargs):
+            raise RuntimeError("event recording failed")
+
+    source = Source()
+    supervisor = RuntimeSupervisor(
+        source,
+        Clock(),
+        failsafe_factory=failsafe_factory(),
+        operational_event_recorder=FailingCommandRecorder(),
+    )
+
+    supervisor.report_fatal(RuntimeError("normal failed"))
+
+    assert [item.action for item in source.commands] == [HeatingAction.DISABLE_HEATING]
+    assert supervisor.state.command_authority.value == "failsafe"
 
 
 def test_stale_restart_callbacks_cannot_cross_reset_or_successful_handover():

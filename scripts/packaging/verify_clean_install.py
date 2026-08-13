@@ -28,6 +28,11 @@ from controlel.application.runtime.failsafe_runtime import FailsafeRuntime
 from controlel.application.runtime.runtime_supervisor import RuntimeSupervisor
 from controlel.application.services.source_reconciliation_policy import SourceReconciliationPolicy
 from controlel.application.services.source_recovery_policy import SourceRecoveryPolicy
+from controlel.application.services.operational_event_recorder import OperationalEventRecorder
+from controlel.application.services.operational_event_stream import (
+    OperationalEventStream,
+    operational_event_stream_to_dict,
+)
 from controlel.application.state.source_resilience_diagnostics import (
     SOURCE_RESILIENCE_DIAGNOSTICS_SCHEMA_VERSION,
     SourceResilienceDiagnosticsV1,
@@ -39,6 +44,12 @@ from controlel.application.state.runtime_supervision_state import (
 from controlel.domain.commands.heating_action import HeatingAction
 from controlel.domain.entities.zone import Zone
 from controlel.domain.operating_mode import OperatingMode
+from controlel.domain.operational_events import (
+    OperationalEvent,
+    OperationalEventCategory,
+    OperationalEventCode,
+    OperationalEventSeverity,
+)
 from controlel.domain.runtime_supervision import CommandAuthority, RestartPolicy, SupervisorPhase
 from controlel.domain.repositories.sensor_repository import SensorRepository
 from controlel.domain.repositories.zone_repository import ZoneRepository
@@ -93,6 +104,29 @@ assert SupervisorPhase.NORMAL.value == "normal"
 assert SupervisorPhase.FAILSAFE.value == "failsafe"
 assert RuntimeSupervisionState.__dataclass_params__.frozen is True
 assert RuntimeSupervisionDiagnosticsV1.__dataclass_params__.frozen is True
+
+m31a_contracts = (
+    OperationalEvent,
+    OperationalEventCategory,
+    OperationalEventSeverity,
+    OperationalEventCode,
+    OperationalEventStream,
+    OperationalEventRecorder,
+)
+for contract in m31a_contracts:
+    module_path = Path(importlib.import_module(contract.__module__).__file__).resolve()
+    assert module_path.is_relative_to(package_path.parent)
+event_stream = OperationalEventStream(capacity=1)
+event_stream.emit(
+    timestamp=datetime(2026, 1, 1, tzinfo=UTC),
+    category=OperationalEventCategory.RUNTIME,
+    severity=OperationalEventSeverity.INFO,
+    event_code=OperationalEventCode.RUNTIME_STARTED,
+)
+event_payload = operational_event_stream_to_dict(event_stream.snapshot())
+assert event_payload["schema_version"] == 1
+assert event_payload["capacity"] == 1
+assert event_payload["events"][0]["event_code"] == "runtime_started"
 
 observed_at = datetime(2026, 1, 1, tzinfo=UTC)
 capabilities = SourceCapabilities(

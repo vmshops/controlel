@@ -36,7 +36,7 @@ def test_core_and_integration_versions_are_intentionally_independent():
     with (ROOT / "pyproject.toml").open("rb") as pyproject_file:
         core_version = tomllib.load(pyproject_file)["project"]["version"]
 
-    assert core_version == "0.6.0"
+    assert core_version == "0.7.0"
     assert manifest["version"] == INTEGRATION_VERSION == "0.8.2"
     assert manifest["requirements"] == ["controlel==0.6.0"]
     assert manifest["version"] != manifest["requirements"][0].partition("==")[2]

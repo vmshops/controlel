@@ -22,14 +22,15 @@ The goal is to create a reliable heating controller capable of optimizing comfor
 
 Project phase: Home Assistant one-zone host vertical slice
 
-Core package version: 0.6.0 (published and immutable)
+Core package candidate version: 0.7.0 (not yet published)
 
 Home Assistant integration candidate version: 0.8.2
 
 Use the latest published release for HACS custom-repository installation.
-Core `0.6.0` and integration `0.8.1` are published and immutable. Integration
-`0.8.2` remains pinned exactly to `controlel==0.6.0` and is a focused
-blocking-I/O/documentation stabilization candidate.
+Core `0.6.0` and integration `0.8.1` are published and immutable. Core `0.7.0`
+is the separate M31A release candidate and is not yet published. Integration
+`0.8.2` remains pinned exactly to `controlel==0.6.0`; its version and dependency
+do not move as part of the core release boundary.
 Controlel is not listed in the default HACS store.
 
 ## Home Assistant installation
@@ -151,6 +152,19 @@ countdown entities every second and retains 500. Debug expires after
 be kept active until manually changed. Profiles affect presentation, logging,
 and in-memory evidence only—not regulation.
 
+Core candidate 0.7.0 contains the M31A Operational Events Foundation: immutable
+operational-event contracts; canonical category and severity taxonomies; and a
+bounded in-memory stream with a default capacity of 200, deterministic ordering,
+and explicit drop metadata. Transition and lifecycle de-duplication keeps the
+stream semantic. Deterministic supervision-campaign correlation connects fatal,
+failsafe, restart, and recovery evidence, while both normal and failsafe command
+attempts and outcomes remain visible. Recorder failures are isolated from
+control behavior, and `ControlRuntime.record_runtime_started()` is the narrow
+public lifecycle boundary. Operational events remain separate from the decision
+trace. M31A adds no notifications, statistics, persistence, polling, or control
+behavior, and command dispatch or reported source state never claims physical
+heat.
+
 The integration manifest requires the exact public core release
 `controlel==0.6.0`. A supported custom-component deployment can therefore let
 Home Assistant obtain the core dependency automatically; users do not need to
@@ -171,11 +185,12 @@ has not been published and no default-store publication exists.
 ## Core package artifacts
 
 The reusable core is published as the `controlel` distribution and import
-package. Version `0.6.0` is the latest public immutable release. The
-static version source and PEP 517 build configuration live in `pyproject.toml`;
-normal installation depends only on Pydantic. Packaging validation builds one
-wheel and one sdist, inspects their contents, and installs the wheel into a
-clean environment outside the checkout.
+package. Version `0.6.0` is the latest public immutable release; repository
+version `0.7.0` is the unpublished M31A release candidate. The static version
+source and PEP 517 build configuration live in `pyproject.toml`; normal
+installation depends only on Pydantic. Packaging validation builds one wheel
+and one sdist, inspects their contents, and installs the wheel into a clean
+environment outside the checkout.
 
 Core versions `0.1.0`, `0.2.0`, `0.3.0`, `0.4.0`, `0.5.0`, and `0.6.0` are published on
 PyPI and immutable. Future core corrections require a new version; rebuilt artifacts for an already
