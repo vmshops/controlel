@@ -90,12 +90,22 @@ remain future layers.
 
 ## Milestone 31A: operational events foundation
 
+M31A prepares the separate, unpublished core `0.7.0` release candidate. Public
+core `0.6.0` remains current until the immutable 0.7.0 release process completes,
+and Home Assistant integration `0.8.2` remains pinned to `controlel==0.6.0` in
+this boundary.
+
 M31A adds a canonical immutable operational-event schema, stable category and
 severity taxonomies, transition-aware application recording, and a
 thread-safe bounded 200-event in-memory stream with explicit drop metadata.
-The read boundary is immutable and JSON-safe, the decision trace remains
-separate, and no polling, persistence, notification delivery, statistics, or
-control influence is introduced.
+Ordering and drop accounting are deterministic. Transition/lifecycle
+de-duplication and deterministic supervision campaign correlation cover normal
+and failsafe command evidence without correlating unsupported reported state.
+Recorder failures remain isolated, and the narrow public runtime lifecycle
+boundary avoids exposing private runtime helpers. The read boundary is
+immutable and JSON-safe, the decision trace remains separate, and no polling,
+persistence, notification delivery, statistics, or control influence is
+introduced.
 
 M31B may add notification policy and delivery as a consumer of this boundary.
 M31C may add explainable statistics/analytics. Both remain future milestones

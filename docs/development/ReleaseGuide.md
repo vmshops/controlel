@@ -1,5 +1,30 @@
 # Release guide
 
+## Milestone 31A core 0.7.0 boundary
+
+Repository core version `0.7.0` is the unpublished M31A release candidate.
+Published immutable `controlel==0.6.0` remains the current public core until
+the separately approved, provenance-bound 0.7.0 release completes. Home
+Assistant integration `0.8.2` remains unchanged and pinned exactly to public
+`controlel==0.6.0`; moving that dependency is a later integration release
+boundary.
+
+Core 0.7.0 adds immutable `OperationalEvent` contracts, canonical category and
+severity taxonomies, and a deterministic bounded in-memory stream with default
+capacity 200 and explicit drop metadata. Transition/lifecycle de-duplication,
+deterministic `supervision:<normal_generation>` campaign correlation, and
+normal/failsafe command attempt and outcome visibility provide explainable
+runtime evidence. Recorder failure is isolated from control behavior, and
+`ControlRuntime.record_runtime_started()` is the narrow public lifecycle
+boundary. M31A adds no notifications, statistics, persistence, polling, or
+control influence.
+
+This boundary changes core metadata, core packaging/version contracts, and
+release documentation only. It does not tag, build final release artifacts,
+upload, publish, or create a GitHub Release. Final artifacts must be rebuilt
+later from the exact reviewed release commit by the immutable provenance
+workflow.
+
 ## Integration 0.8.2 stabilization boundary
 
 Core `0.6.0` and integration `0.8.1` are published and immutable. Integration
@@ -92,8 +117,10 @@ The distribution name and Python import package are both `controlel`. Versions
 `0.1.0`, `0.2.0`, `0.3.0`, `0.4.0`, `0.5.0`, and `0.6.0` are publicly available on PyPI and immutable.
 PyPI versions are immutable; corrections always require a higher version.
 
-The current core release is immutable `0.6.0`. Public-integration composition
-checks and the Home Assistant manifest use that exact version.
+The current public core release is immutable `0.6.0`. Repository project
+version `0.7.0` is the unpublished M31A candidate. Public-integration
+composition checks and the Home Assistant manifest continue using exactly
+`controlel==0.6.0`.
 
 The first core release is `0.1.0`. The single authoritative release
 version is the static `project.version` in `pyproject.toml`. Runtime access uses
