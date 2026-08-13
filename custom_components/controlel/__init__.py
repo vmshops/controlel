@@ -15,6 +15,7 @@ from controlel.application.ports.heat_source_port import HeatSourcePort
 from controlel.application.runtime.control_runtime import ControlRuntime as CoreControlRuntime
 from controlel.application.runtime.failsafe_runtime import FailsafeRuntime
 from controlel.application.runtime.runtime_supervisor import RuntimeSupervisor
+from controlel.application.services.operational_event_recorder import OperationalEventRecorder
 from controlel.application.state.runtime_supervision_state import RuntimeHandoverEvidence
 from controlel.domain.capabilities.temperature_capability import (
     TemperatureCapability,
@@ -45,6 +46,8 @@ class ControlRuntime(CoreControlRuntime):
 
     def start(self) -> None:
         """Start the HA-owned lifecycle without fabricating a measurement."""
+
+        self.record_runtime_started()
 
 
 @dataclass
@@ -171,6 +174,8 @@ async def async_setup_entry(
             minimum_heating_on_time=heat_source_configuration.minimum_heating_on_time,
             minimum_heating_off_time=heat_source_configuration.minimum_heating_off_time,
         )
+        operational_event_recorder = OperationalEventRecorder()
+        runtime_arguments["operational_event_recorder"] = operational_event_recorder
         if heat_delivery_controller is not None:
             runtime_arguments["heat_delivery_controller"] = heat_delivery_controller
 
@@ -220,6 +225,7 @@ async def async_setup_entry(
             scheduler=scheduler,
             failsafe_factory=failsafe_factory,
             restart_factory=restart_factory,
+            operational_event_recorder=operational_event_recorder,
         )
         runtime = build_runtime(supervisor.normal_port())
         supervisor.attach_normal_runtime(runtime)

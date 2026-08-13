@@ -25,9 +25,9 @@ def test_manifest_has_required_custom_component_contract():
         "issue_tracker": "https://github.com/vmshops/controlel/issues",
         "integration_type": "hub",
         "iot_class": "local_push",
-        "requirements": ["controlel==0.6.0"],
+        "requirements": ["controlel==0.7.0"],
         "single_config_entry": True,
-        "version": "0.8.2",
+        "version": "0.9.0",
     }
 
 
@@ -37,8 +37,8 @@ def test_core_and_integration_versions_are_intentionally_independent():
         core_version = tomllib.load(pyproject_file)["project"]["version"]
 
     assert core_version == "0.7.0"
-    assert manifest["version"] == INTEGRATION_VERSION == "0.8.2"
-    assert manifest["requirements"] == ["controlel==0.6.0"]
+    assert manifest["version"] == INTEGRATION_VERSION == "0.9.0"
+    assert manifest["requirements"] == ["controlel==0.7.0"]
     assert manifest["version"] != manifest["requirements"][0].partition("==")[2]
 
 
@@ -46,7 +46,7 @@ def test_manifest_requirement_is_one_exact_public_distribution_pin():
     manifest = json.loads((COMPONENT / "manifest.json").read_text(encoding="utf-8"))
     requirements = manifest["requirements"]
 
-    assert requirements == ["controlel==0.6.0"]
+    assert requirements == ["controlel==0.7.0"]
     assert len(requirements) == 1
     assert not any(marker in requirements[0] for marker in ("~=", ">=", "<=", " @ ", "git+", "-e ", "file:"))
 
@@ -187,3 +187,11 @@ def test_normal_project_dependencies_exclude_home_assistant():
 def test_custom_component_does_not_contain_duplicate_core_source():
     assert not (COMPONENT / "controlel").exists()
     assert not (ROOT / "src" / "controlel" / "integrations" / "home_assistant").exists()
+
+
+def test_home_assistant_uses_narrow_public_runtime_start_boundary() -> None:
+    integration_source = (COMPONENT / "__init__.py").read_text(encoding="utf-8")
+
+    assert "self.record_runtime_started()" in integration_source
+    assert "_record_operational" not in integration_source
+    assert "emit(" not in integration_source

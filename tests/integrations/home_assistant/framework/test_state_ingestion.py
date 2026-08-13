@@ -79,7 +79,8 @@ class RecordingRuntime:
         finally:
             self.active = False
 
-    def mark_measurement_indeterminate(self):
+    def mark_measurement_indeterminate(self, condition=None):
+        del condition
         assert self.active is False
         self.threads.append(get_ident())
         self.operations.append(("indeterminate", None))

@@ -22,15 +22,13 @@ The goal is to create a reliable heating controller capable of optimizing comfor
 
 Project phase: Home Assistant one-zone host vertical slice
 
-Core package candidate version: 0.7.0 (not yet published)
+Core package version: 0.7.0 (published and immutable)
 
-Home Assistant integration candidate version: 0.8.2
+Home Assistant integration candidate version: 0.9.0
 
 Use the latest published release for HACS custom-repository installation.
-Core `0.6.0` and integration `0.8.1` are published and immutable. Core `0.7.0`
-is the separate M31A release candidate and is not yet published. Integration
-`0.8.2` remains pinned exactly to `controlel==0.6.0`; its version and dependency
-do not move as part of the core release boundary.
+Core `0.7.0` is published and immutable. Integration `0.9.0` is the separate
+M31A Home Assistant candidate and pins exactly `controlel==0.7.0`.
 Controlel is not listed in the default HACS store.
 
 ## Home Assistant installation
@@ -46,7 +44,7 @@ installation flow is:
    **Controlel**.
 
 The integration manifest makes Home Assistant install the exact public core
-dependency `controlel==0.6.0`; users must not install the core manually.
+dependency `controlel==0.7.0`; users must not install the core manually.
 Detailed prerequisites, configuration, safety behavior, manual installation,
 upgrades, removal, and current limitations are in the
 [Home Assistant installation guide](docs/operations/HomeAssistantInstallation.md).
@@ -126,7 +124,7 @@ Core 0.6.0 also includes M30.2D Runtime Supervision & Failsafe Recovery. An
 application-level supervisor quarantines a failed normal-runtime generation,
 transfers exclusive command authority to a minimal failsafe controller, and
 uses protected `SAFE_HEATING` or `EMERGENCY_OFF` decisions while attempting a
-bounded restart campaign. The 0.8.2 Home Assistant host binds this supervisor
+bounded restart campaign. The Home Assistant host binds this supervisor
 to its one-shot scheduler, failsafe and normal-runtime factories, and explicit
 reported-source evidence. Supervision works only while the Home Assistant
 process remains alive; it cannot protect against complete HA, OS, power, or
@@ -152,7 +150,7 @@ countdown entities every second and retains 500. Debug expires after
 be kept active until manually changed. Profiles affect presentation, logging,
 and in-memory evidence only—not regulation.
 
-Core candidate 0.7.0 contains the M31A Operational Events Foundation: immutable
+Core 0.7.0 contains the M31A Operational Events Foundation: immutable
 operational-event contracts; canonical category and severity taxonomies; and a
 bounded in-memory stream with a default capacity of 200, deterministic ordering,
 and explicit drop metadata. Transition and lifecycle de-duplication keeps the
@@ -163,15 +161,17 @@ control behavior, and `ControlRuntime.record_runtime_started()` is the narrow
 public lifecycle boundary. Operational events remain separate from the decision
 trace. M31A adds no notifications, statistics, persistence, polling, or control
 behavior, and command dispatch or reported source state never claims physical
-heat.
+heat. Integration 0.9.0 exposes only the bounded, JSON-safe read projection in
+downloaded diagnostics; it adds no Home Assistant event, entity, or control
+surface.
 
 The integration manifest requires the exact public core release
-`controlel==0.6.0`. A supported custom-component deployment can therefore let
+`controlel==0.7.0`. A supported custom-component deployment can therefore let
 Home Assistant obtain the core dependency automatically; users do not need to
 install the core manually. Editable installation remains available for local
 source compatibility testing. The core test suite does not require Home
 Assistant, while Home Assistant framework tests use separate local-source and
-public-package compositions against the same immutable core `0.6.0` release.
+public-package compositions against the same immutable core `0.7.0` release.
 
 Framework compatibility is tested against Home Assistant `2026.7.3` with
 `pytest-homeassistant-custom-component==0.13.347` on Python 3.14.2 or newer.
@@ -179,20 +179,19 @@ The isolated, hashed environment is defined by `requirements/ha-test.in` and
 `requirements/ha-test.txt`; setup and suite commands are in the
 [development guide](docs/development/DevelopmentGuide.md). The compatibility
 harness is separate from HACS release validation. HACS metadata and
-deterministic release packaging are prepared for `0.8.2`, but that candidate
+deterministic release packaging are prepared for `0.9.0`, but that candidate
 has not been published and no default-store publication exists.
 
 ## Core package artifacts
 
 The reusable core is published as the `controlel` distribution and import
-package. Version `0.6.0` is the latest public immutable release; repository
-version `0.7.0` is the unpublished M31A release candidate. The static version
-source and PEP 517 build configuration live in `pyproject.toml`; normal
+package. Version `0.7.0` is the latest public immutable release. The static
+version source and PEP 517 build configuration live in `pyproject.toml`; normal
 installation depends only on Pydantic. Packaging validation builds one wheel
 and one sdist, inspects their contents, and installs the wheel into a clean
 environment outside the checkout.
 
-Core versions `0.1.0`, `0.2.0`, `0.3.0`, `0.4.0`, `0.5.0`, and `0.6.0` are published on
+Core versions `0.1.0`, `0.2.0`, `0.3.0`, `0.4.0`, `0.5.0`, `0.6.0`, and `0.7.0` are published on
 PyPI and immutable. Future core corrections require a new version; rebuilt artifacts for an already
 published version must never be uploaded.
 Repository packaging CI remains validation-only and contains no publication

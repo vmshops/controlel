@@ -33,6 +33,7 @@ from controlel.application.services.heat_demand_safety_policy import (
 from controlel.application.services.heating_diagnostics_boundary import (
     HeatingDiagnosticsBoundary,
 )
+from controlel.application.services.operational_event_stream import operational_event_stream_to_dict
 from controlel.application.services.source_control_policy import SourceControlOutcome
 from controlel.application.state.heating_diagnostics import (
     empty_heating_diagnostics_snapshot,
@@ -47,6 +48,7 @@ from controlel.domain.demands.building_heat_demand_status import (
 from controlel.domain.heat_delivery.observation import ObservationQuality
 from controlel.domain.measurements.measurement import Measurement
 from controlel.domain.operating_mode import SafeHeatingTemperatureEvidence
+from controlel.domain.operational_events import MeasurementEventCondition
 from controlel.domain.runtime_supervision import CommandAuthority
 from controlel.domain.source_control import ReportedSourceEvidence, ReportedSourceState
 
@@ -720,7 +722,10 @@ class HomeAssistantControlelHost:
                 await self._async_submit_runtime(self._runtime_supervisor.update_trusted_evidence, None)
                 if self._runtime_supervisor.state.command_authority is CommandAuthority.FAILSAFE:
                     return None
-            result = await self._async_submit_runtime(self._runtime.mark_measurement_indeterminate)
+            result = await self._async_submit_runtime(
+                self._runtime.mark_measurement_indeterminate,
+                MeasurementEventCondition.UNAVAILABLE,
+            )
             if isinstance(result, HeatDemandEvaluationResult):
                 self._observe_evaluation_result(result)
             self._logger.debug(
@@ -764,7 +769,15 @@ class HomeAssistantControlelHost:
             TemperatureNoDecisionReason.PRIMARY_MEASUREMENT_EXPIRED,
             TemperatureNoDecisionReason.PRIMARY_MEASUREMENT_FUTURE_DATED,
         }:
-            indeterminate = await self._async_submit_runtime(self._runtime.mark_measurement_indeterminate)
+            condition = (
+                MeasurementEventCondition.STALE
+                if result.reason is TemperatureNoDecisionReason.PRIMARY_MEASUREMENT_EXPIRED
+                else MeasurementEventCondition.UNAVAILABLE
+            )
+            indeterminate = await self._async_submit_runtime(
+                self._runtime.mark_measurement_indeterminate,
+                condition,
+            )
             self._observe_evaluation_result(indeterminate)
         self._logger.debug(
             "Accepted Controlel measurement timestamp=%s processing_status=%s",
@@ -930,6 +943,11 @@ class HomeAssistantControlelHost:
             self._reported_source_evidence.state.value if self._reported_source_evidence is not None else None
         )
         return projected
+
+    def operational_event_diagnostics(self) -> dict[str, object]:
+        """Return the bounded application-owned operational event stream."""
+
+        return operational_event_stream_to_dict(self._runtime.operational_event_stream.snapshot())
 
     async def async_source_resilience_diagnostics(self) -> dict[str, object] | None:
         """Project bounded core resilience evidence on the runtime executor."""

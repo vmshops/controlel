@@ -464,7 +464,8 @@ class FakeRuntime:
             next_evaluation_at=NOW,
         )
 
-    def mark_measurement_indeterminate(self):
+    def mark_measurement_indeterminate(self, condition=None):
+        del condition
         self.worker_threads.append(get_ident())
         self.operations.append(("indeterminate", None))
         return SimpleNamespace(
@@ -619,13 +620,21 @@ def create_shadow_test_host(
 
 
 def test_home_assistant_runtime_start_does_not_evaluate_empty_core_state(monkeypatch):
+    recorded_starts = []
+
     def fail_if_called(runtime):
         raise AssertionError("core startup evaluation must not run before a real HA state")
 
     monkeypatch.setattr(CoreControlRuntime, "start", fail_if_called)
+    monkeypatch.setattr(
+        CoreControlRuntime,
+        "record_runtime_started",
+        lambda runtime: recorded_starts.append(runtime),
+    )
     runtime = object.__new__(HomeAssistantControlRuntime)
 
     assert runtime.start() is None
+    assert recorded_starts == [runtime]
 
 
 def test_production_host_drains_completed_episode_after_control_returns() -> None:

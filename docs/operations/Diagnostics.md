@@ -37,7 +37,7 @@ false. No raw sample history, arbitrary exception message, secret, or physical
 burner/heat confirmation is included. Successful command dispatch and reported
 controller state remain separate fields.
 
-Home Assistant integration `0.8.2` consumes core `0.6.0` and includes the bounded
+Home Assistant integration `0.9.0` consumes core `0.7.0` and includes the bounded
 runtime-supervision projection to downloaded diagnostics. It reports phase,
 command authority, normalized fatal cause, restart attempts/budget/deadline,
 and recovery timestamps without arbitrary exception text or physical-state
@@ -51,3 +51,17 @@ is fixed-size and contains no traceback or arbitrary error message.
 
 The authoritative per-entity quick reference, including diagnostics-only
 M30.2/M30.2D fields, is [EntityReference.md](EntityReference.md).
+
+## M31A bounded operational events
+
+Downloaded diagnostics include an `operational_events` object with schema
+version, capacity, total/retained/dropped counts, latest event timestamp, and
+at most 200 ordered semantic events. Event fields are localization-neutral
+codes and JSON-safe evidence. Unknown evidence remains null; arbitrary
+exception messages, service payloads, secrets, and physical-state inferences
+are excluded.
+
+This stream is separate from `decision_trace`: it records meaningful
+transitions rather than every evaluation. It is diagnostics-only, in memory,
+and passive. Downloading or refreshing diagnostics emits no events and creates
+no timer, polling, command, Home Assistant event, or Recorder history.

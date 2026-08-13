@@ -12,11 +12,11 @@ from urllib.request import Request, urlopen
 import controlel
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-CORE_VERSION = "0.6.0"
+CORE_VERSION = "0.7.0"
 CORE_REQUIREMENT = f"controlel=={CORE_VERSION}"
-PUBLIC_WHEEL_FILENAME = "controlel-0.6.0-py3-none-any.whl"
-PUBLIC_WHEEL_SIZE = 121_007
-PUBLIC_WHEEL_SHA256 = "2633524b04fe3a15265b43783bacdd4aaa166bfe4bdb11f9caea5d80b6d1ae99"
+PUBLIC_WHEEL_FILENAME = "controlel-0.7.0-py3-none-any.whl"
+PUBLIC_WHEEL_SIZE = 130_655
+PUBLIC_WHEEL_SHA256 = "caf5b68a4045a458958cd60ed004b7660b45340ed44316554d2d4ced81f32bbd"
 PYPI_METADATA_URL = f"https://pypi.org/pypi/controlel/{CORE_VERSION}/json"
 
 
