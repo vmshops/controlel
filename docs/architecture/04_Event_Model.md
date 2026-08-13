@@ -60,8 +60,55 @@ return `HeatDemandEvaluationResult` directly. A timer never fabricates a
 No-decision and `OBSERVE_ONLY` paths do not evaluate demand or alter safety
 state or scheduling.
 
-Event-only observers do not receive this synchronous result. Logging,
-persistence, correlation IDs, and diagnostic events remain outside scope.
+Event-only observers do not receive this synchronous result. The separate
+operational-event recorder observes the completed semantic result; it never
+participates in decision or command execution.
+
+## M31A operational events
+
+`OperationalEvent` is the canonical immutable record of a meaningful runtime
+transition. Its stable schema contains a deterministic stream-local event ID,
+aware timestamp, category, severity, event and summary codes, optional reason,
+zone/source/correlation identity, previous/new state, requested command,
+command outcome, and sorted JSON-safe scalar evidence. Arbitrary exception
+messages are forbidden; normalized reason or exception-type codes are used.
+
+The initial categories are `runtime`, `measurement`, `demand`, `safety`,
+`source_control`, `source_resilience`, `supervision`, `heat_delivery`, and
+`performance`. Semantic severity is one of `info`, `notice`, `warning`, or
+`critical`; severity does not imply a notification preference.
+
+`OperationalEventStream` retains at most 200 events per composed runtime. It
+preserves emission order and reports total emitted, retained, and dropped
+counts plus the latest evidence timestamp. Snapshots are immutable and their
+projection is JSON-safe. Retention is memory-only: there is no database,
+Recorder coupling, polling loop, or long-term history in M31A.
+
+The transition-aware application recorder emits on condition entry, recovery,
+command attempt/outcome, or lifecycle boundary. Repeated stable evaluations,
+same-state source reports, snapshot refreshes, and one continuing protection
+hold do not emit duplicates. Correlation IDs connect only evidence-backed
+lifecycle relationships such as a command request/outcome, zone demand
+confirmation, or fatal/failsafe/restart campaign. Reported source transitions
+remain uncorrelated because the current adapter evidence has no explicit
+causal token; matching direction or timing is insufficient.
+
+The supervisor command-authority port records failsafe source request,
+dispatch, and failure outcomes into the same stream used by normal runtime and
+supervision lifecycle events. Recorder failure is contained outside source
+execution. Each fatal generation supplies one deterministic supervision
+correlation through failsafe entry, restart attempts, recovery, or exhaustion.
+
+Operational events do not replace the decision trace. The trace explains each
+bounded controller evaluation; operational events summarize meaningful
+changes across evaluations. Observation, assessment, decision, requested
+command, successful dispatch, reported controller state, and physical reality
+remain distinct. A dispatch event never claims source operation, and a
+reported enabled state never claims burner or heat output.
+
+M31B may consume the immutable read boundary for notification policy and M31C
+may consume it for statistics. Neither delivery nor aggregation is part of
+M31A.
 
 ## Observer execution ownership
 

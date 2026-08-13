@@ -151,6 +151,13 @@ countdown entities every second and retains 500. Debug expires after
 be kept active until manually changed. Profiles affect presentation, logging,
 and in-memory evidence only—not regulation.
 
+M31A adds a canonical semantic operational-event stream for meaningful core
+runtime transitions. Each composed runtime retains at most 200 immutable,
+ordered events with explicit dropped-event metadata and a JSON-safe read
+boundary. Operational events remain separate from the decision trace. M31A
+adds no notifications, statistics, persistence, polling, or control behavior,
+and command dispatch or reported source state never claims physical heat.
+
 The integration manifest requires the exact public core release
 `controlel==0.6.0`. A supported custom-component deployment can therefore let
 Home Assistant obtain the core dependency automatically; users do not need to

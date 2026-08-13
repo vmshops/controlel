@@ -63,6 +63,7 @@ from controlel.application.services.operating_mode_policy import (
     OperatingModeAssessment,
     OperatingModePolicy,
 )
+from controlel.application.services.operational_event_recorder import OperationalEventRecorder
 from controlel.application.services.shadow_heating_performance_monitor import (
     ShadowHeatingPerformanceMonitor,
 )
@@ -149,6 +150,7 @@ from controlel.domain.operating_mode import (
     SafeHeatingProfile,
     SafeHeatingTemperatureEvidence,
 )
+from controlel.domain.operational_events import MeasurementEventCondition
 from controlel.domain.repositories.sensor_repository import SensorRepository
 from controlel.domain.repositories.zone_repository import ZoneRepository
 from controlel.domain.source_control import (
@@ -188,11 +190,14 @@ class ControlRuntime:
         source_recovery_window: timedelta = DEFAULT_RECOVERY_WINDOW,
         safe_heating_profile: SafeHeatingProfile | None = None,
         manual_recovery_duration: timedelta = DEFAULT_MANUAL_RECOVERY_DURATION,
+        operational_event_recorder: OperationalEventRecorder | None = None,
     ) -> None:
         self.clock = clock
         self.scheduler = scheduler
         self.scheduled_failure_sink = scheduled_failure_sink
         self.event_bus = EventBus()
+        self.operational_event_recorder = operational_event_recorder or OperationalEventRecorder()
+        self.operational_event_stream = self.operational_event_recorder.stream
         self.state_store = RuntimeStateStore()
         self.zone_repository = zone_repository
         self.heat_delivery_controller = heat_delivery_controller
@@ -299,10 +304,34 @@ class ControlRuntime:
         self._active_operation: str | None = None
         self._stopped = False
         self._fatal_shutdown_result: FatalShutdownResult | None = None
+        self._operational_start_recorded = False
 
     def start(self) -> HeatDemandEvaluationResult:
         with self._runtime_operation("start"):
-            return self._evaluate_heat_demand(HeatDemandEvaluationTrigger.STARTUP)
+            result = self._evaluate_heat_demand(
+                HeatDemandEvaluationTrigger.STARTUP,
+                record_operational_events=False,
+            )
+            self._record_runtime_started_at(result.building_heat_demand.evaluated_at)
+            self._record_operational(
+                "evaluation",
+                result,
+                confirmation_assessments=self.zone_heat_demand_confirmation_assessments,
+            )
+            return result
+
+    def record_runtime_started(self) -> None:
+        """Record this runtime generation's start without evaluating empty inputs."""
+
+        if self._operational_start_recorded:
+            return
+        self._record_runtime_started_at(self._now())
+
+    def _record_runtime_started_at(self, timestamp: datetime) -> None:
+        if self._operational_start_recorded:
+            return
+        self._operational_start_recorded = True
+        self._record_operational("runtime_started", timestamp)
 
     def begin_source_recovery(
         self,
@@ -335,6 +364,7 @@ class ControlRuntime:
             ):
                 raise ValueError("reported source evidence time must not regress")
             self.reported_source_evidence = evidence
+            self._record_operational("reported_source", evidence)
             return self._evaluate_heat_demand(HeatDemandEvaluationTrigger.MANUAL)
 
     def set_operating_mode(
@@ -416,11 +446,17 @@ class ControlRuntime:
         with self._runtime_operation("reevaluate_heat_demand"):
             return self._evaluate_heat_demand(HeatDemandEvaluationTrigger.MANUAL)
 
-    def mark_measurement_indeterminate(self) -> HeatDemandEvaluationResult:
+    def mark_measurement_indeterminate(
+        self,
+        condition: MeasurementEventCondition = MeasurementEventCondition.UNAVAILABLE,
+    ) -> HeatDemandEvaluationResult:
         """Invalidate current zone input and reevaluate through safety policy."""
 
+        if not isinstance(condition, MeasurementEventCondition):
+            raise TypeError("condition must be a MeasurementEventCondition")
         with self._runtime_operation("mark_measurement_indeterminate"):
             self.zone_demand_store.clear()
+            self._record_operational("measurement", condition, self._now())
             return self._evaluate_heat_demand(HeatDemandEvaluationTrigger.MANUAL)
 
     def process_temperature(
@@ -462,6 +498,7 @@ class ControlRuntime:
                     now=now,
                 )
             )
+            self._record_operational("runtime_stopped", now)
 
     def fatal_shutdown(
         self,
@@ -523,6 +560,7 @@ class ControlRuntime:
                     command_type=CommandFamily.HEATING,
                     action=HeatingAction.DISABLE_HEATING,
                 )
+                self._record_operational("emergency_disable_requested", requested_at)
                 try:
                     self.heat_source_command_dispatcher.dispatch_emergency(command)
                 except Exception as error:
@@ -542,6 +580,15 @@ class ControlRuntime:
                     )
 
             self._fatal_shutdown_result = result
+            self._record_operational(
+                "runtime_fatal",
+                requested_at,
+                reason_code=(
+                    result.emergency_disable_outcome.value
+                    if result.emergency_disable_outcome is not None
+                    else "fatal_shutdown"
+                ),
+            )
             return result
 
     @contextmanager
@@ -589,6 +636,7 @@ class ControlRuntime:
             raise RuntimeError("Decision handling result must contain a decision event")
 
         self.event_bus.publish(decision_event)
+        self._record_operational("measurement", MeasurementEventCondition.VALID, measurement.timestamp)
 
         zone_demand = self.zone_demand_handler.handle(decision_event)
         if zone_demand is None:
@@ -653,6 +701,8 @@ class ControlRuntime:
         trigger: HeatDemandEvaluationTrigger,
         scheduled_for: datetime | None = None,
         indeterminate_start_hint: datetime | None = None,
+        *,
+        record_operational_events: bool = True,
     ) -> HeatDemandEvaluationResult:
         aggregate_demand = self.heat_demand_aggregator.evaluate()
         previous_pending_zone_ids = {
@@ -941,7 +991,7 @@ class ControlRuntime:
                             command,
                             corrective_reconciliation=corrective,
                         )
-                    except Exception:
+                    except Exception as error:
                         self.source_control_state = self.source_control_policy.record_failed(
                             source_assessment,
                             failed_at=now,
@@ -957,6 +1007,12 @@ class ControlRuntime:
                                 corrective_command=action,
                             )
                             self._replace_scheduled_evaluation(self.source_reconciliation_state.next_reevaluation_at)
+                        self._record_operational(
+                            "command_failed",
+                            action,
+                            now,
+                            reason_code=type(error).__name__,
+                        )
                         self._observe_heating_episodes(tuple(confirmed_inputs), captured_at=now)
                         raise
                     if executed:
@@ -996,7 +1052,7 @@ class ControlRuntime:
             tuple(confirmed_inputs),
             captured_at=building_heat_demand.evaluated_at,
         )
-        return HeatDemandEvaluationResult(
+        result = HeatDemandEvaluationResult(
             trigger=trigger,
             status=status,
             building_heat_demand=building_heat_demand,
@@ -1011,6 +1067,21 @@ class ControlRuntime:
             source_recovery_assessment=recovery_assessment,
             operating_mode_assessment=mode_assessment,
         )
+        if record_operational_events:
+            self._record_operational(
+                "evaluation",
+                result,
+                confirmation_assessments=self.zone_heat_demand_confirmation_assessments,
+            )
+        return result
+
+    def _record_operational(self, method_name: str, *args: object, **kwargs: object) -> None:
+        """Keep diagnostics-only event failures outside the control path."""
+
+        try:
+            getattr(self.operational_event_recorder, method_name)(*args, **kwargs)
+        except Exception:
+            pass
 
     def _observe_heating_episodes(
         self,

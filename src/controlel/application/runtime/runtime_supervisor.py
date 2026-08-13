@@ -9,6 +9,7 @@ from controlel.application.ports.heat_source_port import HeatSourcePort
 from controlel.application.ports.scheduled_runtime_failure_sink import ScheduledRuntimeFailure
 from controlel.application.ports.scheduler import ScheduledTaskHandle, Scheduler
 from controlel.application.runtime.failsafe_runtime import FailsafeRuntime
+from controlel.application.services.operational_event_recorder import OperationalEventRecorder
 from controlel.application.state.runtime_supervision_state import (
     RuntimeHandoverEvidence,
     RuntimeSupervisionDiagnosticsV1,
@@ -53,7 +54,17 @@ class _AuthorityPort:
     def execute(self, command: HeatSourceCommand) -> None:
         if not self.supervisor._owns(self.authority, self.generation):
             raise CommandAuthorityError("controller generation does not own command authority")
-        self.supervisor._source.execute(command)
+        correlation = None
+        if self.authority is CommandAuthority.FAILSAFE:
+            correlation = self.supervisor._record_failsafe_command_requested(command)
+        try:
+            self.supervisor._source.execute(command)
+        except Exception as error:
+            if self.authority is CommandAuthority.FAILSAFE:
+                self.supervisor._record_failsafe_command_failed(command, error, correlation)
+            raise
+        if self.authority is CommandAuthority.FAILSAFE:
+            self.supervisor._record_failsafe_command_dispatched(command, correlation)
 
 
 class RuntimeSupervisor:
@@ -68,16 +79,20 @@ class RuntimeSupervisor:
         restart_policy: RestartPolicy = RestartPolicy(),
         failsafe_factory: Callable[[HeatSourcePort], FailsafeRuntime] | None = None,
         restart_factory: RestartFactory | None = None,
+        operational_event_recorder: OperationalEventRecorder | None = None,
     ) -> None:
         self._source, self._clock, self._scheduler = source, clock, scheduler
         self.restart_policy, self._failsafe_factory = restart_policy, failsafe_factory
         self._restart_factory = restart_factory
+        self.operational_event_recorder = operational_event_recorder or OperationalEventRecorder()
+        self.operational_event_stream = self.operational_event_recorder.stream
         self._generation, self._campaign = 1, 1
         self._normal_active, self._authority = True, CommandAuthority.NORMAL
         self._trusted_evidence: SafeHeatingTemperatureEvidence | None = None
         self._reported_evidence: ReportedSourceEvidence | None = None
         self._normal_runtime: StoppableRuntime | None = None
         self._failsafe: FailsafeRuntime | None = None
+        self._active_failsafe_evaluation_at: datetime | None = None
         self._restart_handle: ScheduledTaskHandle | None = None
         self._manual_handle: ScheduledTaskHandle | None = None
         self._manual_generation = 0
@@ -95,6 +110,7 @@ class RuntimeSupervisor:
             None,
             None,
         )
+        self._record_operational("supervision", self.state, self._clock.now())
 
     def normal_port(self) -> HeatSourcePort:
         return _AuthorityPort(self, CommandAuthority.NORMAL, self._generation)
@@ -134,9 +150,13 @@ class RuntimeSupervisor:
             self._failsafe.ingest_reported_source(evidence)
 
     def report_fatal(self, error: Exception) -> None:
+        now = self._clock.now()
+        cause_code = _cause_code(error)
         self._normal_active = False
         self._generation += 1
         self._campaign += 1
+        correlation = self._supervision_correlation(self._generation)
+        self._record_operational("runtime_fatal", now, cause_code, correlation_id=correlation)
         self._authority = CommandAuthority.FAILSAFE
         failed, self._normal_runtime = self._normal_runtime, None
         handover = self._normal_handover_evidence(failed) if failed is not None else None
@@ -150,7 +170,8 @@ class RuntimeSupervisor:
             self._failsafe.restore_handover(handover)
         elif self._failsafe is not None and self._reported_evidence is not None:
             self._failsafe.ingest_reported_source(self._reported_evidence)
-        self._enter_failsafe(_cause_code(error))
+        self._enter_failsafe(cause_code)
+        self._record_operational("supervision", self.state, now)
         self._evaluate_failsafe()
         self._schedule_restart()
 
@@ -162,21 +183,37 @@ class RuntimeSupervisor:
         if chosen is None:
             return None
         attempts = self.state.restart_attempt_count + 1
+        self._record_operational(
+            "restart_attempt_started",
+            now,
+            attempt=attempts,
+            budget=self.state.restart_budget,
+            generation=self._generation,
+        )
         evidence = self._handover_evidence()
         try:
             candidate = chosen(_AuthorityPort(self, CommandAuthority.NORMAL, self._generation), evidence)
         except Exception as error:
+            failure_code = _cause_code(error)
             exhausted = attempts >= self.restart_policy.attempt_limit
             self.state = replace(
                 self.state,
                 phase=SupervisorPhase.RESTART_EXHAUSTED if exhausted else SupervisorPhase.RESTART_WAIT,
-                fatal_cause_code=_cause_code(error),
+                fatal_cause_code=failure_code,
                 restart_attempt_count=attempts,
                 next_restart_at=None if exhausted else now + self.restart_policy.retry_interval,
                 restart_budget_exhausted=exhausted,
             )
             if not exhausted:
                 self._schedule_restart()
+            self._record_operational(
+                "restart_attempt_failed",
+                now,
+                attempt=attempts,
+                reason_code=failure_code,
+                generation=self._generation,
+            )
+            self._record_operational("supervision", self.state, now)
             return None
         self._invalidate_callbacks()
         self._authority, self._normal_active = CommandAuthority.NORMAL, True
@@ -193,7 +230,69 @@ class RuntimeSupervisor:
             manual_recovery_deadline=None,
             last_recovered_to_normal_at=now,
         )
+        self._record_operational("supervision", self.state, now)
         return candidate
+
+    def _record_operational(self, method_name: str, *args: object, **kwargs: object) -> None:
+        """Keep diagnostics-only event failures outside supervision behavior."""
+
+        try:
+            getattr(self.operational_event_recorder, method_name)(*args, **kwargs)
+        except Exception:
+            pass
+
+    def _record_failsafe_command_requested(self, command: HeatSourceCommand) -> str | None:
+        timestamp = self._failsafe_event_timestamp()
+        if timestamp is None:
+            return None
+        try:
+            return self.operational_event_recorder.command_requested(command.action, timestamp)
+        except Exception:
+            return None
+
+    def _record_failsafe_command_dispatched(
+        self,
+        command: HeatSourceCommand,
+        correlation_id: str | None,
+    ) -> None:
+        timestamp = self._failsafe_event_timestamp()
+        if correlation_id is None or timestamp is None:
+            return
+        self._record_operational(
+            "command_dispatched",
+            command.action,
+            timestamp,
+            correlation_id=correlation_id,
+        )
+
+    def _record_failsafe_command_failed(
+        self,
+        command: HeatSourceCommand,
+        error: Exception,
+        correlation_id: str | None,
+    ) -> None:
+        timestamp = self._failsafe_event_timestamp()
+        if timestamp is None:
+            return
+        self._record_operational(
+            "command_failed",
+            command.action,
+            timestamp,
+            reason_code=type(error).__name__,
+            correlation_id=correlation_id,
+        )
+
+    @staticmethod
+    def _supervision_correlation(generation: int) -> str:
+        return f"supervision:{generation:08d}"
+
+    def _failsafe_event_timestamp(self) -> datetime | None:
+        if self._active_failsafe_evaluation_at is not None:
+            return self._active_failsafe_evaluation_at
+        try:
+            return self._clock.now()
+        except Exception:
+            return None
 
     def reset_restart_campaign(self) -> None:
         self._campaign += 1
@@ -263,8 +362,10 @@ class RuntimeSupervisor:
     def _evaluate_failsafe(self, *, manual_recovery: bool = False) -> None:
         if self._failsafe:
             try:
+                now = self._clock.now()
+                self._active_failsafe_evaluation_at = now
                 self._failsafe.evaluate(
-                    now=self._clock.now(),
+                    now=now,
                     evidence=self._trusted_evidence,
                     manual_recovery=manual_recovery,
                 )
@@ -273,6 +374,8 @@ class RuntimeSupervisor:
                     self.state,
                     fatal_cause_code=FatalCauseCode.FAILSAFE_DISPATCH_FAILED.value,
                 )
+            finally:
+                self._active_failsafe_evaluation_at = None
 
     def _schedule_restart(self) -> None:
         if not self._scheduler or not self._restart_factory or not self.state.next_restart_at:

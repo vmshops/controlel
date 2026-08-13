@@ -1,6 +1,7 @@
 from datetime import UTC, datetime, timedelta
 from inspect import signature
 from threading import Event, Thread
+from uuid import UUID
 
 from controlel.application.runtime.control_runtime import ControlRuntime
 from controlel.application.runtime.runtime_processing_result import RuntimeProcessingStatus
@@ -27,9 +28,11 @@ from controlel.domain.heat_delivery import (
     ObservationQuality,
 )
 from controlel.domain.measurements.measurement import Measurement
+from controlel.domain.operational_events import OperationalEventCode
 from controlel.domain.repositories.sensor_repository import SensorRepository
 from controlel.domain.repositories.zone_repository import ZoneRepository
 from controlel.domain.sensors.sensor import Sensor
+from controlel.domain.states.heat_source_control_state import HeatSourceControlState
 from controlel.domain.value_objects.sensor_id import SensorId
 from controlel.domain.value_objects.temperature import Temperature
 from controlel.domain.value_objects.zone_id import ZoneId
@@ -110,6 +113,79 @@ def test_control_runtime_processes_temperature_and_keeps_runtime_measurement():
     assert result.status is RuntimeProcessingStatus.COMMAND_EXECUTED
     assert runtime.state_store.get_latest(measurement.sensor_id) is measurement
     assert port.commands == [result.heat_demand_evaluation.command]
+    events = runtime.operational_event_stream.snapshot().events
+    assert [event.event_code for event in events] == [
+        OperationalEventCode.MEASUREMENT_BECAME_VALID,
+        OperationalEventCode.HEAT_DEMAND_STARTED,
+        OperationalEventCode.HEAT_DEMAND_CONFIRMED,
+        OperationalEventCode.SOURCE_ENABLE_REQUESTED,
+        OperationalEventCode.SOURCE_COMMAND_DISPATCHED,
+    ]
+    assert {event.correlation_id for event in events[1:]} == {events[1].correlation_id}
+
+
+def test_operational_event_failure_cannot_change_control_execution() -> None:
+    runtime, port = create_runtime()
+
+    class FailingRecorder:
+        def measurement(self, *args, **kwargs) -> None:
+            raise RuntimeError("observer failure")
+
+        def evaluation(self, *args, **kwargs) -> None:
+            raise RuntimeError("observer failure")
+
+    runtime.operational_event_recorder = FailingRecorder()
+    measurement = Measurement(
+        sensor_id=SensorId(value="living_room_temperature"),
+        value=Temperature(19),
+        timestamp=NOW,
+    )
+
+    result = runtime.process_temperature(measurement)
+
+    assert result.status is RuntimeProcessingStatus.COMMAND_EXECUTED
+    assert port.commands == [result.heat_demand_evaluation.command]
+
+
+def test_public_runtime_started_boundary_is_narrow_and_idempotent() -> None:
+    runtime, _ = create_runtime()
+
+    runtime.record_runtime_started()
+    runtime.record_runtime_started()
+
+    events = runtime.operational_event_stream.snapshot().events
+    assert [event.event_code for event in events] == [OperationalEventCode.RUNTIME_STARTED]
+    assert list(signature(ControlRuntime.record_runtime_started).parameters) == ["self"]
+    assert not hasattr(runtime, "emit_operational_event")
+
+
+def test_dispatcher_suppressed_duplicate_does_not_emit_repeated_source_requests() -> None:
+    runtime, port = create_runtime()
+    runtime.heat_source_state_store.save(
+        HeatSourceControlState(
+            applied_action=HeatingAction.ENABLE_HEATING,
+            command_id=UUID(int=0),
+            applied_at=NOW,
+        )
+    )
+
+    first = runtime.process_temperature(
+        Measurement(
+            sensor_id=SensorId(value="living_room_temperature"),
+            value=Temperature(19),
+            timestamp=NOW,
+        )
+    )
+    second = runtime.reevaluate_heat_demand()
+
+    assert first.status is RuntimeProcessingStatus.COMMAND_SUPPRESSED
+    assert second.status.value == "demand_command_suppressed"
+    assert port.commands == []
+    assert [
+        event
+        for event in runtime.operational_event_stream.snapshot().events
+        if event.category.value == "source_control"
+    ] == []
 
 
 def test_runtime_stop_bounds_episode_and_fresh_runtime_does_not_restore_it() -> None:
@@ -162,6 +238,7 @@ def test_control_runtime_constructor_uses_shared_source_contract_only():
         "source_recovery_window",
         "safe_heating_profile",
         "manual_recovery_duration",
+        "operational_event_recorder",
     ]
     assert "actuator_routes" not in parameters
     assert "actuator" not in parameters

@@ -88,6 +88,19 @@ Adaptive assistance remains future work. Learning, persistence, actuator
 travel/open verification, and source-water-temperature optimization also
 remain future layers.
 
+## Milestone 31A: operational events foundation
+
+M31A adds a canonical immutable operational-event schema, stable category and
+severity taxonomies, transition-aware application recording, and a
+thread-safe bounded 200-event in-memory stream with explicit drop metadata.
+The read boundary is immutable and JSON-safe, the decision trace remains
+separate, and no polling, persistence, notification delivery, statistics, or
+control influence is introduced.
+
+M31B may add notification policy and delivery as a consumer of this boundary.
+M31C may add explainable statistics/analytics. Both remain future milestones
+and must preserve the command/report/physical-reality distinctions.
+
 ## Milestone 23: Home Assistant one-zone host vertical slice
 
 The first host integration proves:

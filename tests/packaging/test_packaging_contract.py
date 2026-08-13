@@ -105,7 +105,7 @@ def test_manifest_pins_published_core_and_keeps_version_independent() -> None:
     assert manifest["issue_tracker"] == "https://github.com/vmshops/controlel/issues"
 
 
-def test_core_artifact_verification_binds_representative_m30_2_contracts() -> None:
+def test_core_artifact_verification_binds_representative_public_contracts() -> None:
     validator = (ROOT / "scripts" / "packaging" / "validate_artifacts.py").read_text(encoding="utf-8")
     clean_install = (ROOT / "scripts" / "packaging" / "verify_clean_install.py").read_text(encoding="utf-8")
 
@@ -124,6 +124,13 @@ def test_core_artifact_verification_binds_representative_m30_2_contracts() -> No
         "RestartPolicy",
         "RuntimeSupervisionState",
         "RuntimeSupervisionDiagnosticsV1",
+        "OperationalEvent",
+        "OperationalEventCategory",
+        "OperationalEventSeverity",
+        "OperationalEventCode",
+        "OperationalEventStream",
+        "OperationalEventRecorder",
+        "operational_event_stream_to_dict",
     }
     assert all(contract in clean_install for contract in required_contracts)
     for module in (
@@ -136,6 +143,9 @@ def test_core_artifact_verification_binds_representative_m30_2_contracts() -> No
         "application/runtime/failsafe_runtime.py",
         "application/state/runtime_supervision_state.py",
         "domain/runtime_supervision/__init__.py",
+        "domain/operational_events/__init__.py",
+        "application/services/operational_event_stream.py",
+        "application/services/operational_event_recorder.py",
     ):
         assert module in validator
 
