@@ -268,7 +268,7 @@ async def test_device_entities_states_unique_ids_and_unload(
     assert hass.states.get(by_key["heat_demand"].entity_id).state == "heat_required"
     assert hass.states.get(by_key["heat_required"].entity_id).state == "on"
     assert hass.states.get(by_key["runtime_active"].entity_id).state == "on"
-    assert hass.states.get(by_key["integration_version"].entity_id).state == "0.8.2"
+    assert hass.states.get(by_key["integration_version"].entity_id).state == "0.9.0"
     assert hass.states.get(by_key["core_version"].entity_id).state == expected_framework_core_version
     assert hass.states.get(by_key["diagnostic_profile"].entity_id).state == (DIAGNOSTIC_PROFILE_DETAILED)
     assert hass.states.get(by_key["grace_remaining"].entity_id).state == "unavailable"
@@ -404,14 +404,37 @@ async def test_legacy_effective_profile_survives_unload_and_restart(
         if item.unique_id.endswith("_diagnostic_profile")
     )
     assert hass.states.get(profile.entity_id).state == DIAGNOSTIC_PROFILE_DETAILED
+    before_reload = (await async_get_config_entry_diagnostics(hass, entry))["operational_events"]
+    assert before_reload["events"][0]["event_id"] == "event:00000001"
 
     assert await hass.config_entries.async_unload(entry.entry_id)
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
 
     assert hass.states.get(profile.entity_id).state == DIAGNOSTIC_PROFILE_DETAILED
+    after_reload = (await async_get_config_entry_diagnostics(hass, entry))["operational_events"]
+    assert after_reload["events"][0]["event_id"] == "event:00000001"
+    assert after_reload["total_emitted"] == len(after_reload["events"])
     assert CONF_DIAGNOSTIC_PROFILE not in entry.data
     assert CONF_DIAGNOSTIC_PROFILE not in entry.options
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_debug_presentation_refresh_does_not_emit_operational_events(
+    hass,
+    entry_data,
+    service_calls,
+) -> None:
+    entry_data[CONF_DIAGNOSTIC_PROFILE] = DIAGNOSTIC_PROFILE_DEBUG
+    entry = await _setup_entry(hass, entry_data)
+    host = entry.runtime_data.host
+    assert host is not None
+    before = host.operational_event_diagnostics()
+
+    host.snapshot_source.refresh_elapsed(datetime.now(UTC) + timedelta(seconds=1))
+
+    assert host.operational_event_diagnostics() == before
+    assert service_calls == []
     assert await hass.config_entries.async_unload(entry.entry_id)
 
 
@@ -643,7 +666,7 @@ async def test_diagnostics_are_allowlisted_json_safe_and_redact_unknown_entry_da
     serialized = json.dumps(diagnostics, sort_keys=True)
 
     assert diagnostics["versions"] == {
-        "integration": "0.8.2",
+        "integration": "0.9.0",
         "core": expected_framework_core_version,
     }
     assert diagnostics["operational_snapshot"]["runtime_status"] == "active"
@@ -666,6 +689,7 @@ async def test_diagnostics_are_allowlisted_json_safe_and_redact_unknown_entry_da
     } <= diagnostics["operational_snapshot"].keys()
     assert len(diagnostics["entity_ids"]) == len(EXPECTED_SENSOR_KEYS | EXPECTED_BINARY_SENSOR_KEYS)
     assert diagnostics["decision_trace"]
+    assert "decision_code" in diagnostics["decision_trace"][0]
     assert diagnostics["heating_diagnostics"]["schema_version"] == 1
     assert len(diagnostics["heating_diagnostics"]["zones"]) == 1
     assert len(json.dumps(diagnostics["heating_diagnostics"])) < 65_536
@@ -675,6 +699,18 @@ async def test_diagnostics_are_allowlisted_json_safe_and_redact_unknown_entry_da
     assert diagnostics["source_resilience"]["schema_version"] == 1
     assert diagnostics["source_resilience"]["source_ownership"] == "controlel_owned"
     assert diagnostics["source_resilience"]["reported_source_state"] == "disabled"
+    operational_events = diagnostics["operational_events"]
+    assert operational_events["schema_version"] == 1
+    assert operational_events["capacity"] == 200
+    assert operational_events["retained_count"] <= operational_events["capacity"]
+    assert operational_events["total_emitted"] == (
+        operational_events["retained_count"] + operational_events["dropped_count"]
+    )
+    assert operational_events["events"]
+    assert "event_code" in operational_events["events"][0]
+    assert "decision_code" not in operational_events["events"][0]
+    assert diagnostics["counters"]["operational_event_records"] == operational_events["retained_count"]
+    assert json.loads(json.dumps(operational_events, sort_keys=True)) == operational_events
     assert diagnostics["active_issue_ids"] == []
     provenance = diagnostics["configuration_provenance"]
     assert diagnostics["configuration"]["diagnostic_profile"] == (DIAGNOSTIC_PROFILE_DETAILED)

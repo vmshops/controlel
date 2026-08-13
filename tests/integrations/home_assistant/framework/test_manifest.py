@@ -9,7 +9,7 @@ import controlel
 from custom_components.controlel.const import DOMAIN
 
 ROOT = Path(__file__).parents[4].resolve()
-INTEGRATION_VERSION = "0.8.2"
+INTEGRATION_VERSION = "0.9.0"
 
 
 @pytest.mark.asyncio

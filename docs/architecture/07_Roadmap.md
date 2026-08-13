@@ -90,10 +90,9 @@ remain future layers.
 
 ## Milestone 31A: operational events foundation
 
-M31A prepares the separate, unpublished core `0.7.0` release candidate. Public
-core `0.6.0` remains current until the immutable 0.7.0 release process completes,
-and Home Assistant integration `0.8.2` remains pinned to `controlel==0.6.0` in
-this boundary.
+M31A is published as immutable core `0.7.0`. Home Assistant integration `0.9.0`
+pins that exact public package and exposes the read-only JSON projection through
+downloaded diagnostics only.
 
 M31A adds a canonical immutable operational-event schema, stable category and
 severity taxonomies, transition-aware application recording, and a
@@ -105,7 +104,7 @@ Recorder failures remain isolated, and the narrow public runtime lifecycle
 boundary avoids exposing private runtime helpers. The read boundary is
 immutable and JSON-safe, the decision trace remains separate, and no polling,
 persistence, notification delivery, statistics, or control influence is
-introduced.
+introduced. Existing entity keys and unique IDs remain unchanged.
 
 M31B may add notification policy and delivery as a consumer of this boundary.
 M31C may add explainable statistics/analytics. Both remain future milestones

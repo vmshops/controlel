@@ -99,8 +99,8 @@ def test_manifest_pins_published_core_and_keeps_version_independent() -> None:
     core_version = load_pyproject()["project"]["version"]
 
     assert core_version == "0.7.0"
-    assert manifest["requirements"] == ["controlel==0.6.0"]
-    assert manifest["version"] == "0.8.2"
+    assert manifest["requirements"] == ["controlel==0.7.0"]
+    assert manifest["version"] == "0.9.0"
     assert manifest["version"] != core_version
     assert manifest["issue_tracker"] == "https://github.com/vmshops/controlel/issues"
 
@@ -192,7 +192,7 @@ def test_framework_ci_separates_local_source_and_public_core_compositions() -> N
     assert "CONTROLEL_FRAMEWORK_COMPOSITION: local" in workflow
     assert "home-assistant-framework-public:" in workflow
     assert "CONTROLEL_FRAMEWORK_COMPOSITION: public" in workflow
-    assert "controlel==0.6.0" in workflow
+    assert "controlel==0.7.0" in workflow
     assert "python scripts/ci/verify_public_core.py" in workflow
     assert "candidate-core-wheel" not in workflow
 
@@ -217,8 +217,9 @@ def test_public_core_provenance_records_history_and_current_composition_hash() -
     assert "equivalent to `core-v0.3.0`" in release_guide
     assert wheel_hash in release_guide
     assert sdist_hash in release_guide
-    assert "controlel-0.6.0-py3-none-any.whl" in checker
-    assert "2633524b04fe3a15265b43783bacdd4aaa166bfe4bdb11f9caea5d80b6d1ae99" in checker
+    assert "controlel-0.7.0-py3-none-any.whl" in checker
+    assert "PUBLIC_WHEEL_SIZE = 130_655" in checker
+    assert "caf5b68a4045a458958cd60ed004b7660b45340ed44316554d2d4ced81f32bbd" in checker
 
 
 def test_strict_final_core_release_interface_and_sequence_are_documented() -> None:
