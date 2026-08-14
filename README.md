@@ -165,6 +165,20 @@ heat. Integration 0.9.0 exposes only the bounded, JSON-safe read projection in
 downloaded diagnostics; it adds no Home Assistant event, entity, or control
 surface.
 
+The unreleased M31B core work builds a passive smart-notification foundation
+on that canonical stream. Core policy maps every event code to a distinct user
+attention level, produces semantic localization-neutral intents, filters stable
+logical recipients, applies explicit once-per-lifecycle versus per-occurrence
+deduplication, and preserves safe scalar event details. An application service
+owns the source cursor and reports exact missed-event gaps when the bounded
+source stream overflows. Ordinary traffic is limited to 10 notifications per
+recipient/category per 60 seconds; CRITICAL traffic has an independent 20 per
+recipient per 60 seconds emergency ceiling. Delivery remains behind a generic
+application port and is best-effort and in-memory, with no retry loop, polling,
+persistence, or control-path influence. Host adapter/configuration work remains
+separate. A later release-boundary change will prepare these public APIs for
+core 0.8.0.
+
 The integration manifest requires the exact public core release
 `controlel==0.7.0`. A supported custom-component deployment can therefore let
 Home Assistant obtain the core dependency automatically; users do not need to

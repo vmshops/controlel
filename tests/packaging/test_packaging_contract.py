@@ -131,6 +131,14 @@ def test_core_artifact_verification_binds_representative_public_contracts() -> N
         "OperationalEventStream",
         "OperationalEventRecorder",
         "operational_event_stream_to_dict",
+        "NotificationIntent",
+        "NotificationDeliveryPort",
+        "NotificationPolicy",
+        "NotificationRecipient",
+        "NotificationPlanner",
+        "NotificationState",
+        "notification_state_to_dict",
+        "notification_level_for_event",
     }
     assert all(contract in clean_install for contract in required_contracts)
     for module in (
@@ -146,6 +154,12 @@ def test_core_artifact_verification_binds_representative_public_contracts() -> N
         "domain/operational_events/__init__.py",
         "application/services/operational_event_stream.py",
         "application/services/operational_event_recorder.py",
+        "application/ports/notification_delivery_port.py",
+        "application/services/notification_planner.py",
+        "application/services/notification_processor.py",
+        "application/services/notification_policy.py",
+        "application/state/notification_state.py",
+        "domain/notifications/__init__.py",
     ):
         assert module in validator
 

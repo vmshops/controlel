@@ -26,6 +26,7 @@ import controlel
 from controlel.application.runtime.control_runtime import ControlRuntime
 from controlel.application.runtime.failsafe_runtime import FailsafeRuntime
 from controlel.application.runtime.runtime_supervisor import RuntimeSupervisor
+from controlel.application.ports.notification_delivery_port import NotificationDeliveryPort
 from controlel.application.services.source_reconciliation_policy import SourceReconciliationPolicy
 from controlel.application.services.source_recovery_policy import SourceRecoveryPolicy
 from controlel.application.services.operational_event_recorder import OperationalEventRecorder
@@ -33,6 +34,10 @@ from controlel.application.services.operational_event_stream import (
     OperationalEventStream,
     operational_event_stream_to_dict,
 )
+from controlel.application.services.notification_planner import NotificationPlanner
+from controlel.application.services.notification_processor import NotificationProcessor
+from controlel.application.services.notification_policy import notification_level_for_event
+from controlel.application.state.notification_state import NotificationState, notification_state_to_dict
 from controlel.application.state.source_resilience_diagnostics import (
     SOURCE_RESILIENCE_DIAGNOSTICS_SCHEMA_VERSION,
     SourceResilienceDiagnosticsV1,
@@ -49,6 +54,14 @@ from controlel.domain.operational_events import (
     OperationalEventCategory,
     OperationalEventCode,
     OperationalEventSeverity,
+)
+from controlel.domain.notifications import (
+    NotificationDeliveryResult,
+    NotificationDeliveryStatus,
+    NotificationIntent,
+    NotificationLevel,
+    NotificationPolicy,
+    NotificationRecipient,
 )
 from controlel.domain.runtime_supervision import CommandAuthority, RestartPolicy, SupervisorPhase
 from controlel.domain.repositories.sensor_repository import SensorRepository
@@ -127,6 +140,27 @@ event_payload = operational_event_stream_to_dict(event_stream.snapshot())
 assert event_payload["schema_version"] == 1
 assert event_payload["capacity"] == 1
 assert event_payload["events"][0]["event_code"] == "runtime_started"
+
+m31b_contracts = (
+    NotificationDeliveryPort,
+    NotificationDeliveryResult,
+    NotificationDeliveryStatus,
+    NotificationIntent,
+    NotificationLevel,
+    NotificationPolicy,
+    NotificationRecipient,
+    NotificationPlanner,
+    NotificationProcessor,
+    NotificationState,
+)
+for contract in m31b_contracts:
+    module_path = Path(importlib.import_module(contract.__module__).__file__).resolve()
+    assert module_path.is_relative_to(package_path.parent)
+notification_planner = NotificationPlanner(NotificationPolicy())
+notification_payload = notification_state_to_dict(notification_planner.state())
+assert notification_payload["schema_version"] == 1
+assert notification_payload["enabled"] is False
+assert notification_level_for_event(OperationalEventCode.RUNTIME_FATAL) is NotificationLevel.CRITICAL
 
 observed_at = datetime(2026, 1, 1, tzinfo=UTC)
 capabilities = SourceCapabilities(
