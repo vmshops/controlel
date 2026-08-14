@@ -156,6 +156,15 @@ best-effort and memory-only. Outcomes are explicit: `delivered`, `failed`,
 notification-driven control, host adapter, or automatic recipient discovery in
 the core boundary.
 
+Home Assistant integration `0.10.0` composes the public core boundary without
+reinterpreting it. A thin `NotificationDeliveryPort` adapter invokes only
+explicitly configured `notify.<service>` targets on the HA event loop. Runtime
+completion marks one shared drain dirty; an active drain task is reused and
+loops only while new work was marked pending. This is event-driven coalescing,
+not polling or a retry scheduler. Configuration and redacted diagnostics remain
+adapter concerns, while mapping, recipient filtering, deduplication, cursor and
+overflow semantics, and both rate limits remain application/core concerns.
+
 M31C may consume operational events for statistics. Aggregation is not part of
 M31A or M31B.
 

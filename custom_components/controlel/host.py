@@ -33,6 +33,7 @@ from controlel.application.services.heat_demand_safety_policy import (
 from controlel.application.services.heating_diagnostics_boundary import (
     HeatingDiagnosticsBoundary,
 )
+from controlel.application.services.notification_planner import NotificationPlanner
 from controlel.application.services.operational_event_stream import operational_event_stream_to_dict
 from controlel.application.services.source_control_policy import SourceControlOutcome
 from controlel.application.state.heating_diagnostics import (
@@ -47,6 +48,7 @@ from controlel.domain.demands.building_heat_demand_status import (
 )
 from controlel.domain.heat_delivery.observation import ObservationQuality
 from controlel.domain.measurements.measurement import Measurement
+from controlel.domain.notifications import NotificationPolicy
 from controlel.domain.operating_mode import SafeHeatingTemperatureEvidence
 from controlel.domain.operational_events import MeasurementEventCondition
 from controlel.domain.runtime_supervision import CommandAuthority
@@ -62,6 +64,7 @@ from .measurement_ingestion import (
     StateLike,
     StateVersion,
 )
+from .notifications import HomeAssistantNotificationCoordinator
 from .observability import (
     PROFILE_REFRESH_CADENCE_SECONDS,
     ObservabilityController,
@@ -129,6 +132,7 @@ class HomeAssistantControlelHost:
         heating_diagnostics_enabled: bool = True,
         runtime_supervisor: RuntimeSupervisor | None = None,
         scheduled_callback_cleanup: Callable[[], None] | None = None,
+        notification_coordinator: HomeAssistantNotificationCoordinator | None = None,
     ) -> None:
         self._hass = hass
         self._runtime = runtime
@@ -146,6 +150,7 @@ class HomeAssistantControlelHost:
         self._heating_diagnostics_enabled = heating_diagnostics_enabled
         self._runtime_supervisor = runtime_supervisor
         self._scheduled_callback_cleanup = scheduled_callback_cleanup
+        self._notification_coordinator = notification_coordinator
         self._source_entity_id = getattr(config, "controlled_entity_id", None)
         self._reported_source_evidence: ReportedSourceEvidence | None = None
         initial_heating_diagnostics = empty_heating_diagnostics_snapshot(config.zone_id.value)
@@ -201,6 +206,8 @@ class HomeAssistantControlelHost:
         self._accepted_callback_tasks: set[asyncio.Task[Any]] = set()
         self._shadow_assessment_tasks: set[asyncio.Task[Any]] = set()
         self._heating_diagnostics_tasks: set[asyncio.Task[Any]] = set()
+        self._notification_task: asyncio.Task[Any] | None = None
+        self._notification_drain_pending = False
         self._heating_diagnostics_generation = 0
         self._fatal_shutdown_task: asyncio.Task[Any] | None = None
         self._fatal_error: Exception | None = None
@@ -540,6 +547,11 @@ class HomeAssistantControlelHost:
                 return
             self._stopping = True
             self._accepting = False
+            if self._notification_coordinator is not None:
+                self._notification_coordinator.close()
+            notification_task = self._notification_task
+            if notification_task is not None:
+                notification_task.cancel()
             self.observability.stop()
 
             unsubscribe = self._unsubscribe
@@ -573,6 +585,8 @@ class HomeAssistantControlelHost:
             callback_tasks = [task for task in self._accepted_callback_tasks if task is not asyncio.current_task()]
             if callback_tasks:
                 await asyncio.gather(*callback_tasks, return_exceptions=True)
+            if notification_task is not None and notification_task is not asyncio.current_task():
+                await asyncio.gather(notification_task, return_exceptions=True)
 
             if not self._executor.closed:
                 try:
@@ -827,6 +841,34 @@ class HomeAssistantControlelHost:
         finally:
             self._schedule_heating_diagnostics_projection(refresh_runtime_evidence=True)
             self._schedule_shadow_assessment_drain()
+            self._schedule_notification_delivery()
+
+    def _schedule_notification_delivery(self) -> None:
+        coordinator = self._notification_coordinator
+        if coordinator is None or not self._accepting:
+            return
+        self._notification_drain_pending = True
+        if self._notification_task is not None and not self._notification_task.done():
+            return
+        self._notification_task = self._create_task(
+            self._async_drain_notifications(),
+            "Controlel operational notification delivery",
+        )
+
+    async def _async_drain_notifications(self) -> None:
+        """Coalesce runtime completion signals into one bounded drain task."""
+
+        try:
+            while self._accepting and self._notification_drain_pending:
+                self._notification_drain_pending = False
+                coordinator = self._notification_coordinator
+                if coordinator is None:
+                    return
+                await coordinator.async_process_new_events()
+        finally:
+            self._notification_task = None
+            if self._accepting and self._notification_drain_pending:
+                self._schedule_notification_delivery()
 
     def _schedule_shadow_assessment_drain(self) -> None:
         monitor = getattr(self._runtime, "heating_performance_monitor", None)
@@ -948,6 +990,13 @@ class HomeAssistantControlelHost:
         """Return the bounded application-owned operational event stream."""
 
         return operational_event_stream_to_dict(self._runtime.operational_event_stream.snapshot())
+
+    def notification_diagnostics(self) -> dict[str, object]:
+        """Return bounded notification policy, intent, and delivery state."""
+
+        if self._notification_coordinator is None:
+            return NotificationPlanner(NotificationPolicy()).diagnostics()
+        return self._notification_coordinator.diagnostics()
 
     async def async_source_resilience_diagnostics(self) -> dict[str, object] | None:
         """Project bounded core resilience evidence on the runtime executor."""

@@ -268,7 +268,7 @@ async def test_device_entities_states_unique_ids_and_unload(
     assert hass.states.get(by_key["heat_demand"].entity_id).state == "heat_required"
     assert hass.states.get(by_key["heat_required"].entity_id).state == "on"
     assert hass.states.get(by_key["runtime_active"].entity_id).state == "on"
-    assert hass.states.get(by_key["integration_version"].entity_id).state == "0.9.0"
+    assert hass.states.get(by_key["integration_version"].entity_id).state == "0.10.0"
     assert hass.states.get(by_key["core_version"].entity_id).state == expected_framework_core_version
     assert hass.states.get(by_key["diagnostic_profile"].entity_id).state == (DIAGNOSTIC_PROFILE_DETAILED)
     assert hass.states.get(by_key["grace_remaining"].entity_id).state == "unavailable"
@@ -666,7 +666,7 @@ async def test_diagnostics_are_allowlisted_json_safe_and_redact_unknown_entry_da
     serialized = json.dumps(diagnostics, sort_keys=True)
 
     assert diagnostics["versions"] == {
-        "integration": "0.9.0",
+        "integration": "0.10.0",
         "core": expected_framework_core_version,
     }
     assert diagnostics["operational_snapshot"]["runtime_status"] == "active"
@@ -711,6 +711,17 @@ async def test_diagnostics_are_allowlisted_json_safe_and_redact_unknown_entry_da
     assert "decision_code" not in operational_events["events"][0]
     assert diagnostics["counters"]["operational_event_records"] == operational_events["retained_count"]
     assert json.loads(json.dumps(operational_events, sort_keys=True)) == operational_events
+    notification_policy = diagnostics["notification_policy"]
+    assert notification_policy["schema_version"] == 1
+    assert notification_policy["enabled"] is False
+    assert notification_policy["configured_recipient_count"] == 0
+    assert notification_policy["recipients"] == []
+    assert notification_policy["source_total_observed"] >= 0
+    assert notification_policy["source_last_processed_sequence"] >= 0
+    assert notification_policy["source_events_missed"] == 0
+    assert notification_policy["source_overflow_occurrences"] == 0
+    assert notification_policy["total_intents_produced"] == 0
+    assert json.loads(json.dumps(notification_policy, sort_keys=True)) == notification_policy
     assert diagnostics["active_issue_ids"] == []
     provenance = diagnostics["configuration_provenance"]
     assert diagnostics["configuration"]["diagnostic_profile"] == (DIAGNOSTIC_PROFILE_DETAILED)

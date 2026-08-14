@@ -9,6 +9,8 @@ from math import isfinite
 from typing import Any
 
 from controlel.domain.commands.heating_action import HeatingAction
+from controlel.domain.notifications import NotificationLevel, NotificationPolicy, NotificationRecipient
+from controlel.domain.operational_events import OperationalEventCategory
 from controlel.domain.value_objects.sensor_id import SensorId
 from controlel.domain.value_objects.temperature import Temperature
 from controlel.domain.value_objects.zone_id import ZoneId
@@ -39,6 +41,7 @@ from .const import (
     CONF_MAX_FUTURE_SKEW,
     CONF_MINIMUM_HEATING_OFF_TIME,
     CONF_MINIMUM_HEATING_ON_TIME,
+    CONF_NOTIFICATIONS,
     CONF_PRIMARY_MEASUREMENT_MAX_AGE,
     CONF_SENSOR_ID,
     CONF_SENSOR_NAME,
@@ -48,10 +51,15 @@ from .const import (
     CONF_ZONE_NAME,
     CONTROL_MODE_CUSTOM,
     CONTROL_MODE_SIMPLE,
+    DEFAULT_CRITICAL_NOTIFICATION_MAXIMUM_PER_WINDOW,
+    DEFAULT_CRITICAL_NOTIFICATION_RATE_WINDOW_SECONDS,
     DEFAULT_DEBUG_DURATION,
     DEFAULT_DEBUG_UNTIL_CHANGED,
     DEFAULT_DIAGNOSTIC_PROFILE_BEFORE_DEBUG,
     DEFAULT_HEAT_DELIVERY_ASSIST_TARGET,
+    DEFAULT_NOTIFICATION_HISTORY_CAPACITY,
+    DEFAULT_NOTIFICATION_MAXIMUM_PER_WINDOW,
+    DEFAULT_NOTIFICATION_RATE_WINDOW_SECONDS,
     DIAGNOSTIC_PROFILE_BASIC,
     DIAGNOSTIC_PROFILE_DEBUG,
     DIAGNOSTIC_PROFILE_DETAILED,
@@ -69,12 +77,14 @@ from .const import (
     LEGACY_MINIMUM_HEATING_OFF_TIME,
     LEGACY_MINIMUM_HEATING_ON_TIME,
     MAX_HEAT_DEMAND_CONFIRMATION_DURATION,
+    NOTIFICATION_TRANSPORT_HOME_ASSISTANT,
 )
 
 _IDENTIFIER_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 _SLUG_PATTERN = re.compile(r"^[a-z0-9_]+$")
 _ENTITY_ID_PATTERN = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+$")
 _IDENTITY_KEYS = frozenset({CONF_SENSOR_ID, CONF_ZONE_ID})
+_MAX_NOTIFICATION_RECIPIENTS = 16
 
 
 class HomeAssistantConfigurationError(ValueError):
@@ -179,6 +189,7 @@ class HomeAssistantIntegrationConfig:
     heat_delivery_ownership: str = HEAT_DELIVERY_OWNERSHIP_DEVICE
     heat_delivery_assist_policy: str = HEAT_DELIVERY_ASSIST_NONE
     heat_delivery_assist_target: float = DEFAULT_HEAT_DELIVERY_ASSIST_TARGET
+    notification_policy: NotificationPolicy = NotificationPolicy()
 
     def __post_init__(self) -> None:
         _validate_nonempty(self.sensor_name, "sensor name")
@@ -427,6 +438,7 @@ def integration_config_from_entry_data(
             heat_delivery_assist_target=_finite_optional_number(
                 data, CONF_HEAT_DELIVERY_ASSIST_TARGET, DEFAULT_HEAT_DELIVERY_ASSIST_TARGET
             ),
+            notification_policy=_notification_policy(data.get(CONF_NOTIFICATIONS)),
         )
     except (KeyError, TypeError, ValueError) as error:
         if isinstance(error, HomeAssistantConfigurationError):
@@ -441,6 +453,89 @@ def integration_config_from_entry(
     """Build effective configuration with options overriding mutable legacy data."""
 
     return integration_config_from_entry_data(merged_entry_configuration(data, options))
+
+
+def _notification_policy(value: object) -> NotificationPolicy:
+    """Parse the modular integration-owned notification configuration."""
+
+    if value is None:
+        return NotificationPolicy()
+    if not isinstance(value, Mapping):
+        raise HomeAssistantConfigurationError("notifications must be an object")
+    enabled = value.get("enabled", False)
+    if not isinstance(enabled, bool):
+        raise HomeAssistantConfigurationError("notifications enabled must be a boolean")
+    raw_recipients = value.get("recipients", ())
+    if not isinstance(raw_recipients, list | tuple):
+        raise HomeAssistantConfigurationError("notification recipients must be a list")
+    if len(raw_recipients) > _MAX_NOTIFICATION_RECIPIENTS:
+        raise HomeAssistantConfigurationError("notification recipients must not exceed 16")
+    recipients: list[NotificationRecipient] = []
+    for raw_recipient in raw_recipients:
+        if not isinstance(raw_recipient, Mapping):
+            raise HomeAssistantConfigurationError("each notification recipient must be an object")
+        recipient_id = _required_string(raw_recipient, "recipient_id")
+        _validate_slug(recipient_id, "notification recipient ID")
+        transport = _required_string(raw_recipient, "transport")
+        if transport != NOTIFICATION_TRANSPORT_HOME_ASSISTANT:
+            raise HomeAssistantConfigurationError("notification transport is invalid")
+        target = _required_string(raw_recipient, "target")
+        _validate_entity_id(target, "notification target")
+        if not target.startswith("notify."):
+            raise HomeAssistantConfigurationError("notification target must be a notify service")
+        recipient_enabled = raw_recipient.get("enabled", True)
+        if not isinstance(recipient_enabled, bool):
+            raise HomeAssistantConfigurationError("notification recipient enabled must be a boolean")
+        raw_categories = raw_recipient.get("categories", ())
+        if not isinstance(raw_categories, list | tuple):
+            raise HomeAssistantConfigurationError("notification categories must be a list")
+        categories = tuple(
+            sorted({OperationalEventCategory(item) for item in raw_categories}, key=lambda item: item.value)
+        )
+        recipients.append(
+            NotificationRecipient(
+                recipient_id,
+                transport,
+                target,
+                enabled=recipient_enabled,
+                minimum_level=NotificationLevel(raw_recipient.get("minimum_level", NotificationLevel.OPERATIONAL)),
+                categories=categories,
+            )
+        )
+    maximum = value.get("maximum_per_window", DEFAULT_NOTIFICATION_MAXIMUM_PER_WINDOW)
+    window_seconds = value.get("rate_window_seconds", DEFAULT_NOTIFICATION_RATE_WINDOW_SECONDS)
+    critical_maximum = value.get(
+        "critical_maximum_per_window",
+        DEFAULT_CRITICAL_NOTIFICATION_MAXIMUM_PER_WINDOW,
+    )
+    critical_window_seconds = value.get(
+        "critical_rate_window_seconds",
+        DEFAULT_CRITICAL_NOTIFICATION_RATE_WINDOW_SECONDS,
+    )
+    history_capacity = value.get("history_capacity", DEFAULT_NOTIFICATION_HISTORY_CAPACITY)
+    if isinstance(maximum, bool) or not isinstance(maximum, int):
+        raise HomeAssistantConfigurationError("notification maximum per window must be an integer")
+    if isinstance(window_seconds, bool) or not isinstance(window_seconds, int | float) or not isfinite(window_seconds):
+        raise HomeAssistantConfigurationError("notification rate window seconds must be finite")
+    if isinstance(critical_maximum, bool) or not isinstance(critical_maximum, int):
+        raise HomeAssistantConfigurationError("critical notification maximum per window must be an integer")
+    if (
+        isinstance(critical_window_seconds, bool)
+        or not isinstance(critical_window_seconds, int | float)
+        or not isfinite(critical_window_seconds)
+    ):
+        raise HomeAssistantConfigurationError("critical notification rate window seconds must be finite")
+    if isinstance(history_capacity, bool) or not isinstance(history_capacity, int):
+        raise HomeAssistantConfigurationError("notification history capacity must be an integer")
+    return NotificationPolicy(
+        enabled=enabled,
+        recipients=tuple(recipients),
+        maximum_per_window=maximum,
+        rate_window=timedelta(seconds=window_seconds),
+        critical_maximum_per_window=critical_maximum,
+        critical_rate_window=timedelta(seconds=critical_window_seconds),
+        history_capacity=history_capacity,
+    )
 
 
 def merged_entry_configuration(

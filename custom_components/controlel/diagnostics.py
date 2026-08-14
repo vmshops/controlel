@@ -140,6 +140,26 @@ def _normalized_config(config: HomeAssistantIntegrationConfig) -> dict[str, Any]
         "actuator_ownership": config.heat_delivery_ownership,
         "assist_policy": config.heat_delivery_assist_policy,
         "assist_target_temperature": config.heat_delivery_assist_target,
+        "notification_policy": {
+            "enabled": config.notification_policy.enabled,
+            "configured_recipient_count": len(config.notification_policy.recipients),
+            "recipients": [
+                {
+                    "recipient_id": recipient.recipient_id,
+                    "transport": recipient.transport,
+                    "target_configured": bool(recipient.target),
+                    "enabled": recipient.enabled,
+                    "minimum_level": recipient.minimum_level.value,
+                    "categories": [category.value for category in recipient.categories],
+                }
+                for recipient in config.notification_policy.recipients
+            ],
+            "maximum_per_window": config.notification_policy.maximum_per_window,
+            "rate_window_seconds": config.notification_policy.rate_window.total_seconds(),
+            "critical_maximum_per_window": config.notification_policy.critical_maximum_per_window,
+            "critical_rate_window_seconds": config.notification_policy.critical_rate_window.total_seconds(),
+            "history_capacity": config.notification_policy.history_capacity,
+        },
     }
 
 
@@ -300,6 +320,7 @@ async def async_get_config_entry_diagnostics(
     entity_ids = sorted(item.entity_id for item in er.async_entries_for_config_entry(registry, entry.entry_id))
     source_resilience = await host.async_source_resilience_diagnostics()
     operational_events = host.operational_event_diagnostics()
+    notification_policy = host.notification_diagnostics()
     return {
         "configuration": _normalized_config(runtime_data.config),
         "configuration_provenance": _configuration_provenance(
@@ -318,6 +339,7 @@ async def async_get_config_entry_diagnostics(
         "heating_diagnostics": heating_diagnostics_to_dict(snapshot.heating_diagnostics),
         "runtime_supervision": host.runtime_supervision_diagnostics(),
         "operational_events": operational_events,
+        "notification_policy": notification_policy,
         "source_resilience": source_resilience,
         "counters": {
             "snapshot_revision": snapshot.revision,

@@ -22,14 +22,14 @@ The goal is to create a reliable heating controller capable of optimizing comfor
 
 Project phase: Home Assistant one-zone host vertical slice
 
-Core package version: 0.8.0 release candidate (not yet published)
+Core package version: 0.8.0 (published and immutable)
 
-Home Assistant integration candidate version: 0.9.0
+Home Assistant integration candidate version: 0.10.0
 
 Use the latest published release for HACS custom-repository installation.
-Core `0.8.0` is the unreleased M31B release candidate. Core `0.7.0` remains the
-published immutable release. Integration `0.9.0` remains separate and pins
-exactly `controlel==0.7.0`.
+Core `0.8.0` is the published immutable M31B release. Integration `0.10.0` is
+the separate Home Assistant M31B candidate and pins exactly
+`controlel==0.8.0`.
 Controlel is not listed in the default HACS store.
 
 ## Home Assistant installation
@@ -45,7 +45,7 @@ installation flow is:
    **Controlel**.
 
 The integration manifest makes Home Assistant install the exact public core
-dependency `controlel==0.7.0`; users must not install the core manually.
+dependency `controlel==0.8.0`; users must not install the core manually.
 Detailed prerequisites, configuration, safety behavior, manual installation,
 upgrades, removal, and current limitations are in the
 [Home Assistant installation guide](docs/operations/HomeAssistantInstallation.md).
@@ -177,17 +177,26 @@ recipient/category per 60 seconds; CRITICAL traffic has an independent 20 per
 recipient per 60 seconds emergency ceiling. Delivery remains behind a generic
 application port and is best-effort and in-memory, with no retry loop, polling,
 persistence, or control-path influence. Bounded immutable notification state
-and history retain truthful cursor and delivery evidence. Host transport and
-configuration work are not part of core 0.8.0. This release candidate is not
-yet published; public core 0.7.0 remains current until publication completes.
+and history retain truthful cursor and delivery evidence. Core `0.8.0` is
+published and immutable.
+
+Integration `0.10.0` composes that public core through a thin Home Assistant
+notify transport. Notifications remain disabled with no recipients by default.
+Configured delivery runs on the HA event loop through one coalesced drain task;
+one recipient failure does not block another, unload rejects future drains, and
+accepted HA service calls cannot be revoked. HA stores only validated modular
+configuration and publishes bounded target-redacted diagnostics. Mapping,
+deduplication, cursor/overflow accounting, and rate limits remain core-owned.
+No polling, retry loop, persistence, automatic target discovery, custom sidebar
+UI, or control-path influence is introduced.
 
 The integration manifest requires the exact public core release
-`controlel==0.7.0`. A supported custom-component deployment can therefore let
+`controlel==0.8.0`. A supported custom-component deployment can therefore let
 Home Assistant obtain the core dependency automatically; users do not need to
 install the core manually. Editable installation remains available for local
 source compatibility testing. The core test suite does not require Home
 Assistant, while Home Assistant framework tests use separate local-source and
-public-package compositions against the same immutable core `0.7.0` release.
+public-package compositions against the same immutable core `0.8.0` release.
 
 Framework compatibility is tested against Home Assistant `2026.7.3` with
 `pytest-homeassistant-custom-component==0.13.347` on Python 3.14.2 or newer.
@@ -195,20 +204,19 @@ The isolated, hashed environment is defined by `requirements/ha-test.in` and
 `requirements/ha-test.txt`; setup and suite commands are in the
 [development guide](docs/development/DevelopmentGuide.md). The compatibility
 harness is separate from HACS release validation. HACS metadata and
-deterministic release packaging are prepared for `0.9.0`, but that candidate
+deterministic release packaging are prepared for `0.10.0`, but that candidate
 has not been published and no default-store publication exists.
 
 ## Core package artifacts
 
 The reusable core is published as the `controlel` distribution and import
-package. Repository version `0.8.0` is the unreleased M31B candidate; version
-`0.7.0` remains the latest public immutable release. The static version source
+package. Version `0.8.0` is the latest public immutable release. The static version source
 and PEP 517 build configuration live in `pyproject.toml`; normal installation
 depends only on Pydantic. Packaging validation builds one wheel and one sdist,
 inspects their contents, and installs the wheel into a clean environment
 outside the checkout.
 
-Core versions `0.1.0`, `0.2.0`, `0.3.0`, `0.4.0`, `0.5.0`, `0.6.0`, and `0.7.0` are published on
+Core versions `0.1.0`, `0.2.0`, `0.3.0`, `0.4.0`, `0.5.0`, `0.6.0`, `0.7.0`, and `0.8.0` are published on
 PyPI and immutable. Future core corrections require a new version; rebuilt artifacts for an already
 published version must never be uploaded.
 Repository packaging CI remains validation-only and contains no publication

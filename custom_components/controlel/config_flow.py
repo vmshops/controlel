@@ -53,6 +53,7 @@ from .const import (
     CONF_MINIMUM_HEATING_OFF_TIME_MINUTES,
     CONF_MINIMUM_HEATING_ON_TIME,
     CONF_MINIMUM_HEATING_ON_TIME_MINUTES,
+    CONF_NOTIFICATIONS,
     CONF_PRIMARY_MEASUREMENT_MAX_AGE,
     CONF_PRIMARY_MEASUREMENT_MAX_AGE_MINUTES,
     CONF_SENSOR_ID,
@@ -65,6 +66,8 @@ from .const import (
     CONFIG_ENTRY_VERSION,
     CONTROL_MODE_CUSTOM,
     CONTROL_MODE_SIMPLE,
+    DEFAULT_CRITICAL_NOTIFICATION_MAXIMUM_PER_WINDOW,
+    DEFAULT_CRITICAL_NOTIFICATION_RATE_WINDOW_SECONDS,
     DEFAULT_DEBUG_DURATION,
     DEFAULT_DEBUG_UNTIL_CHANGED,
     DEFAULT_DIAGNOSTIC_PROFILE,
@@ -78,6 +81,9 @@ from .const import (
     DEFAULT_MAX_FUTURE_SKEW,
     DEFAULT_MINIMUM_HEATING_OFF_TIME,
     DEFAULT_MINIMUM_HEATING_ON_TIME,
+    DEFAULT_NOTIFICATION_HISTORY_CAPACITY,
+    DEFAULT_NOTIFICATION_MAXIMUM_PER_WINDOW,
+    DEFAULT_NOTIFICATION_RATE_WINDOW_SECONDS,
     DEFAULT_PRIMARY_MEASUREMENT_MAX_AGE,
     DEFAULT_TARGET_TEMPERATURE,
     DIAGNOSTIC_PROFILE_BASIC,
@@ -127,6 +133,7 @@ _MUTABLE_COMMON_KEYS = (
     CONF_HEAT_DELIVERY_OWNERSHIP,
     CONF_HEAT_DELIVERY_ASSIST_POLICY,
     CONF_HEAT_DELIVERY_ASSIST_TARGET,
+    CONF_NOTIFICATIONS,
 )
 _ADVANCED_BINDING_KEYS = (
     CONF_ENABLE_SERVICE_DOMAIN,
@@ -692,6 +699,21 @@ def _advanced_schema(
                     DEFAULT_DEBUG_UNTIL_CHANGED,
                 ),
             ): selector.BooleanSelector(),
+            vol.Required(
+                CONF_NOTIFICATIONS,
+                default=defaults.get(
+                    CONF_NOTIFICATIONS,
+                    {
+                        "enabled": False,
+                        "recipients": [],
+                        "maximum_per_window": DEFAULT_NOTIFICATION_MAXIMUM_PER_WINDOW,
+                        "rate_window_seconds": DEFAULT_NOTIFICATION_RATE_WINDOW_SECONDS,
+                        "critical_maximum_per_window": DEFAULT_CRITICAL_NOTIFICATION_MAXIMUM_PER_WINDOW,
+                        "critical_rate_window_seconds": DEFAULT_CRITICAL_NOTIFICATION_RATE_WINDOW_SECONDS,
+                        "history_capacity": DEFAULT_NOTIFICATION_HISTORY_CAPACITY,
+                    },
+                ),
+            ): selector.ObjectSelector(),
         }
     )
     if control_mode == CONTROL_MODE_CUSTOM:
@@ -870,6 +892,18 @@ def _configuration_from_steps(
         CONF_HEAT_DELIVERY_ASSIST_TARGET: basic.get(
             CONF_HEAT_DELIVERY_ASSIST_TARGET, DEFAULT_HEAT_DELIVERY_ASSIST_TARGET
         ),
+        CONF_NOTIFICATIONS: advanced.get(
+            CONF_NOTIFICATIONS,
+            {
+                "enabled": False,
+                "recipients": [],
+                "maximum_per_window": DEFAULT_NOTIFICATION_MAXIMUM_PER_WINDOW,
+                "rate_window_seconds": DEFAULT_NOTIFICATION_RATE_WINDOW_SECONDS,
+                "critical_maximum_per_window": DEFAULT_CRITICAL_NOTIFICATION_MAXIMUM_PER_WINDOW,
+                "critical_rate_window_seconds": DEFAULT_CRITICAL_NOTIFICATION_RATE_WINDOW_SECONDS,
+                "history_capacity": DEFAULT_NOTIFICATION_HISTORY_CAPACITY,
+            },
+        ),
     }
     if basic[CONF_HEAT_SOURCE_CONTROL_MODE] == CONTROL_MODE_SIMPLE:
         configuration[CONF_CONTROLLED_ENTITY_ID] = basic.get(
@@ -967,6 +1001,18 @@ def _apply_legacy_defaults(configuration: dict[str, Any]) -> None:
         CONF_DIAGNOSTIC_PROFILE_BEFORE_DEBUG,
         DEFAULT_DIAGNOSTIC_PROFILE_BEFORE_DEBUG,
     )
+    configuration.setdefault(
+        CONF_NOTIFICATIONS,
+        {
+            "enabled": False,
+            "recipients": [],
+            "maximum_per_window": DEFAULT_NOTIFICATION_MAXIMUM_PER_WINDOW,
+            "rate_window_seconds": DEFAULT_NOTIFICATION_RATE_WINDOW_SECONDS,
+            "critical_maximum_per_window": DEFAULT_CRITICAL_NOTIFICATION_MAXIMUM_PER_WINDOW,
+            "critical_rate_window_seconds": DEFAULT_CRITICAL_NOTIFICATION_RATE_WINDOW_SECONDS,
+            "history_capacity": DEFAULT_NOTIFICATION_HISTORY_CAPACITY,
+        },
+    )
 
 
 def _log_semantic_configuration_diff(before: Any, after: Any) -> None:
@@ -1062,6 +1108,7 @@ def _configuration_errors(
             CONF_DEBUG_DURATION,
             CONF_DEBUG_UNTIL_CHANGED,
             CONF_CONTROLLED_ENTITY_ID,
+            CONF_NOTIFICATIONS,
             *_ADVANCED_BINDING_KEYS,
         ):
             if field.replace("_", " ") in message or field in message:
