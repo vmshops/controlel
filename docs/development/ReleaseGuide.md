@@ -1,5 +1,30 @@
 # Release guide
 
+## Milestone 31B core 0.8.0 boundary
+
+Core `0.8.0` is the unreleased M31B Smart Notifications Foundation release
+candidate. Public core `0.7.0` remains published and immutable until the 0.8.0
+release completes. Home Assistant integration `0.9.0` remains unchanged and
+continues to pin exactly public `controlel==0.7.0`; HA transport and
+configuration work belong to a later separate integration boundary.
+
+Core 0.8.0 adds immutable notification contracts, exhaustive operational-event
+attention-level mapping, `NotificationPolicy`, `NotificationPlanner`, the
+application-owned `NotificationProcessor`, and a generic
+`NotificationDeliveryPort`. Recipient filtering, explicit
+once-per-correlated-lifecycle and per-occurrence de-duplication, ordinary
+per-recipient/category rate limiting, an independent CRITICAL emergency
+ceiling, exact source cursor/overflow accounting, and bounded immutable
+notification state/history are deterministic and transport-neutral. Delivery
+is best-effort and in-memory; no persistence, polling, retry loop, host adapter,
+notification-driven control, or claim about physical state is introduced.
+
+This boundary changes core version metadata, core packaging/version contracts,
+and release documentation only. It does not create a tag, build final release
+artifacts, upload to PyPI, publish, or create a GitHub Release. Immutable 0.8.0
+artifacts must later be built from the exact reviewed release commit using the
+existing provenance workflow.
+
 ## Milestone 31A core 0.7.0 boundary
 
 Core `0.7.0` is published and immutable from annotated tag `core-v0.7.0`.

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "controlel"
-version = "0.7.0"
+version = "0.8.0"
 description = "Platform-independent heating control core for Home Assistant and other hosts"
 readme = "README.md"
 requires-python = ">=3.13"
