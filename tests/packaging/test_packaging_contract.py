@@ -139,6 +139,14 @@ def test_core_artifact_verification_binds_representative_public_contracts() -> N
         "NotificationState",
         "notification_state_to_dict",
         "notification_level_for_event",
+        "UserActivity",
+        "UserActivityType",
+        "UserActivityStatus",
+        "UserActivityLevel",
+        "UserActivitySnapshot",
+        "UserActivityStream",
+        "UserActivityComposer",
+        "user_activity_snapshot_to_dict",
     }
     assert all(contract in clean_install for contract in required_contracts)
     for module in (
@@ -160,6 +168,9 @@ def test_core_artifact_verification_binds_representative_public_contracts() -> N
         "application/services/notification_policy.py",
         "application/state/notification_state.py",
         "domain/notifications/__init__.py",
+        "domain/user_activities/__init__.py",
+        "application/services/user_activity_stream.py",
+        "application/services/user_activity_composer.py",
     ):
         assert module in validator
 

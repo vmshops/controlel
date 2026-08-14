@@ -246,7 +246,11 @@ class RuntimeSupervisor:
         if timestamp is None:
             return None
         try:
-            return self.operational_event_recorder.command_requested(command.action, timestamp)
+            return self.operational_event_recorder.command_requested(
+                command.action,
+                timestamp,
+                activity_id=self._supervision_correlation(self._generation),
+            )
         except Exception:
             return None
 
@@ -263,6 +267,7 @@ class RuntimeSupervisor:
             command.action,
             timestamp,
             correlation_id=correlation_id,
+            activity_id=self._supervision_correlation(self._generation),
         )
 
     def _record_failsafe_command_failed(
@@ -280,6 +285,7 @@ class RuntimeSupervisor:
             timestamp,
             reason_code=type(error).__name__,
             correlation_id=correlation_id,
+            activity_id=self._supervision_correlation(self._generation),
         )
 
     @staticmethod

@@ -21,6 +21,7 @@ from controlel.application.services.source_control_policy import (
     SourceControlOutcome,
     SourceControlPolicy,
 )
+from controlel.application.services.source_reconciliation_policy import SourceReconciliationPolicy
 from controlel.application.services.zone_heat_demand_confirmation_policy import ZoneHeatDemandConfirmationPolicy
 from controlel.application.state.heat_demand_safety_state import HeatDemandSafetyState
 from controlel.application.state.source_control_state import ActiveLockoutType, SourceControlReason
@@ -32,7 +33,7 @@ from controlel.domain.demands.building_heat_demand_status import BuildingHeatDem
 from controlel.domain.demands.zone_demand import ZoneDemand
 from controlel.domain.demands.zone_heat_demand_input import ZoneHeatDemandInput, ZoneHeatDemandInputReason
 from controlel.domain.operational_events import MeasurementEventCondition, OperationalEventCode
-from controlel.domain.source_control import ReportedSourceEvidence, ReportedSourceState
+from controlel.domain.source_control import ReportedSourceEvidence, ReportedSourceState, SourceOwnership
 from controlel.domain.value_objects.sensor_id import SensorId
 from controlel.domain.value_objects.zone_id import ZoneId
 
@@ -266,3 +267,112 @@ def test_dispatcher_suppressed_duplicate_emits_no_source_request() -> None:
     recorder.evaluation(suppressed)
 
     assert recorder.stream.snapshot().events == ()
+
+
+def test_measurement_and_safety_events_share_a_distinct_incident_activity_id() -> None:
+    recorder = OperationalEventRecorder()
+    recorder.measurement(MeasurementEventCondition.STALE, NOW)
+    recorder.evaluation(_result(BuildingHeatDemandStatus.INDETERMINATE, NOW + timedelta(seconds=1)))
+    recorder.measurement(MeasurementEventCondition.VALID, NOW + timedelta(seconds=2))
+
+    events = recorder.stream.snapshot().events
+    assert [event.event_code for event in events] == [
+        OperationalEventCode.MEASUREMENT_BECAME_STALE,
+        OperationalEventCode.SAFETY_GRACE_STARTED,
+        OperationalEventCode.MEASUREMENT_RECOVERED,
+    ]
+    assert len({event.activity_id for event in events}) == 1
+    assert events[0].activity_id is not None
+    assert events[0].activity_id.startswith("measurement-incident:")
+    assert all(event.correlation_id is None for event in events)
+
+
+def test_reconciliation_campaign_has_explicit_activity_id_and_truthful_completion() -> None:
+    recorder = OperationalEventRecorder()
+    policy = SourceReconciliationPolicy(unknown_transition_hold=timedelta())
+    reported_on = ReportedSourceEvidence(
+        ReportedSourceState.ENABLED,
+        NOW,
+        NOW - timedelta(minutes=1),
+    )
+    drift = policy.evaluate(
+        ownership=SourceOwnership.CONTROLEL_OWNED,
+        desired_command=HeatingAction.DISABLE_HEATING,
+        last_successful_command=HeatingAction.DISABLE_HEATING,
+        reported=reported_on,
+        current_state=None,
+        now=NOW,
+    )
+    recorder.evaluation(
+        replace(_result(BuildingHeatDemandStatus.NO_HEAT_REQUIRED), source_reconciliation_assessment=drift)
+    )
+    reported_off = ReportedSourceEvidence(ReportedSourceState.DISABLED, NOW + timedelta(seconds=1))
+    agreed = policy.evaluate(
+        ownership=SourceOwnership.CONTROLEL_OWNED,
+        desired_command=HeatingAction.DISABLE_HEATING,
+        last_successful_command=HeatingAction.DISABLE_HEATING,
+        reported=reported_off,
+        current_state=drift.state,
+        now=NOW + timedelta(seconds=1),
+    )
+    recorder.evaluation(
+        replace(
+            _result(BuildingHeatDemandStatus.NO_HEAT_REQUIRED, NOW + timedelta(seconds=1)),
+            source_reconciliation_assessment=agreed,
+        )
+    )
+
+    drift_event, started_event, completed_event = recorder.stream.snapshot().events
+    assert drift_event.activity_id == started_event.activity_id == completed_event.activity_id
+    assert drift_event.activity_id is not None
+    assert drift_event.activity_id.startswith("source-reconciliation:")
+    assert {detail.key: detail.value for detail in drift_event.details} == {
+        "desired_state": "disable_heating",
+        "reported_state": "enabled",
+    }
+    assert {detail.key: detail.value for detail in completed_event.details}["completion_outcome"] == (
+        "reported_agreement"
+    )
+
+
+def test_successful_building_source_commands_share_episode_but_keep_command_correlations() -> None:
+    recorder = OperationalEventRecorder()
+    policy = SourceControlPolicy(minimum_on_time=timedelta(), minimum_off_time=timedelta())
+    initial = policy.initial_state(NOW)
+    dispatch = SourceControlAssessment(
+        state=initial,
+        outcome=SourceControlOutcome.DISPATCH,
+        reason=SourceControlReason.NORMAL_DEMAND,
+        active_lockout=None,
+        lockout_deadline=None,
+        safety_bypassed_lockout=False,
+    )
+    recorder.evaluation(
+        replace(
+            _result(BuildingHeatDemandStatus.HEAT_REQUIRED),
+            status=HeatDemandEvaluationStatus.DEMAND_COMMAND_EXECUTED,
+            source_control_assessment=dispatch,
+        )
+    )
+    recorder.evaluation(
+        replace(
+            _result(BuildingHeatDemandStatus.NO_HEAT_REQUIRED, NOW + timedelta(minutes=1)),
+            status=HeatDemandEvaluationStatus.DEMAND_COMMAND_EXECUTED,
+            source_control_assessment=dispatch,
+        )
+    )
+
+    command_events = [
+        event
+        for event in recorder.stream.snapshot().events
+        if event.event_code
+        in {
+            OperationalEventCode.SOURCE_ENABLE_REQUESTED,
+            OperationalEventCode.SOURCE_DISABLE_REQUESTED,
+            OperationalEventCode.SOURCE_COMMAND_DISPATCHED,
+        }
+    ]
+    assert len({event.activity_id for event in command_events}) == 1
+    assert command_events[0].activity_id is not None
+    assert command_events[0].activity_id.startswith("heating-episode:")
+    assert len({event.correlation_id for event in command_events}) == 2
