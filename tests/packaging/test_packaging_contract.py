@@ -38,7 +38,7 @@ def test_project_metadata_and_runtime_dependencies_match_release_contract() -> N
     project = load_pyproject()["project"]
 
     assert project["name"] == "controlel"
-    assert project["version"] == "0.9.0"
+    assert project["version"] == "0.10.0"
     assert project["readme"] == "README.md"
     assert project["requires-python"] == ">=3.13"
     assert project["license"] == "MIT"
@@ -85,7 +85,7 @@ def test_project_version_is_the_only_release_version_source() -> None:
         path for path in (ROOT / "src" / "controlel").rglob("*.py") if "__version__" in path.read_text(encoding="utf-8")
     ]
 
-    assert project_version == "0.9.0"
+    assert project_version == "0.10.0"
     assert controlel.__version__ == project_version
     assert importlib.metadata.version("controlel") == project_version
     assert version_files == [ROOT / "src" / "controlel" / "__init__.py"]
@@ -98,7 +98,7 @@ def test_manifest_pins_published_core_and_keeps_version_independent() -> None:
     manifest = json.loads((ROOT / "custom_components" / "controlel" / "manifest.json").read_text(encoding="utf-8"))
     core_version = load_pyproject()["project"]["version"]
 
-    assert core_version == "0.9.0"
+    assert core_version == "0.10.0"
     assert manifest["requirements"] == ["controlel==0.8.0"]
     assert manifest["version"] == "0.10.1"
     assert manifest["version"] != core_version
@@ -133,12 +133,17 @@ def test_core_artifact_verification_binds_representative_public_contracts() -> N
         "operational_event_stream_to_dict",
         "NotificationIntent",
         "NotificationDeliveryPort",
+        "NotificationDeliveryResult",
+        "NotificationDeliveryStatus",
+        "NotificationLevel",
         "NotificationPolicy",
         "NotificationRecipient",
         "NotificationPlanner",
         "NotificationState",
         "notification_state_to_dict",
         "notification_level_for_event",
+        "ACTIVITY_NOTIFICATION_RULES",
+        "notification_rule_for_activity",
         "UserActivity",
         "UserActivityParameter",
         "UserActivityType",
@@ -211,15 +216,23 @@ def test_packaging_ci_builds_and_validates_without_publishing() -> None:
     assert "token" not in workflow.casefold()
 
 
-def test_framework_ci_separates_local_source_and_public_core_compositions() -> None:
+def test_ci_separates_repository_core_from_released_ha_public_core_compositions() -> None:
     workflow = (ROOT / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8")
 
-    assert "home-assistant-framework-local:" in workflow
-    assert "CONTROLEL_FRAMEWORK_COMPOSITION: local" in workflow
+    assert "tests/domain" in workflow
+    assert "tests/application" in workflow
+    assert "tests/infrastructure" in workflow
+    assert "tests/architecture" in workflow
+    assert "tests/packaging" in workflow
+    assert "python -m pytest --ignore=tests/integrations/home_assistant/framework" not in workflow
+    assert "home-assistant-public:" in workflow
     assert "home-assistant-framework-public:" in workflow
+    assert "home-assistant-framework-local:" not in workflow
+    assert "CONTROLEL_FRAMEWORK_COMPOSITION: local" not in workflow
     assert "CONTROLEL_FRAMEWORK_COMPOSITION: public" in workflow
-    assert "controlel==0.8.0" in workflow
-    assert "python scripts/ci/verify_public_core.py" in workflow
+    assert workflow.count("controlel==0.8.0") == 2
+    assert workflow.count("python scripts/ci/verify_public_core.py") == 2
+    assert workflow.count("--asyncio-mode=auto") == 1
     assert "candidate-core-wheel" not in workflow
 
 

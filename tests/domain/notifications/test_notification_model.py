@@ -15,6 +15,7 @@ from controlel.domain.notifications import (
     NotificationRecipient,
 )
 from controlel.domain.operational_events import OperationalEventCategory
+from controlel.domain.user_activities import UserActivityType
 
 
 def test_notification_contracts_are_immutable_and_localization_neutral() -> None:
@@ -32,14 +33,16 @@ def test_notification_contracts_are_immutable_and_localization_neutral() -> None
         OperationalEventCategory.RUNTIME,
         "notification_title_runtime_recovered",
         "notification_message_runtime_recovered",
-        "event:00000001",
+        "activity:00000001",
+        UserActivityType.RUNTIME_RECOVERED,
         recipient.recipient_id,
+        "supervision:1",
         parameters=(NotificationParameter("reason_code", "runtime_recovered"),),
     )
     result = NotificationDeliveryResult(
         intent.created_at,
         NotificationDeliveryStatus.DELIVERED,
-        intent.source_event_id,
+        intent.source_activity_id,
         intent.recipient_id,
         intent.notification_id,
     )
@@ -62,6 +65,21 @@ def test_recipient_and_parameter_validation_is_deterministic() -> None:
         )
     with pytest.raises(ValueError, match="finite"):
         NotificationParameter("temperature", float("nan"))
+
+    with pytest.raises(ValueError, match="zone_ids must be unique and sorted"):
+        NotificationIntent(
+            "notification:1",
+            datetime(2026, 1, 1, tzinfo=UTC),
+            NotificationLevel.OPERATIONAL,
+            OperationalEventCategory.RUNTIME,
+            "title",
+            "message",
+            "activity:1",
+            UserActivityType.RUNTIME_RECOVERED,
+            "phone",
+            "supervision:1",
+            zone_ids=("zone:2", "zone:1"),
+        )
 
 
 def test_policy_rejects_duplicate_enabled_transport_targets() -> None:

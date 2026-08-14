@@ -1,25 +1,21 @@
-"""Tests for the explicit M31B event notification mapping."""
+"""Tests for exhaustive activity-driven notification policy."""
 
-from controlel.application.services.notification_policy import (
-    NOTIFICATION_LEVEL_BY_EVENT_CODE,
-    notification_level_for_event,
-)
-from controlel.domain.notifications import NotificationLevel
-from controlel.domain.operational_events import OperationalEventCode
+from controlel.application.services.notification_policy import ACTIVITY_NOTIFICATION_RULES
+from controlel.domain.user_activities import UserActivityStatus, UserActivityType
 
 
-def test_every_operational_event_code_has_one_explicit_notification_level() -> None:
-    assert set(NOTIFICATION_LEVEL_BY_EVENT_CODE) == set(OperationalEventCode)
-    assert all(notification_level_for_event(code) is level for code, level in NOTIFICATION_LEVEL_BY_EVENT_CODE.items())
+def test_every_activity_type_has_an_explicit_nonempty_policy() -> None:
+    assert set(ACTIVITY_NOTIFICATION_RULES) == set(UserActivityType)
+    assert all(rule.notifiable_statuses for rule in ACTIVITY_NOTIFICATION_RULES.values())
 
 
-def test_required_initial_mapping() -> None:
-    assert notification_level_for_event(OperationalEventCode.RUNTIME_FATAL) is NotificationLevel.CRITICAL
-    assert notification_level_for_event(OperationalEventCode.RESTART_BUDGET_EXHAUSTED) is NotificationLevel.CRITICAL
-    assert notification_level_for_event(OperationalEventCode.FAILSAFE_ENTERED) is NotificationLevel.OPERATIONAL
-    assert notification_level_for_event(OperationalEventCode.MEASUREMENT_RECOVERED) is NotificationLevel.OPERATIONAL
-    assert notification_level_for_event(OperationalEventCode.HEAT_DEMAND_CONFIRMED) is NotificationLevel.DETAILED
-    assert (
-        notification_level_for_event(OperationalEventCode.REPORTED_SOURCE_STATE_CHANGED) is NotificationLevel.DETAILED
-    )
-    assert notification_level_for_event(OperationalEventCode.MEASUREMENT_BECAME_VALID) is NotificationLevel.DEBUG
+def test_lifecycle_stages_are_explicit() -> None:
+    assert ACTIVITY_NOTIFICATION_RULES[UserActivityType.MEASUREMENT_DEGRADED].notifiable_statuses == {
+        UserActivityStatus.OPEN
+    }
+    assert ACTIVITY_NOTIFICATION_RULES[UserActivityType.MEASUREMENT_RECOVERED].notifiable_statuses == {
+        UserActivityStatus.RECOVERED
+    }
+    assert ACTIVITY_NOTIFICATION_RULES[UserActivityType.RUNTIME_RESTART_EXHAUSTED].notifiable_statuses == {
+        UserActivityStatus.FAILED
+    }

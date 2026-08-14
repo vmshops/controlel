@@ -41,7 +41,11 @@ from controlel.application.services.user_activity_stream import (
 )
 from controlel.application.services.notification_planner import NotificationPlanner
 from controlel.application.services.notification_processor import NotificationProcessor
-from controlel.application.services.notification_policy import notification_level_for_event
+from controlel.application.services.notification_policy import (
+    ACTIVITY_NOTIFICATION_RULES,
+    notification_level_for_event,
+    notification_rule_for_activity,
+)
 from controlel.application.state.notification_state import NotificationState, notification_state_to_dict
 from controlel.application.state.source_resilience_diagnostics import (
     SOURCE_RESILIENCE_DIAGNOSTICS_SCHEMA_VERSION,
@@ -178,7 +182,8 @@ activity_source.emit(
 activity_composer = UserActivityComposer(activity_source.snapshot, activity_capacity=2)
 assert activity_composer.process_available() is True
 activity_payload = user_activity_snapshot_to_dict(activity_composer.snapshot())
-assert activity_payload["schema_version"] == 1
+assert activity_payload["schema_version"] == 2
+assert activity_payload["total_activity_revisions_emitted"] == 1
 assert activity_payload["activities"][0]["activity_type"] == "measurement_degraded"
 assert UserActivityParameter("reported_state", None).value is None
 
@@ -199,9 +204,39 @@ for contract in m31b_contracts:
     assert module_path.is_relative_to(package_path.parent)
 notification_planner = NotificationPlanner(NotificationPolicy())
 notification_payload = notification_state_to_dict(notification_planner.state())
-assert notification_payload["schema_version"] == 1
+assert notification_payload["schema_version"] == 2
 assert notification_payload["enabled"] is False
 assert notification_level_for_event(OperationalEventCode.RUNTIME_FATAL) is NotificationLevel.CRITICAL
+assert set(ACTIVITY_NOTIFICATION_RULES) == set(UserActivityType)
+assert notification_rule_for_activity(UserActivityType.MEASUREMENT_DEGRADED) is not None
+activity_notification_planner = NotificationPlanner(
+    NotificationPolicy(
+        enabled=True,
+        recipients=(
+            NotificationRecipient(
+                "clean_install",
+                "test",
+                "redacted-target",
+                minimum_level=NotificationLevel.DEBUG,
+            ),
+        ),
+    )
+)
+activity_intent = activity_notification_planner.plan(activity_composer.snapshot().activities[0]).intents[0]
+assert activity_intent.source_activity_id == activity_payload["activities"][0]["activity_id"]
+assert activity_intent.activity_type is UserActivityType.MEASUREMENT_DEGRADED
+assert activity_intent.correlation_id == activity_payload["activities"][0]["correlation_id"]
+assert activity_intent.zone_ids == ()
+assert activity_intent.source_ids == ()
+assert {parameter.key: parameter.value for parameter in activity_intent.parameters}["status"] == "open"
+activity_delivery_result = NotificationDeliveryResult(
+    datetime(2026, 1, 1, tzinfo=UTC),
+    NotificationDeliveryStatus.DELIVERED,
+    activity_intent.source_activity_id,
+    activity_intent.recipient_id,
+    activity_intent.notification_id,
+)
+assert activity_delivery_result.source_activity_id == activity_intent.source_activity_id
 
 observed_at = datetime(2026, 1, 1, tzinfo=UTC)
 capabilities = SourceCapabilities(

@@ -6,14 +6,15 @@ The ordinary development environment deliberately has no Home Assistant
 dependency. Use these separate suites:
 
 ```text
-# A. Core and all dependency-free repository tests
-python -m pytest --ignore=tests/integrations/home_assistant/framework
+# A. Repository Core 0.10.0 and release-contract tests
+python -m pytest tests/domain tests/application tests/infrastructure \
+  tests/architecture tests/packaging
 
-# B. Dependency-free Home Assistant adapter tests only
+# B. Released Home Assistant adapter tests with public Core 0.8.0
 python -m pytest tests/integrations/home_assistant \
   --ignore=tests/integrations/home_assistant/framework
 
-# C. Real Home Assistant framework tests with local core (from .venv-ha)
+# C. Real Home Assistant framework tests with public Core 0.8.0
 python -m pytest tests/integrations/home_assistant/framework
 ```
 
@@ -31,35 +32,23 @@ python3.14 -m venv .venv-ha
 ./.venv-ha/bin/python -m pip install --upgrade pip
 ./.venv-ha/bin/python -m pip install --require-hashes \
   -r requirements/ha-test.txt
-./.venv-ha/bin/python -m pip install --no-deps -e .
-./.venv-ha/bin/python -m pytest \
-  tests/integrations/home_assistant/framework
-```
-
-The editable install is intentional for the local-source composition: the
-custom component imports the reusable `controlel` package from this checkout.
-The local project must be installed separately and must not be added to the
-generated lock.
-
-For public dependency validation, create a separate environment and never
-install the checkout as a distribution:
-
-```bash
-python3.14 -m venv .venv-ha-public
-./.venv-ha-public/bin/python -m pip install --require-hashes \
-  -r requirements/ha-test.txt
-./.venv-ha-public/bin/python -m pip install \
+./.venv-ha/bin/python -m pip install \
   --no-cache-dir \
   --index-url https://pypi.org/simple \
   controlel==0.8.0
 CONTROLEL_FRAMEWORK_COMPOSITION=public \
-  ./.venv-ha-public/bin/python -m pytest \
+  ./.venv-ha/bin/python -m pytest \
   tests/integrations/home_assistant/framework
 ```
 
 This environment loads `custom_components/controlel` from the checkout through
 the normal Home Assistant custom-component test mechanism, but imports the core
 from `site-packages`. It must not add `src` to `PYTHONPATH`.
+
+Integration `0.10.1` declares Core `0.8.0`; it is intentionally not a required
+compatibility target for repository Core `0.10.0`. The former editable-Core HA
+composition is postponed until HA `0.11.0` performs the explicit activity-driven
+notification migration. Core `0.10.0` remains covered by suite A.
 
 Home Assistant 2026.7.3 imports POSIX-only `fcntl` and `resource` modules in
 its pytest bootstrap, so the standard framework command does not run in native
@@ -74,7 +63,7 @@ py -3.14 -m venv .venv-ha
 .\.venv-ha\Scripts\python.exe -m pip install `
     --require-hashes `
     -r requirements\ha-test.txt
-.\.venv-ha\Scripts\python.exe -m pip install --no-deps -e .
+.\.venv-ha\Scripts\python.exe -m pip install controlel==0.8.0
 ```
 
 Do not use globally installed pytest or packaging tools.

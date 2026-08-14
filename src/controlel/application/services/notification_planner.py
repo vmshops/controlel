@@ -1,4 +1,4 @@
-"""Bounded notification intent planning, de-duplication, and rate control."""
+"""Bounded activity-driven notification planning and rate control."""
 
 from collections import defaultdict, deque
 from dataclasses import dataclass
@@ -6,7 +6,7 @@ from datetime import datetime
 from threading import Lock
 from typing import Any
 
-from controlel.application.services.notification_policy import notification_level_for_event
+from controlel.application.services.notification_policy import notification_rule_for_activity
 from controlel.application.state.notification_state import (
     NotificationHistoryRecord,
     NotificationRecipientSummary,
@@ -21,58 +21,9 @@ from controlel.domain.notifications import (
     NotificationParameter,
     NotificationPolicy,
 )
-from controlel.domain.operational_events import OperationalEvent, OperationalEventCode
+from controlel.domain.user_activities import UserActivity
 
 _RANK = {level: rank for rank, level in enumerate(reversed(tuple(NotificationLevel)))}
-
-ONCE_PER_CORRELATED_LIFECYCLE_CODES = frozenset(
-    {
-        OperationalEventCode.RUNTIME_FATAL,
-        OperationalEventCode.RUNTIME_RECOVERED,
-        OperationalEventCode.HEAT_DEMAND_STARTED,
-        OperationalEventCode.HEAT_DEMAND_CONFIRMED,
-        OperationalEventCode.HEAT_DEMAND_CANCELLED,
-        OperationalEventCode.HEAT_DEMAND_SATISFIED,
-        OperationalEventCode.SAFETY_GRACE_STARTED,
-        OperationalEventCode.SAFETY_GRACE_EXPIRED,
-        OperationalEventCode.SOURCE_DRIFT_DETECTED,
-        OperationalEventCode.SOURCE_RECONCILIATION_COMPLETED,
-        OperationalEventCode.FAILSAFE_ENTERED,
-        OperationalEventCode.FAILSAFE_EXITED,
-        OperationalEventCode.RESTART_BUDGET_EXHAUSTED,
-    }
-)
-PER_OCCURRENCE_CODES = frozenset(
-    {
-        OperationalEventCode.RUNTIME_STARTED,
-        OperationalEventCode.RUNTIME_STOPPED,
-        OperationalEventCode.MEASUREMENT_BECAME_VALID,
-        OperationalEventCode.MEASUREMENT_BECAME_STALE,
-        OperationalEventCode.MEASUREMENT_BECAME_UNAVAILABLE,
-        OperationalEventCode.MEASUREMENT_RECOVERED,
-        OperationalEventCode.SAFETY_DISABLE_REQUESTED,
-        OperationalEventCode.EMERGENCY_DISABLE_REQUESTED,
-        OperationalEventCode.SOURCE_ENABLE_REQUESTED,
-        OperationalEventCode.SOURCE_DISABLE_REQUESTED,
-        OperationalEventCode.SOURCE_COMMAND_DISPATCHED,
-        OperationalEventCode.SOURCE_COMMAND_FAILED,
-        OperationalEventCode.SOURCE_COMMAND_DEFERRED_MINIMUM_ON,
-        OperationalEventCode.SOURCE_COMMAND_DEFERRED_MINIMUM_OFF,
-        OperationalEventCode.REPORTED_SOURCE_STATE_CHANGED,
-        OperationalEventCode.SOURCE_RECONCILIATION_STARTED,
-        OperationalEventCode.CORRECTIVE_ACTION_HELD,
-        OperationalEventCode.CORRECTIVE_ACTION_DISPATCHED,
-        OperationalEventCode.RESTART_ATTEMPT_STARTED,
-        OperationalEventCode.RESTART_ATTEMPT_FAILED,
-        OperationalEventCode.COMMAND_AUTHORITY_CHANGED,
-    }
-)
-
-if (
-    ONCE_PER_CORRELATED_LIFECYCLE_CODES & PER_OCCURRENCE_CODES
-    or ONCE_PER_CORRELATED_LIFECYCLE_CODES | PER_OCCURRENCE_CODES != set(OperationalEventCode)
-):
-    raise RuntimeError("every OperationalEventCode must have an explicit notification deduplication family")
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,7 +35,7 @@ class NotificationPlan:
 
 
 class NotificationPlanner:
-    """Plan bounded notifications without participating in control execution."""
+    """Plan bounded notifications from human-meaningful activities only."""
 
     def __init__(self, policy: NotificationPolicy) -> None:
         self.policy = policy
@@ -100,14 +51,17 @@ class NotificationPlanner:
         self._latest_delivery: NotificationDeliveryResult | None = None
         self._lock = Lock()
 
-    def plan(self, event: OperationalEvent) -> NotificationPlan:
-        """Evaluate one immutable event and return transport-neutral work."""
+    def plan(self, activity: UserActivity) -> NotificationPlan:
+        """Evaluate one immutable activity revision."""
 
         with self._lock:
-            return self._plan_locked(event)
+            return self._plan_locked(activity)
 
-    def _plan_locked(self, event: OperationalEvent) -> NotificationPlan:
-        level = notification_level_for_event(event.event_code)
+    def _plan_locked(self, activity: UserActivity) -> NotificationPlan:
+        rule = notification_rule_for_activity(activity.activity_type)
+        level = NotificationLevel(activity.level.value)
+        if activity.status not in rule.notifiable_statuses:
+            return NotificationPlan((), (self._outcome(activity, NotificationDeliveryStatus.SUPPRESSED_POLICY),))
         enabled = tuple(recipient for recipient in self.policy.recipients if recipient.enabled)
         if not self.policy.enabled or not enabled:
             status = (
@@ -115,52 +69,55 @@ class NotificationPlanner:
                 if not self.policy.enabled
                 else NotificationDeliveryStatus.NO_RECIPIENT
             )
-            return NotificationPlan((), (self._outcome(event, status),))
+            return NotificationPlan((), (self._outcome(activity, status),))
 
         intents: list[NotificationIntent] = []
         outcomes: list[NotificationDeliveryResult] = []
         for recipient in enabled:
             if _RANK[level] < _RANK[recipient.minimum_level] or (
-                recipient.categories and event.category not in recipient.categories
+                recipient.categories and rule.category not in recipient.categories
             ):
                 outcomes.append(
-                    self._outcome(event, NotificationDeliveryStatus.SUPPRESSED_POLICY, recipient.recipient_id)
+                    self._outcome(activity, NotificationDeliveryStatus.SUPPRESSED_POLICY, recipient.recipient_id)
                 )
                 continue
-            semantic_key = _deduplication_key(recipient.recipient_id, event)
+            semantic_key = _deduplication_key(recipient.recipient_id, activity)
             if semantic_key in self._seen_set:
                 outcomes.append(
-                    self._outcome(event, NotificationDeliveryStatus.SUPPRESSED_DUPLICATE, recipient.recipient_id)
+                    self._outcome(activity, NotificationDeliveryStatus.SUPPRESSED_DUPLICATE, recipient.recipient_id)
                 )
                 continue
-            if self._rate_limited(recipient.recipient_id, event, level, event.timestamp):
-                outcomes.append(self._outcome(event, NotificationDeliveryStatus.RATE_LIMITED, recipient.recipient_id))
+            if self._rate_limited(recipient.recipient_id, rule.category.value, level, activity.updated_at):
+                outcomes.append(
+                    self._outcome(activity, NotificationDeliveryStatus.RATE_LIMITED, recipient.recipient_id)
+                )
                 continue
             self._remember(semantic_key)
             self._sequence += 1
-            parameter_values = {
-                "event_code": event.event_code.value,
-                "reason_code": event.reason_code,
-                "previous_state": event.previous_state,
-                "new_state": event.new_state,
-                "requested_command": event.requested_command,
-                "command_outcome": event.command_outcome,
+            values = {
+                "activity_type": activity.activity_type.value,
+                "status": activity.status.value,
+                "requested_action": activity.requested_action,
+                "command_outcome": activity.command_outcome,
+                "reported_state": activity.reported_state,
+                "reason_code": activity.reason_code,
+                "completion_outcome": activity.completion_outcome,
             }
-            parameter_values.update({f"event_detail_{detail.key}": detail.value for detail in event.details})
-            parameters = tuple(NotificationParameter(key, value) for key, value in sorted(parameter_values.items()))
+            values.update({f"activity_parameter_{item.key}": item.value for item in activity.parameters})
             intent = NotificationIntent(
                 notification_id=f"notification:{self._sequence:08d}",
-                created_at=event.timestamp,
+                created_at=activity.updated_at,
                 level=level,
-                category=event.category,
-                title_code=f"notification_title_{event.event_code.value}",
-                message_code=f"notification_message_{event.event_code.value}",
-                source_event_id=event.event_id,
+                category=rule.category,
+                title_code=f"notification_title_{activity.activity_type.value}",
+                message_code=f"notification_message_{activity.activity_type.value}",
+                source_activity_id=activity.activity_id,
+                activity_type=activity.activity_type,
                 recipient_id=recipient.recipient_id,
-                correlation_id=event.correlation_id,
-                zone_id=event.zone_id,
-                source_id=event.source_id,
-                parameters=parameters,
+                correlation_id=activity.correlation_id,
+                zone_ids=activity.zone_ids,
+                source_ids=activity.source_ids,
+                parameters=tuple(NotificationParameter(key, value) for key, value in sorted(values.items())),
             )
             intents.append(intent)
             self._history.append(intent)
@@ -179,12 +136,7 @@ class NotificationPlanner:
         """Record a normalized adapter outcome without raising into control."""
 
         result = NotificationDeliveryResult(
-            occurred_at=occurred_at,
-            status=status,
-            source_event_id=intent.source_event_id,
-            recipient_id=intent.recipient_id,
-            notification_id=intent.notification_id,
-            failure_code=failure_code,
+            occurred_at, status, intent.source_activity_id, intent.recipient_id, intent.notification_id, failure_code
         )
         with self._lock:
             self._record(result)
@@ -192,23 +144,22 @@ class NotificationPlanner:
         return result
 
     def state(self) -> NotificationState:
-        """Return an immutable bounded read model for UI and diagnostics."""
+        """Return an immutable bounded read model."""
 
         with self._lock:
-            history = tuple(_history_record(item) for item in self._history)
             return NotificationState(
-                schema_version=1,
+                schema_version=2,
                 enabled=self.policy.enabled,
                 recipients=tuple(
                     NotificationRecipientSummary(
-                        recipient.recipient_id,
-                        recipient.transport,
-                        bool(recipient.target),
-                        recipient.enabled,
-                        recipient.minimum_level,
-                        tuple(category.value for category in recipient.categories),
+                        r.recipient_id,
+                        r.transport,
+                        bool(r.target),
+                        r.enabled,
+                        r.minimum_level,
+                        tuple(c.value for c in r.categories),
                     )
-                    for recipient in self.policy.recipients
+                    for r in self.policy.recipients
                 ),
                 source_total_observed=0,
                 source_last_processed_sequence=0,
@@ -217,24 +168,17 @@ class NotificationPlanner:
                 total_intents_produced=self._total_intents,
                 counters=tuple(sorted(self._counters.items())),
                 latest_intent_timestamp=self._latest_intent_at,
-                latest_delivery_result=(
-                    _history_record(self._latest_delivery) if self._latest_delivery is not None else None
-                ),
-                recent_history=history,
+                latest_delivery_result=_history_record(self._latest_delivery) if self._latest_delivery else None,
+                recent_history=tuple(_history_record(item) for item in self._history),
             )
 
     def diagnostics(self) -> dict[str, Any]:
-        """Return bounded JSON-safe state with transport targets redacted."""
-
         return notification_state_to_dict(self.state())
 
     def _outcome(
-        self,
-        event: OperationalEvent,
-        status: NotificationDeliveryStatus,
-        recipient_id: str | None = None,
+        self, activity: UserActivity, status: NotificationDeliveryStatus, recipient_id: str | None = None
     ) -> NotificationDeliveryResult:
-        result = NotificationDeliveryResult(event.timestamp, status, event.event_id, recipient_id)
+        result = NotificationDeliveryResult(activity.updated_at, status, activity.activity_id, recipient_id)
         self._record(result)
         return result
 
@@ -248,21 +192,19 @@ class NotificationPlanner:
         self._seen.append(key)
         self._seen_set.add(key)
 
-    def _rate_limited(
-        self,
-        recipient_id: str,
-        event: OperationalEvent,
-        level: NotificationLevel,
-        now: datetime,
-    ) -> bool:
+    def _rate_limited(self, recipient_id: str, category: str, level: NotificationLevel, now: datetime) -> bool:
         if level is NotificationLevel.CRITICAL:
-            bucket = self._critical_rate[recipient_id]
-            window = self.policy.critical_rate_window
-            maximum = self.policy.critical_maximum_per_window
+            bucket, window, maximum = (
+                self._critical_rate[recipient_id],
+                self.policy.critical_rate_window,
+                self.policy.critical_maximum_per_window,
+            )
         else:
-            bucket = self._rate[(recipient_id, event.category.value)]
-            window = self.policy.rate_window
-            maximum = self.policy.maximum_per_window
+            bucket, window, maximum = (
+                self._rate[(recipient_id, category)],
+                self.policy.rate_window,
+                self.policy.maximum_per_window,
+            )
         boundary = now - window
         while bucket and bucket[0] <= boundary:
             bucket.popleft()
@@ -272,33 +214,32 @@ class NotificationPlanner:
         return False
 
 
-def _deduplication_key(recipient_id: str, event: OperationalEvent) -> str:
-    if event.event_code in ONCE_PER_CORRELATED_LIFECYCLE_CODES and event.correlation_id is not None:
-        identity = event.correlation_id
-    else:
-        identity = event.event_id
-    return f"{recipient_id}|{event.event_code.value}|{identity}"
+def _deduplication_key(recipient_id: str, activity: UserActivity) -> str:
+    outcome = activity.completion_outcome or ""
+    return f"{recipient_id}|{activity.activity_id}|{activity.activity_type.value}|{activity.status.value}|{outcome}"
 
 
 def _history_record(item: NotificationIntent | NotificationDeliveryResult) -> NotificationHistoryRecord:
     if isinstance(item, NotificationIntent):
         return NotificationHistoryRecord(
-            kind="intent",
-            timestamp=item.created_at,
-            source_event_id=item.source_event_id,
-            recipient_id=item.recipient_id,
-            notification_id=item.notification_id,
-            level=item.level,
-            category=item.category.value,
-            title_code=item.title_code,
-            message_code=item.message_code,
+            "intent",
+            item.created_at,
+            item.source_activity_id,
+            item.activity_type.value,
+            item.recipient_id,
+            item.notification_id,
+            item.level,
+            item.category.value,
+            item.title_code,
+            item.message_code,
         )
     return NotificationHistoryRecord(
-        kind="result",
-        timestamp=item.occurred_at,
-        source_event_id=item.source_event_id,
-        recipient_id=item.recipient_id,
-        notification_id=item.notification_id,
+        "result",
+        item.occurred_at,
+        item.source_activity_id,
+        None,
+        item.recipient_id,
+        item.notification_id,
         status=item.status,
         failure_code=item.failure_code,
     )

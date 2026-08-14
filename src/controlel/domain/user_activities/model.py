@@ -130,7 +130,9 @@ class UserActivitySnapshot:
     schema_version: int
     capacity: int
     activities: tuple[UserActivity, ...]
+    activity_sequences: tuple[int, ...]
     total_activities_emitted: int
+    total_activity_revisions_emitted: int
     dropped_count: int
     source_total_observed: int
     source_last_processed_sequence: int
@@ -138,6 +140,18 @@ class UserActivitySnapshot:
     source_overflow_occurrences: int
     open_activity_count: int
     latest_activity_timestamp: datetime | None
+
+    def __post_init__(self) -> None:
+        if self.schema_version != 2:
+            raise ValueError("schema_version must be 2")
+        if len(self.activity_sequences) != len(self.activities):
+            raise ValueError("activity_sequences must align with activities")
+        if len(set(self.activity_sequences)) != len(self.activity_sequences):
+            raise ValueError("activity_sequences must be unique")
+        if any(
+            sequence < 1 or sequence > self.total_activity_revisions_emitted for sequence in self.activity_sequences
+        ):
+            raise ValueError("activity_sequences must identify emitted revisions")
 
 
 def user_activity_id(activity_type: UserActivityType, correlation_id: str, *, discriminator: str | None = None) -> str:

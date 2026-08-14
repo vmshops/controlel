@@ -36,10 +36,23 @@ def test_core_and_integration_versions_are_intentionally_independent():
     with (ROOT / "pyproject.toml").open("rb") as pyproject_file:
         core_version = tomllib.load(pyproject_file)["project"]["version"]
 
-    assert core_version == "0.9.0"
+    assert core_version == "0.10.0"
     assert manifest["version"] == INTEGRATION_VERSION == "0.10.1"
     assert manifest["requirements"] == ["controlel==0.8.0"]
     assert manifest["version"] != manifest["requirements"][0].partition("==")[2]
+
+
+def test_released_ha_tests_use_declared_public_core_not_repository_candidate() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8")
+
+    assert "home-assistant-public:" in workflow
+    assert "home-assistant-framework-public:" in workflow
+    assert "home-assistant-framework-local:" not in workflow
+    assert "CONTROLEL_FRAMEWORK_COMPOSITION: local" not in workflow
+    assert workflow.count("controlel==0.8.0") == 2
+    assert "tests/integrations/home_assistant \\" in workflow
+    assert "--ignore=tests/integrations/home_assistant/framework" in workflow
+    assert workflow.count("--asyncio-mode=auto") == 1
 
 
 def test_manifest_requirement_is_one_exact_public_distribution_pin():

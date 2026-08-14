@@ -1,10 +1,30 @@
 # Release guide
 
-## Milestone 31B.1 core 0.9.0 release boundary
+## Milestone 31B.2 core 0.10.0 release boundary
 
-Core `0.9.0` is the unpublished M31B.1 UserActivity Foundation release
-candidate. Public Core `0.8.0` remains immutable and current until the complete
-tag-bound provenance workflow finishes and `0.9.0` is published. Home Assistant
+Core `0.9.0` is published and immutable. M31B.2 changes the canonical Core
+notification pipeline to `OperationalEventStream -> UserActivityComposer ->
+UserActivityStream -> NotificationPlanner -> NotificationProcessor ->
+NotificationDeliveryPort`. Core `0.10.0` is the current unpublished release
+candidate. Home Assistant `0.10.1` remains on Core `0.8.0`; a future HA `0.11.0`
+migration to Core `0.10.0` and UserActivity-driven notifications is not part of
+this change and is not yet implemented.
+
+The public semantic boundary remains explicit: `OperationalEvent` is
+fine-grained technical evidence, `UserActivity` is a human-meaningful
+occurrence, Notification is a selected `UserActivity` consumer, and Decision
+Trace is internal decision/debug evidence. The release binds planner and
+processor inputs to activity snapshots, explicit policy for every activity
+type, activity-level recipient filtering, activity provenance and lifecycle
+de-duplication, revision-safe cursor/overflow accounting, bounded history,
+ordinary rate limiting, the independent CRITICAL ceiling, and the generic
+delivery port. It has no raw-event notification production path, HA dependency,
+polling, retry loop, persistence, or control behavior change.
+
+## Milestone 31B.1 core 0.9.0 release boundary (historical)
+
+Core `0.9.0` is the published immutable M31B.1 UserActivity Foundation release.
+Home Assistant
 integration `0.10.1` remains unchanged and pins exactly public
 `controlel==0.8.0`; migration to UserActivity belongs to a later, separate
 integration `0.11.0` change.
@@ -187,17 +207,13 @@ Controlel uses distinct release states:
 ## Distribution identity and version
 
 The distribution name and Python import package are both `controlel`. Versions
-`0.1.0`, `0.2.0`, `0.3.0`, `0.4.0`, `0.5.0`, `0.6.0`, `0.7.0`, and `0.8.0` are publicly available on PyPI and immutable.
+`0.1.0`, `0.2.0`, `0.3.0`, `0.4.0`, `0.5.0`, `0.6.0`, `0.7.0`, `0.8.0`, and `0.9.0` are publicly available on PyPI and immutable.
 PyPI versions are immutable; corrections always require a higher version.
 
-The current public core release is immutable `0.8.0`. Public-integration
-composition checks and the Home Assistant manifest use exactly
-`controlel==0.8.0`.
-
-The repository project version is the unpublished Core `0.9.0` release
-candidate. It must not replace the public-core verifier or Home Assistant pin
-until the immutable `0.9.0` release has been independently published and
-verified.
+The current public core release is immutable `0.9.0`. Public-integration
+composition checks and the Home Assistant manifest intentionally remain on
+`controlel==0.8.0` until the separate future HA `0.11.0` boundary. Core `0.10.0`
+is the current unpublished M31B.2 release candidate.
 
 The first core release is `0.1.0`. The single authoritative release
 version is the static `project.version` in `pyproject.toml`. Runtime access uses
@@ -521,11 +537,14 @@ must not upload rebuilt artifacts for an already published version.
 
 ## Home Assistant dependency contract
 
-Integration `0.10.1` pins exactly `controlel==0.8.0`. CI keeps local editable
-compatibility and public-package framework jobs isolated. The public job never
-installs the repository as a distribution and proves the core resolves from
-`site-packages`. Normal supported integration installation can obtain the core
-automatically.
+Integration `0.10.1` pins exactly `controlel==0.8.0`. Its adapter and framework
+jobs install and verify that exact public package and never install the
+repository as a distribution. Repository Core `0.10.0` is validated separately
+by domain, application, infrastructure, architecture, packaging, and API tests.
+The intentionally unsupported Core `0.10.0` plus HA `0.10.1` composition is not
+a required gate; it returns only when HA `0.11.0` performs the explicit
+UserActivity notification migration. Normal supported integration installation
+can obtain the declared core automatically.
 
 ## Home Assistant integration release contract
 

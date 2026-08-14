@@ -1,6 +1,9 @@
 """Tests for bounded immutable user-activity retention."""
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+
+import pytest
 
 from controlel.application.services.user_activity_stream import (
     UserActivityStream,
@@ -48,9 +51,18 @@ def test_stream_is_bounded_and_updates_one_activity_without_duplicate_history() 
 
     assert [activity.activity_id for activity in snapshot.activities] == ["activity:2", "activity:3"]
     assert snapshot.total_activities_emitted == 3
+    assert snapshot.total_activity_revisions_emitted == 4
+    assert snapshot.activity_sequences == (3, 4)
     assert snapshot.dropped_count == 1
     assert payload["retained_count"] == 2
     assert payload["activities"][0]["reported_state"] is None
+
+
+def test_snapshot_rejects_misaligned_revision_metadata() -> None:
+    snapshot = UserActivityStream().snapshot()
+
+    with pytest.raises(ValueError, match="align"):
+        replace(snapshot, activity_sequences=(1,))
 
 
 def test_stream_discards_all_revisions_for_lost_lifecycle() -> None:

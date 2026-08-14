@@ -108,18 +108,22 @@ reported enabled state never claims burner or heat output.
 
 ## M31B smart-notification foundation
 
-M31B consumes the immutable `OperationalEventStream` read boundary. It does not
-create another event vocabulary or derive notification meaning from host state.
-The application flow is strictly one way:
+M31B.2 makes `UserActivity` the sole production notification input. Technical
+events are first composed into bounded human-meaningful activity revisions; the
+application flow is strictly one way:
 
 ```text
-OperationalEventStream -> NotificationProcessor -> NotificationPolicy
-                       -> NotificationIntent -> NotificationDeliveryPort
+OperationalEventStream -> UserActivityComposer -> UserActivityStream
+                       -> NotificationPlanner -> NotificationProcessor
+                       -> NotificationDeliveryPort
 ```
 
-Event severity remains factual evidence. Notification level is a separate user
-preference with `critical`, `operational`, `detailed`, and `debug` levels. The
-initial explicit mapping is:
+Event severity remains factual evidence. `UserActivityLevel` is the primary
+attention classification, with `critical`, `operational`, `detailed`, and
+`debug` levels. Every activity type has an explicit category and notifiable
+lifecycle-stage rule. Fine-grained technical noise that does not compose into
+an activity cannot produce a notification. The legacy event-level mapping is
+retained only as a compatibility API and is not a production planner input:
 
 | Notification level | Operational event codes |
 | --- | --- |
@@ -128,25 +132,26 @@ initial explicit mapping is:
 | Detailed | `runtime_started`, `runtime_stopped`, `heat_demand_started`, `heat_demand_confirmed`, `heat_demand_cancelled`, `heat_demand_satisfied`, `safety_grace_started`, `source_enable_requested`, `source_disable_requested`, `source_command_dispatched`, `source_command_deferred_minimum_on`, `source_command_deferred_minimum_off`, `reported_source_state_changed`, `source_drift_detected`, `source_reconciliation_started`, `source_reconciliation_completed`, `corrective_action_held`, `restart_attempt_started`, `command_authority_changed` |
 | Debug | `measurement_became_valid` |
 
-The mapping is exhaustive at import and in tests. Policy produces
+Activity policy is exhaustive at import and in tests. Policy produces
 localization-neutral codes and allowlisted scalar parameters, never arbitrary
 exception text or a claim about unobserved physical state.
 
 Recipients have a stable logical ID, generic transport name and target,
 enabled flag, minimum level, and optional category filter. Core does not
-understand host-specific delivery schemas. Once-per-correlated-lifecycle codes
-use recipient, event code, and correlation ID when correlation exists, falling
-back to source event ID. Per-occurrence codes always use recipient and source
-event ID. Ordinary intents use a per-recipient/per-category sliding window
+understand host-specific delivery schemas. Intent provenance identifies the
+source activity, activity type, correlation, zones, sources, lifecycle stage,
+and only allowlisted scalar evidence. De-duplication uses recipient, activity
+identity, and material lifecycle stage/outcome. Ordinary intents use a
+per-recipient/per-category sliding window
 (default 10 per 60 seconds). CRITICAL intents use an independent emergency
 anti-storm ceiling (default 20 per 60 seconds per recipient).
 
-`NotificationProcessor` owns the source sequence cursor. When its cursor falls
-behind the first retained event, it records the exact missing sequence gap and
-an overflow occurrence, then resumes at the first retained event without
-fabricating intents for lost evidence. Cursor progress is incremental per
-processed event; normalized transport failure counts as processed, while an
-unexpected processor failure does not advance beyond the failed event.
+`NotificationProcessor` owns the activity-revision cursor. `UserActivityStream`
+keeps unique-activity retention counters separate from its monotonic revision
+sequence, so `OPEN` to terminal changes are observable without duplicating
+history. Missing revision gaps and overflow occurrences are exact; policy
+suppression and normalized delivery failure advance the cursor, while an
+unexpected processing failure does not advance beyond the failed revision.
 
 Notification history has its own bounded in-memory capacity (default 100) and
 does not alter operational-event retention. Notification processing is
@@ -205,11 +210,10 @@ operation. A reconciliation is completed as `SOURCE_STATE_CORRECTED` only after
 explicit reported agreement, not merely after corrective command dispatch.
 
 The foundation has no scheduler, polling, persistence, host dependency, command
-port, or feedback into regulation. Released M31B notification processing still
-consumes `OperationalEvent` directly; switching notifications and adding a future
-Activity UI are deferred until a later HA release consumes the public activity
-API. Reload/restart begins new in-memory lifecycle state and never fabricates
-continuity.
+port, or feedback into regulation. M31B.2 switches only the Core notification
+consumer to this public activity boundary. A future Home Assistant `0.11.0`
+adapter update is separate and is not implemented here. Reload/restart begins
+new in-memory lifecycle state and never fabricates continuity.
 
 Performance and anomaly assessment remain outside M31B.1. Insufficient
 temperature rise, falling temperature, time-to-target, actuator response, water
