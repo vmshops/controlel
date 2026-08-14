@@ -1,6 +1,5 @@
 import json
 import os
-import tomllib
 from collections.abc import Iterator
 from pathlib import Path
 from shutil import copytree
@@ -32,10 +31,7 @@ MANIFEST_REQUIREMENT = json.loads(
     (ROOT / "custom_components" / "controlel" / "manifest.json").read_text(encoding="utf-8")
 )["requirements"][0]
 MANIFEST_CORE_VERSION = MANIFEST_REQUIREMENT.removeprefix("controlel==")
-with (ROOT / "pyproject.toml").open("rb") as pyproject_file:
-    REPOSITORY_CORE_VERSION = tomllib.load(pyproject_file)["project"]["version"]
 FRAMEWORK_CORE_VERSION_BY_COMPOSITION = {
-    "local": REPOSITORY_CORE_VERSION,
     "public": MANIFEST_CORE_VERSION,
 }
 
@@ -48,7 +44,7 @@ def pytest_configure(config: pytest.Config) -> None:
 @pytest.fixture(scope="session")
 def framework_composition() -> str:
     """Return the explicitly selected framework package composition."""
-    composition = os.environ.get(FRAMEWORK_COMPOSITION_ENV, "local")
+    composition = os.environ.get(FRAMEWORK_COMPOSITION_ENV)
     if composition not in FRAMEWORK_CORE_VERSION_BY_COMPOSITION:
         pytest.fail(
             f"{FRAMEWORK_COMPOSITION_ENV} must be one of "

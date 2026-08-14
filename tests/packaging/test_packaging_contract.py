@@ -216,15 +216,22 @@ def test_packaging_ci_builds_and_validates_without_publishing() -> None:
     assert "token" not in workflow.casefold()
 
 
-def test_framework_ci_separates_local_source_and_public_core_compositions() -> None:
+def test_ci_separates_repository_core_from_released_ha_public_core_compositions() -> None:
     workflow = (ROOT / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8")
 
-    assert "home-assistant-framework-local:" in workflow
-    assert "CONTROLEL_FRAMEWORK_COMPOSITION: local" in workflow
+    assert "tests/domain" in workflow
+    assert "tests/application" in workflow
+    assert "tests/infrastructure" in workflow
+    assert "tests/architecture" in workflow
+    assert "tests/packaging" in workflow
+    assert "python -m pytest --ignore=tests/integrations/home_assistant/framework" not in workflow
+    assert "home-assistant-public:" in workflow
     assert "home-assistant-framework-public:" in workflow
+    assert "home-assistant-framework-local:" not in workflow
+    assert "CONTROLEL_FRAMEWORK_COMPOSITION: local" not in workflow
     assert "CONTROLEL_FRAMEWORK_COMPOSITION: public" in workflow
-    assert "controlel==0.8.0" in workflow
-    assert "python scripts/ci/verify_public_core.py" in workflow
+    assert workflow.count("controlel==0.8.0") == 2
+    assert workflow.count("python scripts/ci/verify_public_core.py") == 2
     assert "candidate-core-wheel" not in workflow
 
 

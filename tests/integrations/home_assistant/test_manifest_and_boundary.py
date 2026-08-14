@@ -42,6 +42,18 @@ def test_core_and_integration_versions_are_intentionally_independent():
     assert manifest["version"] != manifest["requirements"][0].partition("==")[2]
 
 
+def test_released_ha_tests_use_declared_public_core_not_repository_candidate() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8")
+
+    assert "home-assistant-public:" in workflow
+    assert "home-assistant-framework-public:" in workflow
+    assert "home-assistant-framework-local:" not in workflow
+    assert "CONTROLEL_FRAMEWORK_COMPOSITION: local" not in workflow
+    assert workflow.count("controlel==0.8.0") == 2
+    assert "tests/integrations/home_assistant \\" in workflow
+    assert "--ignore=tests/integrations/home_assistant/framework" in workflow
+
+
 def test_manifest_requirement_is_one_exact_public_distribution_pin():
     manifest = json.loads((COMPONENT / "manifest.json").read_text(encoding="utf-8"))
     requirements = manifest["requirements"]

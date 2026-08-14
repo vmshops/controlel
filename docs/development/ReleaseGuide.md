@@ -537,11 +537,14 @@ must not upload rebuilt artifacts for an already published version.
 
 ## Home Assistant dependency contract
 
-Integration `0.10.1` pins exactly `controlel==0.8.0`. CI keeps local editable
-compatibility and public-package framework jobs isolated. The public job never
-installs the repository as a distribution and proves the core resolves from
-`site-packages`. Normal supported integration installation can obtain the core
-automatically.
+Integration `0.10.1` pins exactly `controlel==0.8.0`. Its adapter and framework
+jobs install and verify that exact public package and never install the
+repository as a distribution. Repository Core `0.10.0` is validated separately
+by domain, application, infrastructure, architecture, packaging, and API tests.
+The intentionally unsupported Core `0.10.0` plus HA `0.10.1` composition is not
+a required gate; it returns only when HA `0.11.0` performs the explicit
+UserActivity notification migration. Normal supported integration installation
+can obtain the declared core automatically.
 
 ## Home Assistant integration release contract
 

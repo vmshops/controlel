@@ -41,12 +41,10 @@ def test_core_package_matches_framework_composition(
 
     assert importlib.metadata.version("controlel") == expected_framework_core_version
     assert controlel.__version__ == expected_framework_core_version
-    if framework_composition == "local":
-        assert package_path.is_relative_to(source_root)
-    else:
-        assert "site-packages" in package_path.as_posix()
-        assert not package_path.is_relative_to(source_root)
-        assert source_root not in {Path(entry or ".").resolve() for entry in sys.path}
+    assert framework_composition == "public"
+    assert "site-packages" in package_path.as_posix()
+    assert not package_path.is_relative_to(source_root)
+    assert source_root not in {Path(entry or ".").resolve() for entry in sys.path}
 
 
 def test_custom_component_does_not_vendor_core() -> None:
