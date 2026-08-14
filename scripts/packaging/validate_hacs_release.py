@@ -15,7 +15,7 @@ from pathlib import Path, PurePosixPath
 ROOT = Path(__file__).parents[2]
 DOMAIN = "controlel"
 ARCHIVE_FILENAME = "controlel.zip"
-CORE_REQUIREMENT = "controlel==0.7.0"
+CORE_REQUIREMENT = "controlel==0.8.0"
 ISSUE_TRACKER = "https://github.com/vmshops/controlel/issues"
 DOCUMENTATION_URL = "https://github.com/vmshops/controlel"
 HOME_ASSISTANT_VERSION = "2026.7.3"
@@ -38,6 +38,7 @@ EXPECTED_ARCHIVE_FILES = frozenset(
         "host.py",
         "manifest.json",
         "measurement_ingestion.py",
+        "notifications.py",
         "observability.py",
         "operational.py",
         "runtime_executor.py",

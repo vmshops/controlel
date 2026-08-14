@@ -619,6 +619,39 @@ def create_shadow_test_host(
     return host
 
 
+def test_notification_runtime_signals_use_one_coalesced_drain_task() -> None:
+    class SlowNotificationCoordinator:
+        def __init__(self) -> None:
+            self.entered = asyncio.Event()
+            self.release = asyncio.Event()
+            self.calls = 0
+
+        async def async_process_new_events(self) -> None:
+            self.calls += 1
+            self.entered.set()
+            await self.release.wait()
+
+    async def scenario() -> tuple[int, bool]:
+        host = create_shadow_test_host(FakeRuntime())
+        coordinator = SlowNotificationCoordinator()
+        host._notification_coordinator = coordinator  # type: ignore[assignment]
+        host._schedule_notification_delivery()
+        first_task = host._notification_task
+        assert first_task is not None
+        await coordinator.entered.wait()
+        for _ in range(100):
+            host._schedule_notification_delivery()
+            assert host._notification_task is first_task
+        coordinator.release.set()
+        await first_task
+        await asyncio.sleep(0)
+        return coordinator.calls, host._notification_task is None
+
+    calls, task_released = asyncio.run(scenario())
+    assert calls == 2
+    assert task_released is True
+
+
 def test_home_assistant_runtime_start_does_not_evaluate_empty_core_state(monkeypatch):
     recorded_starts = []
 

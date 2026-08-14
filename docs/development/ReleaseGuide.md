@@ -1,12 +1,11 @@
 # Release guide
 
-## Milestone 31B core 0.8.0 boundary
+## Milestone 31B core 0.8.0 and integration 0.10.0 boundaries
 
-Core `0.8.0` is the unreleased M31B Smart Notifications Foundation release
-candidate. Public core `0.7.0` remains published and immutable until the 0.8.0
-release completes. Home Assistant integration `0.9.0` remains unchanged and
-continues to pin exactly public `controlel==0.7.0`; HA transport and
-configuration work belong to a later separate integration boundary.
+Core `0.8.0` is published and immutable from annotated tag `core-v0.8.0` at
+`a8d44bb210db4727fc381acc439334cb2b49d8bb`. Home Assistant integration
+`0.10.0` is the separate M31B integration candidate and pins exactly public
+`controlel==0.8.0`.
 
 Core 0.8.0 adds immutable notification contracts, exhaustive operational-event
 attention-level mapping, `NotificationPolicy`, `NotificationPlanner`, the
@@ -19,13 +18,20 @@ notification state/history are deterministic and transport-neutral. Delivery
 is best-effort and in-memory; no persistence, polling, retry loop, host adapter,
 notification-driven control, or claim about physical state is introduced.
 
-This boundary changes core version metadata, core packaging/version contracts,
-and release documentation only. It does not create a tag, build final release
-artifacts, upload to PyPI, publish, or create a GitHub Release. Immutable 0.8.0
-artifacts must later be built from the exact reviewed release commit using the
-existing provenance workflow.
+The HA boundary adds only validated modular configuration, an event-loop notify
+transport, one coalesced drain task, unload invalidation, and bounded redacted
+diagnostics. Event mapping, deduplication, cursor/overflow accounting, and rate
+limits remain core-owned. Notifications are disabled with no recipients by
+default. There is no polling, retry loop, persistence, automatic target
+discovery, or control-path influence. The custom sidebar UI and recipient
+write/test APIs remain deferred.
 
-## Milestone 31A core 0.7.0 boundary
+The public wheel identity is `controlel-0.8.0-py3-none-any.whl`, 141,379 bytes,
+SHA-256 `b9f12d0fadf8a0a53e7bd102fc707bf2b518e776b92a2cdbee240562b4079d8f`.
+The public sdist is `controlel-0.8.0.tar.gz`, 89,285 bytes, SHA-256
+`3aa051d187ab5b5305584f67893ed8a89c82bd7061fa3a28ecc4f9136b0fa84c`.
+
+## Milestone 31A core 0.7.0 boundary (historical)
 
 Core `0.7.0` is published and immutable from annotated tag `core-v0.7.0`.
 Home Assistant integration `0.9.0` is the separate M31A integration candidate
@@ -47,7 +53,7 @@ upload, publish, or create a GitHub Release. Final artifacts must be rebuilt
 later from the exact reviewed release commit by the immutable provenance
 workflow.
 
-## Integration 0.9.0 M31A diagnostics boundary
+## Integration 0.9.0 M31A diagnostics boundary (historical)
 
 Integration `0.9.0` composes one shared core operational-event recorder across
 the normal runtime and supervisor, uses the public
@@ -140,10 +146,10 @@ Controlel uses distinct release states:
    backend under `dist/`.
 3. **Verified wheel** has passed metadata, archive-content, and clean
    out-of-checkout installation checks.
-4. **Published core package** is the verified `controlel==0.7.0` release on
+4. **Published core package** is the verified `controlel==0.8.0` release on
    PyPI.
 5. **Home Assistant exact dependency pin** is the integration contract
-   `"requirements": ["controlel==0.7.0"]`.
+   `"requirements": ["controlel==0.8.0"]`.
 6. **HACS readiness** additionally requires integration release packaging and
    HACS metadata. A verified or published core wheel alone does not provide
    HACS readiness.
@@ -151,12 +157,12 @@ Controlel uses distinct release states:
 ## Distribution identity and version
 
 The distribution name and Python import package are both `controlel`. Versions
-`0.1.0`, `0.2.0`, `0.3.0`, `0.4.0`, `0.5.0`, `0.6.0`, and `0.7.0` are publicly available on PyPI and immutable.
+`0.1.0`, `0.2.0`, `0.3.0`, `0.4.0`, `0.5.0`, `0.6.0`, `0.7.0`, and `0.8.0` are publicly available on PyPI and immutable.
 PyPI versions are immutable; corrections always require a higher version.
 
-The current public core release is immutable `0.7.0`. Public-integration
+The current public core release is immutable `0.8.0`. Public-integration
 composition checks and the Home Assistant manifest use exactly
-`controlel==0.7.0`.
+`controlel==0.8.0`.
 
 The first core release is `0.1.0`. The single authoritative release
 version is the static `project.version` in `pyproject.toml`. Runtime access uses
@@ -165,8 +171,8 @@ version is the static `project.version` in `pyproject.toml`. Runtime access uses
 `0.0.0+uninstalled`; it never pretends to be a release.
 
 The custom-component manifest version is a separate integration version. The
-current candidate is `0.9.0`; it is not a second source for the core package
-version and evolves independently. Candidate `0.9.0` is not published.
+current candidate is `0.10.0`; it is not a second source for the core package
+version and evolves independently. Candidate `0.10.0` is not published.
 
 ## Permanent tag namespaces
 
@@ -192,6 +198,19 @@ this monorepo because HACS consumes the repository-wide GitHub Release stream.
 
 The package was independently installed from public PyPI without cache, and
 its representative M31A and runtime-supervision imports resolved from isolated
+`site-packages` without editable or direct-URL metadata.
+
+## Published core 0.8.0 record
+
+- Exact release commit: `a8d44bb210db4727fc381acc439334cb2b49d8bb`.
+- Annotated tag: `core-v0.8.0`.
+- Wheel: `controlel-0.8.0-py3-none-any.whl`, 141,379 bytes, SHA-256
+  `b9f12d0fadf8a0a53e7bd102fc707bf2b518e776b92a2cdbee240562b4079d8f`.
+- Sdist: `controlel-0.8.0.tar.gz`, 89,285 bytes, SHA-256
+  `3aa051d187ab5b5305584f67893ed8a89c82bd7061fa3a28ecc4f9136b0fa84c`.
+
+The package was independently installed from public PyPI without cache. M31B,
+M31A, runtime-supervision, and failsafe imports resolved from isolated
 `site-packages` without editable or direct-URL metadata.
 
 ## Published core 0.5.0 record
@@ -467,7 +486,7 @@ must not upload rebuilt artifacts for an already published version.
 
 ## Home Assistant dependency contract
 
-Integration `0.9.0` pins exactly `controlel==0.7.0`. CI keeps local editable
+Integration `0.10.0` pins exactly `controlel==0.8.0`. CI keeps local editable
 compatibility and public-package framework jobs isolated. The public job never
 installs the repository as a distribution and proves the core resolves from
 `site-packages`. Normal supported integration installation can obtain the core
@@ -477,13 +496,13 @@ automatically.
 
 Integration releases use a separate version stream:
 
-- manifest and `INTEGRATION_VERSION`: `0.9.0`;
-- future integration tag: `v0.9.0`;
+- manifest and `INTEGRATION_VERSION`: `0.10.0`;
+- future integration tag: `v0.10.0`;
 - GitHub Release name:
-  `Controlel Home Assistant Integration v0.9.0`;
+  `Controlel Home Assistant Integration v0.10.0`;
 - HACS asset: `controlel.zip`;
 - checksum asset: `controlel.zip.sha256`;
-- exact core dependency: `controlel==0.7.0`.
+- exact core dependency: `controlel==0.8.0`.
 
 The published `v0.6.0` tag is immutable. The unpublished `v0.7.0` candidate was
 never tagged or released. Integration tags always use
@@ -505,9 +524,9 @@ Every remote step requires explicit approval:
 3. Build the archive twice and require byte-identical output.
 4. Run the independent validator and manually inspect the member list.
 5. Record the ZIP SHA-256.
-6. Create annotated tag `v0.9.0` at the reviewed commit.
+6. Create annotated tag `v0.10.0` at the reviewed commit.
 7. Create GitHub Release
-   `Controlel Home Assistant Integration v0.9.0`.
+   `Controlel Home Assistant Integration v0.10.0`.
 8. Attach `controlel.zip` and `controlel.zip.sha256`; download them again and
    verify their hashes.
 9. Install through HACS in a clean supported Home Assistant instance.

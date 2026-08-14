@@ -17,11 +17,11 @@ Protection history is not persisted. After restart or reload, Controlel reads
 the current sensor value deterministically but does not infer prior command
 history or lockout state from the switch.
 
-Controlel `0.9.0` is the current development candidate for one heating zone,
+Controlel `0.10.0` is the current development candidate for one heating zone,
 one primary temperature sensor, and one shared heat source. It requires the
-public core package `controlel==0.7.0`.
+public core package `controlel==0.8.0`.
 
-Integration `0.9.0` uses published immutable core `0.7.0`. It retains the
+Integration `0.10.0` uses published immutable core `0.8.0`. It retains the
 thread-safe entity publication and runtime-supervision host binding needed for
 M30.2 while retaining the existing configuration surface and entity identity.
 The configured simple switch is explicitly Controlel-owned because this
@@ -53,7 +53,7 @@ High-frequency remaining-time entities may be excluded from Recorder if their
 history is not useful. Passive timestamp entities are low-churn. Controlel does
 not modify Recorder configuration automatically.
 
-Candidate `0.9.0` is not published; use the latest published integration for
+Candidate `0.10.0` is not published; use the latest published integration for
 HACS custom-repository installation. Controlel is not listed in the default HACS
 store.
 
@@ -99,7 +99,7 @@ custom integration.
 
 HACS downloads the release asset into
 `config/custom_components/controlel/`. During integration setup, Home
-Assistant reads the manifest and installs `controlel==0.7.0` from PyPI.
+Assistant reads the manifest and installs `controlel==0.8.0` from PyPI.
 Manual core installation is neither required nor supported for normal use.
 
 ## Manual installation fallback
@@ -244,11 +244,27 @@ structure must provide an explicit migration.
 3. Restart Home Assistant.
 
 HACS removes the integration directory but does not uninstall Python packages
-or related Home Assistant data automatically. The `controlel==0.7.0` package
+or related Home Assistant data automatically. The `controlel==0.8.0` package
 may remain in Home Assistant's managed Python environment and must not be
 manually removed.
 
 ## Known limitations
+
+M31B configuration uses one modular `notifications` object in advanced options
+so notification policy remains separate from heating fields. It contains an
+`enabled` flag, zero or more recipients, ordinary and CRITICAL rate settings,
+and bounded `history_capacity`. Each recipient has a stable `recipient_id`,
+transport `home_assistant_notify`, a `notify.<service>` target, enabled flag,
+minimum level (`critical`, `operational`, `detailed`, or `debug`), and optional
+canonical event categories. Existing and new entries default to disabled with
+no recipients. Controlel never discovers or targets notify services
+automatically. Enabled recipients may not share the same transport and target.
+
+Notifications are best-effort and in-memory. Home Assistant uses one coalesced
+drain task with no polling or retry loop. Unload prevents new work but cannot
+revoke a service call already accepted by Home Assistant. The future dedicated
+Notifications sidebar page, recipient CRUD APIs, and test-notification APIs are
+explicitly deferred.
 
 - One config entry, one zone, one primary sensor, and one heat source.
 - No persistence across reload or restart.

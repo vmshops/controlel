@@ -40,6 +40,7 @@ from custom_components.controlel.const import (
     CONF_MAX_FUTURE_SKEW,
     CONF_MINIMUM_HEATING_OFF_TIME,
     CONF_MINIMUM_HEATING_ON_TIME,
+    CONF_NOTIFICATIONS,
     CONF_PRIMARY_MEASUREMENT_MAX_AGE,
     CONF_SENSOR_ID,
     CONF_SENSOR_NAME,
@@ -118,6 +119,192 @@ def test_legacy_031_entry_missing_protection_settings_retains_zero_behavior():
     assert config.controlled_entity_id == "switch.boiler"
     assert config.heat_delivery_mode == HEAT_DELIVERY_MODE_UNMANAGED
     assert config.heat_delivery_actuator_entity_id is None
+    assert config.notification_policy.enabled is False
+    assert config.notification_policy.recipients == ()
+
+
+def test_notification_configuration_is_modular_bounded_and_typed() -> None:
+    data = entry_data()
+    data[CONF_NOTIFICATIONS] = {
+        "enabled": True,
+        "recipients": [
+            {
+                "recipient_id": "family_phone",
+                "transport": "home_assistant_notify",
+                "target": "notify.family_phone",
+                "minimum_level": "detailed",
+                "categories": ["runtime", "supervision"],
+            }
+        ],
+        "maximum_per_window": 4,
+        "rate_window_seconds": 120,
+        "critical_maximum_per_window": 30,
+        "critical_rate_window_seconds": 180,
+        "history_capacity": 250,
+    }
+
+    policy = integration_config_from_entry_data(data).notification_policy
+
+    assert policy.enabled is True
+    assert policy.maximum_per_window == 4
+    assert policy.rate_window == timedelta(minutes=2)
+    assert policy.critical_maximum_per_window == 30
+    assert policy.critical_rate_window == timedelta(minutes=3)
+    assert policy.history_capacity == 250
+    assert policy.recipients[0].recipient_id == "family_phone"
+    assert policy.recipients[0].target == "notify.family_phone"
+    assert [category.value for category in policy.recipients[0].categories] == ["runtime", "supervision"]
+
+
+def test_notification_configuration_rejects_unknown_transport_and_non_notify_target() -> None:
+    data = entry_data()
+    recipient = {
+        "recipient_id": "phone",
+        "transport": "email",
+        "target": "notify.phone",
+    }
+    data[CONF_NOTIFICATIONS] = {"enabled": True, "recipients": [recipient]}
+    with pytest.raises(HomeAssistantConfigurationError, match="transport is invalid"):
+        integration_config_from_entry_data(data)
+    recipient["transport"] = "home_assistant_notify"
+    recipient["target"] = "switch.boiler"
+    with pytest.raises(HomeAssistantConfigurationError, match="must be a notify service"):
+        integration_config_from_entry_data(data)
+
+
+def test_notification_configuration_rejects_duplicate_enabled_target_bindings() -> None:
+    data = entry_data()
+    data[CONF_NOTIFICATIONS] = {
+        "enabled": True,
+        "recipients": [
+            {
+                "recipient_id": "phone_primary",
+                "transport": "home_assistant_notify",
+                "target": "notify.phone",
+            },
+            {
+                "recipient_id": "phone_duplicate",
+                "transport": "home_assistant_notify",
+                "target": "notify.phone",
+            },
+        ],
+    }
+
+    with pytest.raises(HomeAssistantConfigurationError, match="transport and target bindings must be unique"):
+        integration_config_from_entry_data(data)
+
+
+def test_notification_configuration_rejects_duplicate_recipient_ids_and_excess_recipients() -> None:
+    data = entry_data()
+    recipient = {
+        "recipient_id": "phone",
+        "transport": "home_assistant_notify",
+        "target": "notify.phone",
+    }
+    duplicate = dict(recipient, target="notify.tablet")
+    data[CONF_NOTIFICATIONS] = {"enabled": True, "recipients": [recipient, duplicate]}
+    with pytest.raises(HomeAssistantConfigurationError, match="recipient IDs must be unique"):
+        integration_config_from_entry_data(data)
+
+    data[CONF_NOTIFICATIONS] = {
+        "enabled": True,
+        "recipients": [
+            dict(recipient, recipient_id=f"recipient_{index}", target=f"notify.target_{index}") for index in range(17)
+        ],
+    }
+    with pytest.raises(HomeAssistantConfigurationError, match="must not exceed 16"):
+        integration_config_from_entry_data(data)
+
+
+@pytest.mark.parametrize(
+    "notifications",
+    [
+        "invalid",
+        {"enabled": "yes", "recipients": []},
+        {"enabled": True, "recipients": "notify.phone"},
+        {
+            "enabled": True,
+            "recipients": [
+                {
+                    "recipient_id": "phone",
+                    "transport": "home_assistant_notify",
+                    "target": "notify.phone",
+                    "minimum_level": "unknown",
+                }
+            ],
+        },
+        {
+            "enabled": True,
+            "recipients": [
+                {
+                    "recipient_id": "phone",
+                    "transport": "home_assistant_notify",
+                    "target": "notify.phone",
+                    "categories": ["unknown"],
+                }
+            ],
+        },
+    ],
+)
+def test_malformed_persisted_notification_configuration_fails_safely(notifications: object) -> None:
+    data = entry_data()
+    data[CONF_NOTIFICATIONS] = notifications
+
+    with pytest.raises(HomeAssistantConfigurationError):
+        integration_config_from_entry_data(data)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("maximum_per_window", 0),
+        ("maximum_per_window", 101),
+        ("rate_window_seconds", 0),
+        ("rate_window_seconds", 86_401),
+        ("critical_maximum_per_window", 0),
+        ("critical_maximum_per_window", 201),
+        ("critical_rate_window_seconds", 0),
+        ("critical_rate_window_seconds", 86_401),
+        ("history_capacity", 0),
+        ("history_capacity", 1_001),
+    ],
+)
+def test_notification_configuration_rejects_out_of_range_limits(field: str, value: object) -> None:
+    data = entry_data()
+    data[CONF_NOTIFICATIONS] = {"enabled": True, "recipients": [], field: value}
+
+    with pytest.raises(HomeAssistantConfigurationError, match="must be between"):
+        integration_config_from_entry_data(data)
+
+
+@pytest.mark.parametrize(
+    "limits",
+    [
+        {
+            "maximum_per_window": 1,
+            "rate_window_seconds": 1,
+            "critical_maximum_per_window": 1,
+            "critical_rate_window_seconds": 1,
+            "history_capacity": 1,
+        },
+        {
+            "maximum_per_window": 100,
+            "rate_window_seconds": 86_400,
+            "critical_maximum_per_window": 200,
+            "critical_rate_window_seconds": 86_400,
+            "history_capacity": 1_000,
+        },
+    ],
+)
+def test_notification_configuration_accepts_hard_limit_boundaries(limits: dict[str, int]) -> None:
+    data = entry_data()
+    data[CONF_NOTIFICATIONS] = {"enabled": True, "recipients": [], **limits}
+
+    policy = integration_config_from_entry_data(data).notification_policy
+
+    assert policy.maximum_per_window == limits["maximum_per_window"]
+    assert policy.critical_maximum_per_window == limits["critical_maximum_per_window"]
+    assert policy.history_capacity == limits["history_capacity"]
 
 
 def test_reconstructs_setpoint_assist_without_changing_config_entry_version() -> None:

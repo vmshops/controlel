@@ -95,7 +95,7 @@ jobs:
           python -m pip install \
             --no-cache-dir \
             --index-url https://pypi.org/simple \
-            controlel==0.7.0
+            controlel==0.8.0
 
       - name: Verify public core provenance
         run: python scripts/ci/verify_public_core.py

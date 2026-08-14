@@ -37,7 +37,7 @@ false. No raw sample history, arbitrary exception message, secret, or physical
 burner/heat confirmation is included. Successful command dispatch and reported
 controller state remain separate fields.
 
-Home Assistant integration `0.9.0` consumes core `0.7.0` and includes the bounded
+Home Assistant integration `0.10.0` consumes core `0.8.0` and includes the bounded
 runtime-supervision projection to downloaded diagnostics. It reports phase,
 command authority, normalized fatal cause, restart attempts/budget/deadline,
 and recovery timestamps without arbitrary exception text or physical-state
@@ -65,3 +65,22 @@ This stream is separate from `decision_trace`: it records meaningful
 transitions rather than every evaluation. It is diagnostics-only, in memory,
 and passive. Downloading or refreshing diagnostics emits no events and creates
 no timer, polling, command, Home Assistant event, or Recorder history.
+
+## M31B notification diagnostics
+
+Downloaded diagnostics include a separate `notification_policy` object with
+schema version 1, enabled state, redacted recipient summaries, bounded outcome
+counters, latest intent and delivery evidence, and at most the configured
+bounded number of recent semantic intent/result records. It also reports
+`source_total_observed`, `source_last_processed_sequence`,
+`source_events_missed`, and `source_overflow_occurrences`. Transport targets
+are never returned; diagnostics show only whether a target is configured.
+Arbitrary service exceptions, secrets, tokens, and localized prose are
+excluded.
+
+The subsystem is disabled with no recipients by default. History, cursor, and
+rate-limit state are memory-only. If retention overtakes the notification
+cursor, the exact sequence gap is counted rather than reconstructed. Delivery
+runs outside serialized control through one coalesced HA drain task. A failed
+notify service becomes a stable `failed` result and cannot alter commands,
+source authority, runtime lifecycle, event retention, or later evaluations.

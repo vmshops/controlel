@@ -34,6 +34,7 @@ from .failure_sink import HomeAssistantScheduledFailureSink, clear_entry_issues
 from .heat_source import HomeAssistantHeatSourcePort
 from .host import HomeAssistantControlelHost
 from .measurement_ingestion import HomeAssistantMeasurementMapper
+from .notifications import HomeAssistantNotificationCoordinator, HomeAssistantNotificationTransport
 from .runtime_executor import HomeAssistantRuntimeExecutor
 from .scheduler import HomeAssistantScheduler
 
@@ -229,6 +230,12 @@ async def async_setup_entry(
         )
         runtime = build_runtime(supervisor.normal_port())
         supervisor.attach_normal_runtime(runtime)
+        notification_coordinator = HomeAssistantNotificationCoordinator(
+            config.notification_policy,
+            operational_event_recorder.stream.snapshot,
+            HomeAssistantNotificationTransport(hass, config.notification_policy),
+            LOGGER,
+        )
         host = HomeAssistantControlelHost(
             hass=hass,
             runtime=runtime,
@@ -240,6 +247,7 @@ async def async_setup_entry(
             logger=LOGGER,
             runtime_supervisor=supervisor,
             scheduled_callback_cleanup=scheduler.cancel_all,
+            notification_coordinator=notification_coordinator,
         )
         failure_sink.bind_fatal_handler(host.request_fatal_shutdown)
         await host.async_initialize()
