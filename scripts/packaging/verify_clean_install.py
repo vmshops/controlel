@@ -63,6 +63,7 @@ from controlel.domain.operational_events import (
 from controlel.domain.user_activities import (
     UserActivity,
     UserActivityLevel,
+    UserActivityParameter,
     UserActivitySnapshot,
     UserActivityStatus,
     UserActivityType,
@@ -155,6 +156,7 @@ assert event_payload["events"][0]["event_code"] == "runtime_started"
 
 m31b_1_contracts = (
     UserActivity,
+    UserActivityParameter,
     UserActivityType,
     UserActivityStatus,
     UserActivityLevel,
@@ -178,6 +180,7 @@ assert activity_composer.process_available() is True
 activity_payload = user_activity_snapshot_to_dict(activity_composer.snapshot())
 assert activity_payload["schema_version"] == 1
 assert activity_payload["activities"][0]["activity_type"] == "measurement_degraded"
+assert UserActivityParameter("reported_state", None).value is None
 
 m31b_contracts = (
     NotificationDeliveryPort,
