@@ -34,6 +34,11 @@ from controlel.application.services.operational_event_stream import (
     OperationalEventStream,
     operational_event_stream_to_dict,
 )
+from controlel.application.services.user_activity_composer import UserActivityComposer
+from controlel.application.services.user_activity_stream import (
+    UserActivityStream,
+    user_activity_snapshot_to_dict,
+)
 from controlel.application.services.notification_planner import NotificationPlanner
 from controlel.application.services.notification_processor import NotificationProcessor
 from controlel.application.services.notification_policy import notification_level_for_event
@@ -54,6 +59,14 @@ from controlel.domain.operational_events import (
     OperationalEventCategory,
     OperationalEventCode,
     OperationalEventSeverity,
+)
+from controlel.domain.user_activities import (
+    UserActivity,
+    UserActivityLevel,
+    UserActivityParameter,
+    UserActivitySnapshot,
+    UserActivityStatus,
+    UserActivityType,
 )
 from controlel.domain.notifications import (
     NotificationDeliveryResult,
@@ -140,6 +153,34 @@ event_payload = operational_event_stream_to_dict(event_stream.snapshot())
 assert event_payload["schema_version"] == 1
 assert event_payload["capacity"] == 1
 assert event_payload["events"][0]["event_code"] == "runtime_started"
+
+m31b_1_contracts = (
+    UserActivity,
+    UserActivityParameter,
+    UserActivityType,
+    UserActivityStatus,
+    UserActivityLevel,
+    UserActivitySnapshot,
+    UserActivityStream,
+    UserActivityComposer,
+)
+for contract in m31b_1_contracts:
+    module_path = Path(importlib.import_module(contract.__module__).__file__).resolve()
+    assert module_path.is_relative_to(package_path.parent)
+activity_source = OperationalEventStream(capacity=2)
+activity_source.emit(
+    timestamp=datetime(2026, 1, 1, tzinfo=UTC),
+    category=OperationalEventCategory.MEASUREMENT,
+    severity=OperationalEventSeverity.WARNING,
+    event_code=OperationalEventCode.MEASUREMENT_BECAME_STALE,
+    activity_id="measurement-incident:00000001",
+)
+activity_composer = UserActivityComposer(activity_source.snapshot, activity_capacity=2)
+assert activity_composer.process_available() is True
+activity_payload = user_activity_snapshot_to_dict(activity_composer.snapshot())
+assert activity_payload["schema_version"] == 1
+assert activity_payload["activities"][0]["activity_type"] == "measurement_degraded"
+assert UserActivityParameter("reported_state", None).value is None
 
 m31b_contracts = (
     NotificationDeliveryPort,

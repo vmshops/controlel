@@ -464,6 +464,8 @@ def test_failsafe_command_request_and_dispatch_use_shared_stream(trusted_evidenc
     ]
     assert {event.requested_command for event in command_events} == {expected_action.value}
     assert len({event.correlation_id for event in command_events}) == 1
+    assert {event.activity_id for event in command_events} == {"supervision:00000002"}
+    assert command_events[0].activity_id != command_events[0].correlation_id
 
 
 def test_failsafe_command_failure_is_recorded_without_fabricating_dispatch():
@@ -484,6 +486,7 @@ def test_failsafe_command_failure_is_recorded_without_fabricating_dispatch():
     ]
     assert [event.command_outcome for event in command_events] == ["requested", "failed"]
     assert len({event.correlation_id for event in command_events}) == 1
+    assert {event.activity_id for event in command_events} == {"supervision:00000002"}
     assert "source dispatch failed" not in repr(command_events)
 
 

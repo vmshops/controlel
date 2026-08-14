@@ -1,5 +1,34 @@
 # Release guide
 
+## Milestone 31B.1 core 0.9.0 release boundary
+
+Core `0.9.0` is the unpublished M31B.1 UserActivity Foundation release
+candidate. Public Core `0.8.0` remains immutable and current until the complete
+tag-bound provenance workflow finishes and `0.9.0` is published. Home Assistant
+integration `0.10.1` remains unchanged and pins exactly public
+`controlel==0.8.0`; migration to UserActivity belongs to a later, separate
+integration `0.11.0` change.
+
+The public semantic boundary is explicit: `OperationalEvent` is fine-grained
+technical evidence, `UserActivity` is one human-meaningful occurrence,
+Notification is a future consumer of UserActivity, and Decision Trace is
+internal decision/debug evidence. Core `0.9.0` packages immutable
+`UserActivity`, parameter, type, status, level, and snapshot contracts; a
+bounded `UserActivityStream`; and the passive application-level
+`UserActivityComposer`. Deterministic activity IDs and explicit lifecycle
+correlation cover source reconciliation, measurement/safety incidents,
+building-level heating episodes, and supervision while preserving independent
+zone, command, and supervision correlations.
+
+Composition retains explicit source-event provenance, truthful requested,
+dispatch/result, reported-state, and completion evidence, exact source cursor
+and missed-event/overflow accounting, bounded activity history, and bounded
+open lifecycle state. It never groups by timestamp proximity and adds no
+persistence, polling, Home Assistant dependency, notification-consumer change,
+or control influence. Final artifacts must be rebuilt later from the exact
+reviewed release commit using the immutable pre-tag and tag-bound provenance
+workflow; this release-boundary change does not tag, upload, or publish.
+
 ## Milestone 31B core 0.8.0 and integration 0.10.1 boundaries
 
 Core `0.8.0` is published and immutable from annotated tag `core-v0.8.0` at
@@ -164,6 +193,11 @@ PyPI versions are immutable; corrections always require a higher version.
 The current public core release is immutable `0.8.0`. Public-integration
 composition checks and the Home Assistant manifest use exactly
 `controlel==0.8.0`.
+
+The repository project version is the unpublished Core `0.9.0` release
+candidate. It must not replace the public-core verifier or Home Assistant pin
+until the immutable `0.9.0` release has been independently published and
+verified.
 
 The first core release is `0.1.0`. The single authoritative release
 version is the static `project.version` in `pyproject.toml`. Runtime access uses

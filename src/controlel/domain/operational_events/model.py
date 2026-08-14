@@ -108,6 +108,7 @@ class OperationalEvent:
     zone_id: str | None = None
     source_id: str | None = None
     correlation_id: str | None = None
+    activity_id: str | None = None
     previous_state: str | None = None
     new_state: str | None = None
     requested_command: str | None = None

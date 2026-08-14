@@ -128,6 +128,19 @@ reachable notification code into localized human-readable text with safe
 allowlisted interpolation and fail-safe generic fallback. Notification selection
 and M31B transport semantics are unchanged.
 
+M31B.1 is prepared as the Core `0.9.0` release candidate independently of
+released notification behavior. It adds immutable bounded activity contracts,
+deterministic activity IDs, explicit reconciliation/measurement/building-heating
+lifecycle evidence, source-event provenance, and a passive composer with
+truthful cursor, missed-event, overflow, and bounded-open-state accounting.
+`OperationalEvent` remains technical evidence, `UserActivity` is a
+human-meaningful occurrence, Notification is a future activity consumer, and
+Decision Trace remains internal decision/debug evidence. There is no
+time-proximity grouping, HA dependency, persistence, polling, analytics,
+notification remapping, or control influence.
+After Core `0.9.0` is published, a separate HA `0.11.0` change may switch
+notifications and a future Activity page to the public activity boundary.
+
 ## Milestone 23: Home Assistant one-zone host vertical slice
 
 The first host integration proves:

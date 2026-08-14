@@ -1012,6 +1012,7 @@ class ControlRuntime:
                             action,
                             now,
                             reason_code=type(error).__name__,
+                            corrective_reconciliation=corrective,
                         )
                         self._observe_heating_episodes(tuple(confirmed_inputs), captured_at=now)
                         raise

@@ -69,7 +69,7 @@ participates in decision or command execution.
 `OperationalEvent` is the canonical immutable record of a meaningful runtime
 transition. Its stable schema contains a deterministic stream-local event ID,
 aware timestamp, category, severity, event and summary codes, optional reason,
-zone/source/correlation identity, previous/new state, requested command,
+zone/source/correlation identity, an optional independent activity-lifecycle ID, previous/new state, requested command,
 command outcome, and sorted JSON-safe scalar evidence. Arbitrary exception
 messages are forbidden; normalized reason or exception-type codes are used.
 
@@ -172,6 +172,49 @@ Event selection, policy, cursor, deduplication, and rate limiting remain unchang
 
 M31C may consume operational events for statistics. Aggregation is not part of
 M31A or M31B.
+
+## M31B.1 user-activity foundation
+
+M31B.1 introduces `UserActivity` as a separate immutable semantic layer:
+
+```text
+OperationalEvent = fine-grained technical evidence
+UserActivity      = one human-meaningful occurrence
+Notification      = a future selected UserActivity consumer
+Decision Trace    = bounded internal decision evidence
+```
+
+`UserActivityComposer` passively consumes immutable operational-event snapshots
+with its own cursor. It retains bounded in-memory lifecycle context and publishes
+the latest immutable revision of bounded activities through `UserActivityStream`.
+The snapshot reports exact source progress, missed-event gaps, overflow
+occurrences, open lifecycle count, retained/dropped activity counts, and the
+latest activity timestamp. Lost source evidence causes incomplete lifecycle
+context to be discarded; no missing activity or continuity is fabricated.
+
+Composition uses only explicit `activity_id` evidence. The operational recorder
+allocates independent lifecycle IDs for source reconciliation campaigns,
+measurement/safety incidents, and building heating episodes. Existing command
+correlation, per-zone demand correlation, and supervision campaign correlation
+retain their original meanings. Timestamp proximity is never a join rule.
+
+Requested source action, successful dispatch outcome, reported controller state,
+and physical heat remain distinct. `HEATING_STARTED` and `HEATING_STOPPED` mean
+that source-permission commands were dispatched; they do not claim burner
+operation. A reconciliation is completed as `SOURCE_STATE_CORRECTED` only after
+explicit reported agreement, not merely after corrective command dispatch.
+
+The foundation has no scheduler, polling, persistence, host dependency, command
+port, or feedback into regulation. Released M31B notification processing still
+consumes `OperationalEvent` directly; switching notifications and adding a future
+Activity UI are deferred until a later HA release consumes the public activity
+API. Reload/restart begins new in-memory lifecycle state and never fabricates
+continuity.
+
+Performance and anomaly assessment remain outside M31B.1. Insufficient
+temperature rise, falling temperature, time-to-target, actuator response, water
+temperature analysis, adaptive thresholds, and learning belong to M31C, which
+may later provide canonical assessment evidence for activity presentation.
 
 ## Observer execution ownership
 
