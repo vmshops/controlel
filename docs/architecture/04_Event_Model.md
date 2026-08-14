@@ -106,9 +106,58 @@ command, successful dispatch, reported controller state, and physical reality
 remain distinct. A dispatch event never claims source operation, and a
 reported enabled state never claims burner or heat output.
 
-M31B may consume the immutable read boundary for notification policy and M31C
-may consume it for statistics. Neither delivery nor aggregation is part of
-M31A.
+## M31B smart-notification foundation
+
+M31B consumes the immutable `OperationalEventStream` read boundary. It does not
+create another event vocabulary or derive notification meaning from host state.
+The application flow is strictly one way:
+
+```text
+OperationalEventStream -> NotificationProcessor -> NotificationPolicy
+                       -> NotificationIntent -> NotificationDeliveryPort
+```
+
+Event severity remains factual evidence. Notification level is a separate user
+preference with `critical`, `operational`, `detailed`, and `debug` levels. The
+initial explicit mapping is:
+
+| Notification level | Operational event codes |
+| --- | --- |
+| Critical | `runtime_fatal`, `safety_grace_expired`, `safety_disable_requested`, `emergency_disable_requested`, `restart_budget_exhausted` |
+| Operational | `runtime_recovered`, `measurement_became_stale`, `measurement_became_unavailable`, `measurement_recovered`, `source_command_failed`, `corrective_action_dispatched`, `failsafe_entered`, `failsafe_exited`, `restart_attempt_failed` |
+| Detailed | `runtime_started`, `runtime_stopped`, `heat_demand_started`, `heat_demand_confirmed`, `heat_demand_cancelled`, `heat_demand_satisfied`, `safety_grace_started`, `source_enable_requested`, `source_disable_requested`, `source_command_dispatched`, `source_command_deferred_minimum_on`, `source_command_deferred_minimum_off`, `reported_source_state_changed`, `source_drift_detected`, `source_reconciliation_started`, `source_reconciliation_completed`, `corrective_action_held`, `restart_attempt_started`, `command_authority_changed` |
+| Debug | `measurement_became_valid` |
+
+The mapping is exhaustive at import and in tests. Policy produces
+localization-neutral codes and allowlisted scalar parameters, never arbitrary
+exception text or a claim about unobserved physical state.
+
+Recipients have a stable logical ID, generic transport name and target,
+enabled flag, minimum level, and optional category filter. Core does not
+understand host-specific delivery schemas. Once-per-correlated-lifecycle codes
+use recipient, event code, and correlation ID when correlation exists, falling
+back to source event ID. Per-occurrence codes always use recipient and source
+event ID. Ordinary intents use a per-recipient/per-category sliding window
+(default 10 per 60 seconds). CRITICAL intents use an independent emergency
+anti-storm ceiling (default 20 per 60 seconds per recipient).
+
+`NotificationProcessor` owns the source sequence cursor. When its cursor falls
+behind the first retained event, it records the exact missing sequence gap and
+an overflow occurrence, then resumes at the first retained event without
+fabricating intents for lost evidence. Cursor progress is incremental per
+processed event; normalized transport failure counts as processed, while an
+unexpected processor failure does not advance beyond the failed event.
+
+Notification history has its own bounded in-memory capacity (default 100) and
+does not alter operational-event retention. Notification processing is
+best-effort and memory-only. Outcomes are explicit: `delivered`, `failed`,
+`suppressed_policy`, `suppressed_duplicate`, `rate_limited`, and
+`no_recipient`. There is no retry loop, timer, polling, persistence,
+notification-driven control, host adapter, or automatic recipient discovery in
+the core boundary.
+
+M31C may consume operational events for statistics. Aggregation is not part of
+M31A or M31B.
 
 ## Observer execution ownership
 

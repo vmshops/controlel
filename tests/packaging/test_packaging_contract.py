@@ -38,7 +38,7 @@ def test_project_metadata_and_runtime_dependencies_match_release_contract() -> N
     project = load_pyproject()["project"]
 
     assert project["name"] == "controlel"
-    assert project["version"] == "0.7.0"
+    assert project["version"] == "0.8.0"
     assert project["readme"] == "README.md"
     assert project["requires-python"] == ">=3.13"
     assert project["license"] == "MIT"
@@ -85,7 +85,7 @@ def test_project_version_is_the_only_release_version_source() -> None:
         path for path in (ROOT / "src" / "controlel").rglob("*.py") if "__version__" in path.read_text(encoding="utf-8")
     ]
 
-    assert project_version == "0.7.0"
+    assert project_version == "0.8.0"
     assert controlel.__version__ == project_version
     assert importlib.metadata.version("controlel") == project_version
     assert version_files == [ROOT / "src" / "controlel" / "__init__.py"]
@@ -98,7 +98,7 @@ def test_manifest_pins_published_core_and_keeps_version_independent() -> None:
     manifest = json.loads((ROOT / "custom_components" / "controlel" / "manifest.json").read_text(encoding="utf-8"))
     core_version = load_pyproject()["project"]["version"]
 
-    assert core_version == "0.7.0"
+    assert core_version == "0.8.0"
     assert manifest["requirements"] == ["controlel==0.7.0"]
     assert manifest["version"] == "0.9.0"
     assert manifest["version"] != core_version
@@ -131,6 +131,14 @@ def test_core_artifact_verification_binds_representative_public_contracts() -> N
         "OperationalEventStream",
         "OperationalEventRecorder",
         "operational_event_stream_to_dict",
+        "NotificationIntent",
+        "NotificationDeliveryPort",
+        "NotificationPolicy",
+        "NotificationRecipient",
+        "NotificationPlanner",
+        "NotificationState",
+        "notification_state_to_dict",
+        "notification_level_for_event",
     }
     assert all(contract in clean_install for contract in required_contracts)
     for module in (
@@ -146,6 +154,12 @@ def test_core_artifact_verification_binds_representative_public_contracts() -> N
         "domain/operational_events/__init__.py",
         "application/services/operational_event_stream.py",
         "application/services/operational_event_recorder.py",
+        "application/ports/notification_delivery_port.py",
+        "application/services/notification_planner.py",
+        "application/services/notification_processor.py",
+        "application/services/notification_policy.py",
+        "application/state/notification_state.py",
+        "domain/notifications/__init__.py",
     ):
         assert module in validator
 

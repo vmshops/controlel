@@ -106,9 +106,19 @@ immutable and JSON-safe, the decision trace remains separate, and no polling,
 persistence, notification delivery, statistics, or control influence is
 introduced. Existing entity keys and unique IDs remain unchanged.
 
-M31B may add notification policy and delivery as a consumer of this boundary.
-M31C may add explainable statistics/analytics. Both remain future milestones
-and must preserve the command/report/physical-reality distinctions.
+M31B now forms the unreleased core `0.8.0` release candidate as a passive
+consumer of this boundary. It defines immutable recipient, policy, intent,
+delivery-result, and bounded read-state contracts; exhaustive
+event-to-attention-level mapping; explicit once-per-lifecycle and
+per-occurrence de-duplication; an application-owned source cursor with exact
+missed-event/overflow accounting; ordinary per-recipient/category rate
+limiting; an independent CRITICAL emergency ceiling; and a generic delivery
+port. Bounded immutable state/history records normalized outcomes and truthful
+cursor/overflow evidence. It adds no polling, retries, persistence, host
+adapter/configuration, or control influence. Public core `0.7.0` remains
+current until candidate `0.8.0` is published; host integration remains a later
+independent change. M31C may add explainable statistics/analytics and must
+preserve the command/report/physical-reality distinctions.
 
 ## Milestone 23: Home Assistant one-zone host vertical slice
 
