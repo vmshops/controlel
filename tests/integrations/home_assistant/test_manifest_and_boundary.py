@@ -52,6 +52,7 @@ def test_released_ha_tests_use_declared_public_core_not_repository_candidate() -
     assert workflow.count("controlel==0.8.0") == 2
     assert "tests/integrations/home_assistant \\" in workflow
     assert "--ignore=tests/integrations/home_assistant/framework" in workflow
+    assert workflow.count("--asyncio-mode=auto") == 1
 
 
 def test_manifest_requirement_is_one_exact_public_distribution_pin():

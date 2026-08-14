@@ -232,6 +232,7 @@ def test_ci_separates_repository_core_from_released_ha_public_core_compositions(
     assert "CONTROLEL_FRAMEWORK_COMPOSITION: public" in workflow
     assert workflow.count("controlel==0.8.0") == 2
     assert workflow.count("python scripts/ci/verify_public_core.py") == 2
+    assert workflow.count("--asyncio-mode=auto") == 1
     assert "candidate-core-wheel" not in workflow
 
 

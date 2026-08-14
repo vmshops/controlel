@@ -80,6 +80,7 @@ jobs:
         run: |
           python -m pytest \
             tests/integrations/home_assistant \
+            --asyncio-mode=auto \
             --ignore=tests/integrations/home_assistant/framework
 
   home-assistant-framework-public:
