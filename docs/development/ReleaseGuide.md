@@ -1,14 +1,25 @@
 # Release guide
 
-## Milestone 31B.2 future core 0.10.0 boundary
+## Milestone 31B.2 core 0.10.0 release boundary
 
 Core `0.9.0` is published and immutable. M31B.2 changes the canonical Core
 notification pipeline to `OperationalEventStream -> UserActivityComposer ->
 UserActivityStream -> NotificationPlanner -> NotificationProcessor ->
-NotificationDeliveryPort`. The implementation retains Core version `0.9.0`;
-a separate reviewed boundary should prepare Core `0.10.0`. Home Assistant
-`0.10.1` remains on Core `0.8.0`, and a future HA `0.11.0` migration is not part
-of this change.
+NotificationDeliveryPort`. Core `0.10.0` is the current unpublished release
+candidate. Home Assistant `0.10.1` remains on Core `0.8.0`; a future HA `0.11.0`
+migration to Core `0.10.0` and UserActivity-driven notifications is not part of
+this change and is not yet implemented.
+
+The public semantic boundary remains explicit: `OperationalEvent` is
+fine-grained technical evidence, `UserActivity` is a human-meaningful
+occurrence, Notification is a selected `UserActivity` consumer, and Decision
+Trace is internal decision/debug evidence. The release binds planner and
+processor inputs to activity snapshots, explicit policy for every activity
+type, activity-level recipient filtering, activity provenance and lifecycle
+de-duplication, revision-safe cursor/overflow accounting, bounded history,
+ordinary rate limiting, the independent CRITICAL ceiling, and the generic
+delivery port. It has no raw-event notification production path, HA dependency,
+polling, retry loop, persistence, or control behavior change.
 
 ## Milestone 31B.1 core 0.9.0 release boundary (historical)
 
@@ -201,9 +212,8 @@ PyPI versions are immutable; corrections always require a higher version.
 
 The current public core release is immutable `0.9.0`. Public-integration
 composition checks and the Home Assistant manifest intentionally remain on
-`controlel==0.8.0` until the separate future HA `0.11.0` boundary. M31B.2 is
-the implementation candidate for future Core `0.10.0`; this change does not
-bump the repository project version.
+`controlel==0.8.0` until the separate future HA `0.11.0` boundary. Core `0.10.0`
+is the current unpublished M31B.2 release candidate.
 
 The first core release is `0.1.0`. The single authoritative release
 version is the static `project.version` in `pyproject.toml`. Runtime access uses

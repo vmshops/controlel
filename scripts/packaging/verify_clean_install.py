@@ -225,6 +225,18 @@ activity_notification_planner = NotificationPlanner(
 activity_intent = activity_notification_planner.plan(activity_composer.snapshot().activities[0]).intents[0]
 assert activity_intent.source_activity_id == activity_payload["activities"][0]["activity_id"]
 assert activity_intent.activity_type is UserActivityType.MEASUREMENT_DEGRADED
+assert activity_intent.correlation_id == activity_payload["activities"][0]["correlation_id"]
+assert activity_intent.zone_ids == ()
+assert activity_intent.source_ids == ()
+assert {parameter.key: parameter.value for parameter in activity_intent.parameters}["status"] == "open"
+activity_delivery_result = NotificationDeliveryResult(
+    datetime(2026, 1, 1, tzinfo=UTC),
+    NotificationDeliveryStatus.DELIVERED,
+    activity_intent.source_activity_id,
+    activity_intent.recipient_id,
+    activity_intent.notification_id,
+)
+assert activity_delivery_result.source_activity_id == activity_intent.source_activity_id
 
 observed_at = datetime(2026, 1, 1, tzinfo=UTC)
 capabilities = SourceCapabilities(

@@ -22,14 +22,13 @@ The goal is to create a reliable heating controller capable of optimizing comfor
 
 Project phase: Home Assistant one-zone host vertical slice
 
-Core package version: 0.9.0 (published immutable M31B.1 release)
+Core package version: 0.10.0 (unpublished M31B.2 release candidate)
 
 Home Assistant integration candidate version: 0.10.1
 
 Use the latest published release for HACS custom-repository installation.
-Core `0.9.0` is the published immutable M31B.1 release. M31B.2 prepares the
-activity-driven notification implementation for a future Core `0.10.0`
-boundary without changing the version in this implementation step. Integration `0.10.1` is
+Core `0.9.0` is the published immutable M31B.1 release. Core `0.10.0` is the
+unpublished M31B.2 activity-driven notification release candidate. Integration `0.10.1` is
 the presentation-only Home Assistant notification patch candidate and pins exactly
 `controlel==0.8.0`.
 Controlel is not listed in the default HACS store.
@@ -192,7 +191,7 @@ deduplication, cursor/overflow accounting, and rate limits remain core-owned.
 No polling, retry loop, persistence, automatic target discovery, custom sidebar
 UI, or control-path influence is introduced.
 
-Core `0.9.0` introduces the M31B.1 UserActivity Foundation as a separate
+Core `0.9.0` introduced the M31B.1 UserActivity Foundation as a separate
 application/domain boundary. `OperationalEvent` remains fine-grained technical
 evidence; immutable `UserActivity` records one human-meaningful occurrence;
 notifications consume this activity boundary in M31B.2; and the decision trace remains
@@ -202,12 +201,15 @@ supervision without timestamp-proximity grouping. A passive
 `UserActivityComposer` owns an exact source cursor, missed-event/overflow
 accounting, bounded open lifecycle state, and a bounded in-memory activity
 stream with explicit source-event provenance and truthful completion semantics.
-M31B.2 uses the canonical one-way pipeline from operational events through the
-composer and activity stream into notification planning and delivery. Activity
-level drives attention policy; intent provenance and de-duplication bind to the
-activity and material lifecycle stage. It adds no persistence, polling, Home
-Assistant dependency, or control influence. Integration `0.10.1` still consumes
-public Core `0.8.0`; a later integration `0.11.0` update is not implemented.
+Core `0.10.0` adds M31B.2 using the canonical one-way pipeline
+`OperationalEventStream -> UserActivityComposer -> UserActivityStream ->
+NotificationPlanner -> NotificationProcessor -> NotificationDeliveryPort`.
+Activity level drives attention policy; intent provenance and de-duplication
+bind to the activity and material lifecycle stage. There is no raw-event
+production path, persistence, polling, retry loop, Home Assistant dependency,
+or control influence. Integration `0.10.1` still consumes public Core `0.8.0`;
+the intentional Core `0.10.0` migration belongs to a future HA `0.11.0` change
+that is not implemented here.
 
 The integration manifest requires the exact public core release
 `controlel==0.8.0`. A supported custom-component deployment can therefore let
@@ -229,14 +231,14 @@ has not been published and no default-store publication exists.
 ## Core package artifacts
 
 The reusable core is published as the `controlel` distribution and import
-package. The repository prepares `0.9.0`, while version `0.8.0` remains the
-latest public immutable release until publication completes. The static version source
+package. The repository prepares unpublished `0.10.0`, while version `0.9.0`
+remains the latest public immutable release until publication completes. The static version source
 and PEP 517 build configuration live in `pyproject.toml`; normal installation
 depends only on Pydantic. Packaging validation builds one wheel and one sdist,
 inspects their contents, and installs the wheel into a clean environment
 outside the checkout.
 
-Core versions `0.1.0`, `0.2.0`, `0.3.0`, `0.4.0`, `0.5.0`, `0.6.0`, `0.7.0`, and `0.8.0` are published on
+Core versions `0.1.0`, `0.2.0`, `0.3.0`, `0.4.0`, `0.5.0`, `0.6.0`, `0.7.0`, `0.8.0`, and `0.9.0` are published on
 PyPI and immutable. Future core corrections require a new version; rebuilt artifacts for an already
 published version must never be uploaded.
 Repository packaging CI remains validation-only and contains no publication

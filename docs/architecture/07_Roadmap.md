@@ -137,12 +137,15 @@ human-meaningful occurrence, Notification was reserved as its future consumer, a
 Decision Trace remains internal decision/debug evidence. There is no
 time-proximity grouping, HA dependency, persistence, polling, analytics,
 notification remapping, or control influence.
-M31B.2 makes `UserActivity` the canonical Core notification input. It adds
+M31B.2 is the unpublished Core `0.10.0` release candidate and makes
+`UserActivity` the canonical Core notification input. It adds
 exhaustive activity-type/lifecycle policy, activity-level attention filtering,
 activity-bound intent provenance and de-duplication, and exact bounded activity
-revision cursor/overflow accounting. It is an implementation candidate for a
-future Core `0.10.0`; the version is not changed in this milestone. A separate
-HA `0.11.0` change may later consume that published boundary and is not part of
+revision cursor/overflow accounting while preserving bounded history, ordinary
+rate limits, the independent CRITICAL ceiling, and the generic delivery port.
+There is no raw `OperationalEvent` notification production path, HA dependency,
+polling, retry loop, persistence, or control influence. A separate HA `0.11.0`
+change may later consume the published Core `0.10.0` boundary and is not part of
 M31B.2.
 
 ## Milestone 23: Home Assistant one-zone host vertical slice
