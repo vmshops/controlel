@@ -22,13 +22,14 @@ The goal is to create a reliable heating controller capable of optimizing comfor
 
 Project phase: Home Assistant one-zone host vertical slice
 
-Core package version: 0.9.0 (release candidate, not yet published)
+Core package version: 0.9.0 (published immutable M31B.1 release)
 
 Home Assistant integration candidate version: 0.10.1
 
 Use the latest published release for HACS custom-repository installation.
-Core `0.8.0` remains the published immutable M31B release while Core `0.9.0`
-is prepared as the separate M31B.1 release candidate. Integration `0.10.1` is
+Core `0.9.0` is the published immutable M31B.1 release. M31B.2 prepares the
+activity-driven notification implementation for a future Core `0.10.0`
+boundary without changing the version in this implementation step. Integration `0.10.1` is
 the presentation-only Home Assistant notification patch candidate and pins exactly
 `controlel==0.8.0`.
 Controlel is not listed in the default HACS store.
@@ -194,17 +195,19 @@ UI, or control-path influence is introduced.
 Core `0.9.0` introduces the M31B.1 UserActivity Foundation as a separate
 application/domain boundary. `OperationalEvent` remains fine-grained technical
 evidence; immutable `UserActivity` records one human-meaningful occurrence;
-notifications are a future activity consumer; and the decision trace remains
+notifications consume this activity boundary in M31B.2; and the decision trace remains
 internal decision/debug evidence. Deterministic lifecycle IDs correlate source
 reconciliation, measurement/safety incidents, building heating episodes, and
 supervision without timestamp-proximity grouping. A passive
 `UserActivityComposer` owns an exact source cursor, missed-event/overflow
 accounting, bounded open lifecycle state, and a bounded in-memory activity
 stream with explicit source-event provenance and truthful completion semantics.
-This candidate adds no persistence, polling, Home Assistant dependency, or
-notification-consumer behavior change. Integration `0.10.1` still consumes
-public Core `0.8.0`; activity consumption belongs to a later integration
-`0.11.0` change after Core `0.9.0` is published.
+M31B.2 uses the canonical one-way pipeline from operational events through the
+composer and activity stream into notification planning and delivery. Activity
+level drives attention policy; intent provenance and de-duplication bind to the
+activity and material lifecycle stage. It adds no persistence, polling, Home
+Assistant dependency, or control influence. Integration `0.10.1` still consumes
+public Core `0.8.0`; a later integration `0.11.0` update is not implemented.
 
 The integration manifest requires the exact public core release
 `controlel==0.8.0`. A supported custom-component deployment can therefore let

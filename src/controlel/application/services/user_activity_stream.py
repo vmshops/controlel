@@ -17,33 +17,51 @@ class UserActivityStream:
             raise ValueError("capacity must be a positive integer")
         self._capacity = capacity
         self._activities: list[UserActivity] = []
+        self._activity_sequences: list[int] = []
         self._total_emitted = 0
+        self._total_revisions_emitted = 0
         self._lock = Lock()
 
     def publish(self, activity: UserActivity) -> None:
         """Append a new activity or replace its retained immutable revision."""
 
         with self._lock:
+            self._total_revisions_emitted += 1
             for index, retained in enumerate(self._activities):
                 if retained.activity_id == activity.activity_id:
                     self._activities[index] = activity
+                    self._activity_sequences[index] = self._total_revisions_emitted
                     return
             self._total_emitted += 1
             if len(self._activities) == self._capacity:
                 self._activities.pop(0)
+                self._activity_sequences.pop(0)
             self._activities.append(activity)
+            self._activity_sequences.append(self._total_revisions_emitted)
 
     def discard(self, activity_ids: set[str]) -> None:
         """Discard incomplete retained revisions when source evidence was lost."""
 
         with self._lock:
-            self._activities = [item for item in self._activities if item.activity_id not in activity_ids]
+            retained = [
+                (item, sequence)
+                for item, sequence in zip(self._activities, self._activity_sequences, strict=True)
+                if item.activity_id not in activity_ids
+            ]
+            self._activities = [item for item, _ in retained]
+            self._activity_sequences = [sequence for _, sequence in retained]
 
     def discard_correlations(self, correlation_ids: set[str]) -> None:
         """Discard retained revisions belonging to incomplete lost lifecycles."""
 
         with self._lock:
-            self._activities = [item for item in self._activities if item.correlation_id not in correlation_ids]
+            retained = [
+                (item, sequence)
+                for item, sequence in zip(self._activities, self._activity_sequences, strict=True)
+                if item.correlation_id not in correlation_ids
+            ]
+            self._activities = [item for item, _ in retained]
+            self._activity_sequences = [sequence for _, sequence in retained]
 
     def snapshot(self, *, open_activity_count: int = 0) -> UserActivitySnapshot:
         """Return an immutable copy with source progress initially unset."""
@@ -51,10 +69,12 @@ class UserActivityStream:
         with self._lock:
             activities = tuple(self._activities)
             return UserActivitySnapshot(
-                schema_version=1,
+                schema_version=2,
                 capacity=self._capacity,
                 activities=activities,
+                activity_sequences=tuple(self._activity_sequences),
                 total_activities_emitted=self._total_emitted,
+                total_activity_revisions_emitted=self._total_revisions_emitted,
                 dropped_count=max(0, self._total_emitted - len(activities)),
                 source_total_observed=0,
                 source_last_processed_sequence=0,
@@ -91,6 +111,8 @@ def user_activity_snapshot_to_dict(snapshot: UserActivitySnapshot) -> dict[str, 
         "schema_version": snapshot.schema_version,
         "capacity": snapshot.capacity,
         "total_activities_emitted": snapshot.total_activities_emitted,
+        "total_activity_revisions_emitted": snapshot.total_activity_revisions_emitted,
+        "activity_sequences": list(snapshot.activity_sequences),
         "retained_count": len(snapshot.activities),
         "dropped_count": snapshot.dropped_count,
         "source_total_observed": snapshot.source_total_observed,

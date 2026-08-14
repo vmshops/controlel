@@ -139,6 +139,8 @@ def test_core_artifact_verification_binds_representative_public_contracts() -> N
         "NotificationState",
         "notification_state_to_dict",
         "notification_level_for_event",
+        "ACTIVITY_NOTIFICATION_RULES",
+        "notification_rule_for_activity",
         "UserActivity",
         "UserActivityParameter",
         "UserActivityType",

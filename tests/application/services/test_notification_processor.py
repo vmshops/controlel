@@ -1,10 +1,11 @@
-"""Tests for application-owned notification cursor and delivery processing."""
+"""Tests for exact activity-revision notification processing."""
 
 import asyncio
-from datetime import UTC, datetime, timedelta
+from dataclasses import replace
+from datetime import UTC, datetime
 
 from controlel.application.services.notification_processor import NotificationProcessor
-from controlel.application.services.operational_event_stream import OperationalEventStream
+from controlel.application.services.user_activity_stream import UserActivityStream
 from controlel.domain.notifications import (
     NotificationDeliveryResult,
     NotificationDeliveryStatus,
@@ -12,171 +13,136 @@ from controlel.domain.notifications import (
     NotificationPolicy,
     NotificationRecipient,
 )
-from controlel.domain.operational_events import (
-    OperationalEventCategory,
-    OperationalEventCode,
-    OperationalEventSeverity,
-)
+from controlel.domain.user_activities import UserActivity, UserActivityLevel, UserActivityStatus, UserActivityType
 
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
 
 
-class Delivery:
-    def __init__(self, *, raises: bool = False, failed: bool = False) -> None:
-        self.raises = raises
-        self.failed = failed
-        self.source_event_ids: list[str] = []
-
-    async def deliver(self, intent):
-        self.source_event_ids.append(intent.source_event_id)
-        if self.raises:
-            raise RuntimeError("secret transport exception")
-        status = NotificationDeliveryStatus.FAILED if self.failed else NotificationDeliveryStatus.DELIVERED
-        return NotificationDeliveryResult(
-            NOW,
-            status,
-            intent.source_event_id,
-            intent.recipient_id,
-            intent.notification_id,
-            failure_code="stable_transport_failure" if self.failed else None,
-        )
-
-
-def _policy() -> NotificationPolicy:
-    return NotificationPolicy(
-        enabled=True,
-        recipients=(
-            NotificationRecipient(
-                "phone",
-                "test_transport",
-                "endpoint:phone",
-                minimum_level=NotificationLevel.DEBUG,
-            ),
-        ),
-        maximum_per_window=100,
-        critical_maximum_per_window=200,
+def _activity(activity_id: str, status: UserActivityStatus = UserActivityStatus.OPEN) -> UserActivity:
+    return UserActivity(
+        activity_id,
+        UserActivityType.MEASUREMENT_DEGRADED,
+        status,
+        UserActivityLevel.OPERATIONAL,
+        NOW,
+        NOW,
+        None if status is UserActivityStatus.OPEN else NOW,
+        (f"event:{activity_id}",),
+        activity_id,
     )
 
 
-def _emit(stream: OperationalEventStream, count: int, *, timestamp: datetime = NOW) -> None:
-    start = stream.snapshot().total_emitted
-    categories = (OperationalEventCategory.RUNTIME, OperationalEventCategory.SOURCE_CONTROL)
-    for offset in range(count):
-        stream.emit(
-            timestamp=timestamp,
-            category=categories[(start + offset) % len(categories)],
-            severity=OperationalEventSeverity.INFO,
-            event_code=OperationalEventCode.RUNTIME_STARTED,
+class Delivery:
+    def __init__(self, raises: bool = False) -> None:
+        self.raises = raises
+        self.activity_ids: list[str] = []
+
+    async def deliver(self, intent):
+        self.activity_ids.append(intent.source_activity_id)
+        if self.raises:
+            raise RuntimeError("private transport error")
+        return NotificationDeliveryResult(
+            NOW,
+            NotificationDeliveryStatus.DELIVERED,
+            intent.source_activity_id,
+            intent.recipient_id,
+            intent.notification_id,
         )
 
 
-def test_first_drain_after_retention_overflow_counts_exact_missed_gap() -> None:
+def _processor(stream: UserActivityStream, delivery: Delivery | None = None) -> NotificationProcessor:
+    policy = NotificationPolicy(
+        enabled=True,
+        recipients=(NotificationRecipient("phone", "test", "target", minimum_level=NotificationLevel.DEBUG),),
+        maximum_per_window=100,
+    )
+    return NotificationProcessor(policy, stream.snapshot, delivery or Delivery())
+
+
+def test_repeated_unchanged_snapshot_is_not_reprocessed() -> None:
     async def scenario():
-        stream = OperationalEventStream(capacity=200)
-        _emit(stream, 205, timestamp=NOW + timedelta(minutes=2))
-        processor = NotificationProcessor(_policy(), stream.snapshot, Delivery())
+        stream, delivery = UserActivityStream(), Delivery()
+        stream.publish(_activity("one"))
+        processor = _processor(stream, delivery)
+        await processor.process_available()
+        await processor.process_available()
+        return delivery.activity_ids, processor.state()
+
+    delivered, state = asyncio.run(scenario())
+    assert delivered == ["one"]
+    assert state.source_last_processed_sequence == 1
+
+
+def test_activity_revision_is_observed_and_suppression_advances_cursor() -> None:
+    async def scenario():
+        stream = UserActivityStream()
+        stream.publish(_activity("one"))
+        processor = _processor(stream)
+        await processor.process_available()
+        stream.publish(replace(_activity("one"), status=UserActivityStatus.RECOVERED, completed_at=NOW))
         await processor.process_available()
         return processor.state()
 
     state = asyncio.run(scenario())
-    assert state.source_total_observed == 205
-    assert state.source_last_processed_sequence == 205
-    assert state.source_events_missed == 5
-    assert state.source_overflow_occurrences == 1
+    assert state.source_last_processed_sequence == 2
+    assert dict(state.counters)[NotificationDeliveryStatus.SUPPRESSED_POLICY.value] == 1
 
 
-def test_multiple_overflows_are_counted_without_fabricating_lost_intents() -> None:
+def test_processing_failure_does_not_advance_failed_revision() -> None:
     async def scenario():
-        stream = OperationalEventStream(capacity=200)
-        _emit(stream, 205)
-        processor = NotificationProcessor(_policy(), stream.snapshot, Delivery())
-        await processor.process_available()
-        first_intents = processor.state().total_intents_produced
-        _emit(stream, 205, timestamp=NOW + timedelta(minutes=2))
-        await processor.process_available()
-        return first_intents, processor.state()
-
-    first_intents, state = asyncio.run(scenario())
-    assert first_intents == 200
-    assert state.total_intents_produced == 400
-    assert state.source_events_missed == 10
-    assert state.source_overflow_occurrences == 2
-    assert state.source_last_processed_sequence == 410
-
-
-def test_unexpected_processing_failure_does_not_advance_beyond_failed_event() -> None:
-    async def scenario():
-        stream = OperationalEventStream()
-        _emit(stream, 3)
-        processor = NotificationProcessor(_policy(), stream.snapshot, Delivery())
-        original_plan = processor.planner.plan
-
-        def fail_second(event):
-            if event.event_id == "event:00000002":
-                raise RuntimeError("processor failure")
-            return original_plan(event)
-
-        processor.planner.plan = fail_second  # type: ignore[method-assign]
+        stream = UserActivityStream()
+        stream.publish(_activity("one"))
+        processor = _processor(stream)
+        original = processor.planner.plan
+        processor.planner.plan = lambda activity: (_ for _ in ()).throw(RuntimeError("boom"))  # type: ignore[method-assign]
         caught_up = await processor.process_available()
-        failed_state = processor.state()
-        processor.planner.plan = original_plan  # type: ignore[method-assign]
+        failed = processor.state()
+        processor.planner.plan = original  # type: ignore[method-assign]
         await processor.process_available()
-        return caught_up, failed_state, processor.state()
+        return caught_up, failed, processor.state()
 
-    caught_up, failed_state, recovered_state = asyncio.run(scenario())
+    caught_up, failed, recovered = asyncio.run(scenario())
     assert caught_up is False
-    assert failed_state.source_last_processed_sequence == 1
-    assert recovered_state.source_last_processed_sequence == 3
+    assert failed.source_last_processed_sequence == 0
+    assert recovered.source_last_processed_sequence == 1
 
 
-def test_transport_failure_is_processed_once_and_advances_cursor_truthfully() -> None:
-    async def scenario(raises: bool, failed: bool):
-        stream = OperationalEventStream()
-        _emit(stream, 2)
-        processor = NotificationProcessor(_policy(), stream.snapshot, Delivery(raises=raises, failed=failed))
+def test_delivery_failure_advances_once_without_leaking_exception() -> None:
+    async def scenario():
+        stream = UserActivityStream()
+        stream.publish(_activity("one"))
+        processor = _processor(stream, Delivery(raises=True))
         await processor.process_available()
         await processor.process_available()
         return processor.state()
 
-    for raises, failed in ((True, False), (False, True)):
-        state = asyncio.run(scenario(raises, failed))
-        assert state.source_last_processed_sequence == 2
-        assert dict(state.counters)[NotificationDeliveryStatus.FAILED.value] == 2
-        assert state.total_intents_produced == 2
-        assert "secret transport exception" not in str(state)
+    state = asyncio.run(scenario())
+    assert state.source_last_processed_sequence == 1
+    assert dict(state.counters)[NotificationDeliveryStatus.FAILED.value] == 1
+    assert "private transport error" not in str(state)
 
 
-def test_one_recipient_delivery_exception_does_not_prevent_another_recipient() -> None:
-    class RecipientDelivery:
+def test_one_recipient_failure_does_not_block_another_recipient() -> None:
+    class RecipientDelivery(Delivery):
         async def deliver(self, intent):
             if intent.recipient_id == "phone":
                 raise RuntimeError("private failure")
             return NotificationDeliveryResult(
                 NOW,
                 NotificationDeliveryStatus.DELIVERED,
-                intent.source_event_id,
+                intent.source_activity_id,
                 intent.recipient_id,
                 intent.notification_id,
             )
 
     async def scenario():
-        stream = OperationalEventStream()
-        _emit(stream, 1)
+        stream = UserActivityStream()
+        stream.publish(_activity("one"))
         policy = NotificationPolicy(
             enabled=True,
             recipients=(
-                NotificationRecipient(
-                    "phone",
-                    "test_transport",
-                    "endpoint:phone",
-                    minimum_level=NotificationLevel.DEBUG,
-                ),
-                NotificationRecipient(
-                    "tablet",
-                    "test_transport",
-                    "endpoint:tablet",
-                    minimum_level=NotificationLevel.DEBUG,
-                ),
+                NotificationRecipient("phone", "test", "phone-target", minimum_level=NotificationLevel.DEBUG),
+                NotificationRecipient("tablet", "test", "tablet-target", minimum_level=NotificationLevel.DEBUG),
             ),
         )
         processor = NotificationProcessor(policy, stream.snapshot, RecipientDelivery())
@@ -184,6 +150,21 @@ def test_one_recipient_delivery_exception_does_not_prevent_another_recipient() -
         return processor.state()
 
     state = asyncio.run(scenario())
-    assert state.source_last_processed_sequence == 1
     assert dict(state.counters)[NotificationDeliveryStatus.FAILED.value] == 1
     assert dict(state.counters)[NotificationDeliveryStatus.DELIVERED.value] == 1
+    assert state.source_last_processed_sequence == 1
+
+
+def test_retention_gap_is_counted_exactly() -> None:
+    async def scenario():
+        stream = UserActivityStream(capacity=2)
+        for value in ("one", "two", "three"):
+            stream.publish(_activity(value))
+        processor = _processor(stream)
+        await processor.process_available()
+        return processor.state()
+
+    state = asyncio.run(scenario())
+    assert state.source_events_missed == 1
+    assert state.source_overflow_occurrences == 1
+    assert state.source_last_processed_sequence == 3

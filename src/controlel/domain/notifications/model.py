@@ -7,6 +7,7 @@ from math import isfinite
 
 from controlel.domain.operational_events import OperationalEventCategory
 from controlel.domain.operational_events.model import OperationalEventScalar
+from controlel.domain.user_activities import MAX_ACTIVITY_SOURCES, MAX_ACTIVITY_ZONES, UserActivityType
 
 DEFAULT_NOTIFICATION_MAXIMUM_PER_WINDOW = 10
 DEFAULT_NOTIFICATION_RATE_WINDOW = timedelta(minutes=1)
@@ -19,6 +20,7 @@ MAX_NOTIFICATION_RATE_WINDOW = timedelta(days=1)
 MAX_CRITICAL_MAXIMUM_PER_WINDOW = 200
 MAX_CRITICAL_RATE_WINDOW = timedelta(days=1)
 MAX_NOTIFICATION_HISTORY_CAPACITY = 1_000
+MAX_NOTIFICATION_PARAMETERS = 64
 
 
 class NotificationLevel(StrEnum):
@@ -140,16 +142,19 @@ class NotificationIntent:
     category: OperationalEventCategory
     title_code: str
     message_code: str
-    source_event_id: str
+    source_activity_id: str
+    activity_type: UserActivityType
     recipient_id: str
-    correlation_id: str | None = None
-    zone_id: str | None = None
-    source_id: str | None = None
+    correlation_id: str = ""
+    zone_ids: tuple[str, ...] = ()
+    source_ids: tuple[str, ...] = ()
     parameters: tuple[NotificationParameter, ...] = ()
 
     def __post_init__(self) -> None:
-        if not self.notification_id or not self.source_event_id or not self.recipient_id:
-            raise ValueError("notification, source-event, and recipient IDs must not be empty")
+        if not self.notification_id or not self.source_activity_id or not self.recipient_id or not self.correlation_id:
+            raise ValueError("notification, source-activity, recipient, and correlation IDs must not be empty")
+        if not isinstance(self.activity_type, UserActivityType):
+            raise TypeError("activity_type must be a UserActivityType")
         if self.created_at.tzinfo is None or self.created_at.utcoffset() is None:
             raise ValueError("created_at must be timezone-aware")
         if not self.title_code or not self.message_code:
@@ -157,6 +162,10 @@ class NotificationIntent:
         keys = tuple(parameter.key for parameter in self.parameters)
         if keys != tuple(sorted(keys)) or len(keys) != len(set(keys)):
             raise ValueError("parameters must have unique keys in deterministic sorted order")
+        if len(self.parameters) > MAX_NOTIFICATION_PARAMETERS:
+            raise ValueError(f"parameters must contain at most {MAX_NOTIFICATION_PARAMETERS} items")
+        _sorted_strings(self.zone_ids, "zone_ids", MAX_ACTIVITY_ZONES)
+        _sorted_strings(self.source_ids, "source_ids", MAX_ACTIVITY_SOURCES)
 
 
 @dataclass(frozen=True, slots=True)
@@ -165,7 +174,7 @@ class NotificationDeliveryResult:
 
     occurred_at: datetime
     status: NotificationDeliveryStatus
-    source_event_id: str
+    source_activity_id: str
     recipient_id: str | None = None
     notification_id: str | None = None
     failure_code: str | None = None
@@ -173,8 +182,8 @@ class NotificationDeliveryResult:
     def __post_init__(self) -> None:
         if self.occurred_at.tzinfo is None or self.occurred_at.utcoffset() is None:
             raise ValueError("occurred_at must be timezone-aware")
-        if not self.source_event_id:
-            raise ValueError("source_event_id must not be empty")
+        if not self.source_activity_id:
+            raise ValueError("source_activity_id must not be empty")
         if self.status is NotificationDeliveryStatus.FAILED and not self.failure_code:
             raise ValueError("failed delivery requires a stable failure code")
         if self.status is not NotificationDeliveryStatus.FAILED and self.failure_code is not None:
@@ -189,3 +198,10 @@ def _bounded_integer(value: int, label: str, maximum: int) -> None:
 def _bounded_duration(value: timedelta, label: str, maximum: timedelta) -> None:
     if not isinstance(value, timedelta) or not timedelta(seconds=1) <= value <= maximum:
         raise ValueError(f"{label} must be between 1 second and {int(maximum.total_seconds())} seconds")
+
+
+def _sorted_strings(values: tuple[str, ...], label: str, maximum: int) -> None:
+    if values != tuple(sorted(set(values))):
+        raise ValueError(f"{label} must be unique and sorted")
+    if len(values) > maximum:
+        raise ValueError(f"{label} must contain at most {maximum} items")

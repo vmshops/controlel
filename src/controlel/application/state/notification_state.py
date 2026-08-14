@@ -24,7 +24,8 @@ class NotificationHistoryRecord:
 
     kind: str
     timestamp: datetime
-    source_event_id: str
+    source_activity_id: str
+    activity_type: str | None
     recipient_id: str | None
     notification_id: str | None
     level: NotificationLevel | None = None
@@ -60,7 +61,8 @@ def notification_state_to_dict(state: NotificationState) -> dict[str, object]:
         return {
             "kind": item.kind,
             "timestamp": item.timestamp.isoformat(),
-            "source_event_id": item.source_event_id,
+            "source_activity_id": item.source_activity_id,
+            "activity_type": item.activity_type,
             "recipient_id": item.recipient_id,
             "notification_id": item.notification_id,
             "level": item.level.value if item.level is not None else None,
