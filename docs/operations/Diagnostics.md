@@ -37,7 +37,7 @@ false. No raw sample history, arbitrary exception message, secret, or physical
 burner/heat confirmation is included. Successful command dispatch and reported
 controller state remain separate fields.
 
-Home Assistant integration `0.10.0` consumes core `0.8.0` and includes the bounded
+Home Assistant integration `0.10.1` consumes core `0.8.0` and includes the bounded
 runtime-supervision projection to downloaded diagnostics. It reports phase,
 command authority, normalized fatal cause, restart attempts/budget/deadline,
 and recovery timestamps without arbitrary exception text or physical-state

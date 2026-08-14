@@ -29,7 +29,7 @@ The current switch state is never used to fabricate it.
 Confirm that the exact custom-repository URL is
 `https://github.com/vmshops/controlel` and the selected category is
 **Integration**. The repository must be publicly accessible. Use the latest
-published release; `0.10.0` remains an unpublished candidate.
+published release; `0.10.1` remains an unpublished candidate.
 
 If a zone stays in `confirmation_pending`, check measurement validity and the
 confirmation deadline/remaining entities. Unknown, unavailable, invalid,
@@ -128,7 +128,7 @@ second.
 
 ## Core dependency installation
 
-Integration candidate `0.10.0` requires exactly `controlel==0.8.0`. Normal supported
+Integration candidate `0.10.1` requires exactly `controlel==0.8.0`. Normal supported
 installation lets Home Assistant obtain that dependency automatically; users
 do not need to install it manually. If setup reports a missing core, confirm
 that the environment can reach PyPI and that `python -m pip show controlel`

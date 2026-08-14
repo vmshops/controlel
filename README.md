@@ -24,11 +24,11 @@ Project phase: Home Assistant one-zone host vertical slice
 
 Core package version: 0.8.0 (published and immutable)
 
-Home Assistant integration candidate version: 0.10.0
+Home Assistant integration candidate version: 0.10.1
 
 Use the latest published release for HACS custom-repository installation.
-Core `0.8.0` is the published immutable M31B release. Integration `0.10.0` is
-the separate Home Assistant M31B candidate and pins exactly
+Core `0.8.0` is the published immutable M31B release. Integration `0.10.1` is
+the presentation-only Home Assistant notification patch candidate and pins exactly
 `controlel==0.8.0`.
 Controlel is not listed in the default HACS store.
 
@@ -180,7 +180,7 @@ persistence, or control-path influence. Bounded immutable notification state
 and history retain truthful cursor and delivery evidence. Core `0.8.0` is
 published and immutable.
 
-Integration `0.10.0` composes that public core through a thin Home Assistant
+Integration `0.10.1` composes that public core through a thin Home Assistant
 notify transport. Notifications remain disabled with no recipients by default.
 Configured delivery runs on the HA event loop through one coalesced drain task;
 one recipient failure does not block another, unload rejects future drains, and
@@ -204,7 +204,7 @@ The isolated, hashed environment is defined by `requirements/ha-test.in` and
 `requirements/ha-test.txt`; setup and suite commands are in the
 [development guide](docs/development/DevelopmentGuide.md). The compatibility
 harness is separate from HACS release validation. HACS metadata and
-deterministic release packaging are prepared for `0.10.0`, but that candidate
+deterministic release packaging are prepared for `0.10.1`, but that candidate
 has not been published and no default-store publication exists.
 
 ## Core package artifacts
