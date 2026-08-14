@@ -14,14 +14,22 @@ from controlel.domain.notifications import (
 )
 
 from .const import NOTIFICATION_TRANSPORT_HOME_ASSISTANT
+from .notification_renderer import HomeAssistantNotificationRenderer
 
 
 class HomeAssistantNotificationTransport:
     """Resolve configured logical recipients into HA notify service calls."""
 
-    def __init__(self, hass: object, policy: NotificationPolicy) -> None:
+    def __init__(
+        self,
+        hass: object,
+        policy: NotificationPolicy,
+        *,
+        renderer: HomeAssistantNotificationRenderer | None = None,
+    ) -> None:
         self._hass = hass
         self._recipients = {recipient.recipient_id: recipient for recipient in policy.recipients}
+        self._renderer = renderer or HomeAssistantNotificationRenderer(hass)
 
     async def deliver(self, intent: NotificationIntent) -> NotificationDeliveryResult:
         """Deliver one intent and normalize all transport failures."""
@@ -30,13 +38,14 @@ class HomeAssistantNotificationTransport:
         if recipient is None or recipient.transport != NOTIFICATION_TRANSPORT_HOME_ASSISTANT:
             return _result(intent, NotificationDeliveryStatus.NO_RECIPIENT)
         _, service = recipient.target.split(".", 1)
+        rendered = await self._renderer.async_render(intent)
         try:
             await self._hass.services.async_call(
                 "notify",
                 service,
                 {
-                    "title": intent.title_code,
-                    "message": intent.message_code,
+                    "title": rendered.title,
+                    "message": rendered.message,
                     "data": {
                         "notification_id": intent.notification_id,
                         "level": intent.level.value,
@@ -46,6 +55,7 @@ class HomeAssistantNotificationTransport:
                         "zone_id": intent.zone_id,
                         "source_id": intent.source_id,
                         "parameters": {parameter.key: parameter.value for parameter in intent.parameters},
+                        "renderer_fallback_code": rendered.fallback_code,
                     },
                 },
                 blocking=True,

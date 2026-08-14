@@ -38,6 +38,7 @@ EXPECTED_ARCHIVE_FILES = frozenset(
         "host.py",
         "manifest.json",
         "measurement_ingestion.py",
+        "notification_renderer.py",
         "notifications.py",
         "observability.py",
         "operational.py",

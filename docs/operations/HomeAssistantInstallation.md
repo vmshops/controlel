@@ -17,11 +17,11 @@ Protection history is not persisted. After restart or reload, Controlel reads
 the current sensor value deterministically but does not infer prior command
 history or lockout state from the switch.
 
-Controlel `0.10.0` is the current development candidate for one heating zone,
+Controlel `0.10.1` is the current development candidate for one heating zone,
 one primary temperature sensor, and one shared heat source. It requires the
 public core package `controlel==0.8.0`.
 
-Integration `0.10.0` uses published immutable core `0.8.0`. It retains the
+Integration `0.10.1` uses published immutable core `0.8.0`. It retains the
 thread-safe entity publication and runtime-supervision host binding needed for
 M30.2 while retaining the existing configuration surface and entity identity.
 The configured simple switch is explicitly Controlel-owned because this
@@ -53,7 +53,7 @@ High-frequency remaining-time entities may be excluded from Recorder if their
 history is not useful. Passive timestamp entities are low-churn. Controlel does
 not modify Recorder configuration automatically.
 
-Candidate `0.10.0` is not published; use the latest published integration for
+Candidate `0.10.1` is not published; use the latest published integration for
 HACS custom-repository installation. Controlel is not listed in the default HACS
 store.
 

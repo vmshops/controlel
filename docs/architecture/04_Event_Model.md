@@ -165,6 +165,11 @@ not polling or a retry scheduler. Configuration and redacted diagnostics remain
 adapter concerns, while mapping, recipient filtering, deduplication, cursor and
 overflow semantics, and both rate limits remain application/core concerns.
 
+Integration `0.10.1` adds only the HA presentation boundary: semantic title and
+message codes are resolved through HA translations, interpolated from an explicit
+safe scalar allowlist, and replaced by generic text on any rendering failure.
+Event selection, policy, cursor, deduplication, and rate limiting remain unchanged.
+
 M31C may consume operational events for statistics. Aggregation is not part of
 M31A or M31B.
 

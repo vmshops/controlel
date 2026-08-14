@@ -11,6 +11,7 @@ from controlel.domain.operational_events import (
     OperationalEventCode,
     OperationalEventSeverity,
 )
+from custom_components.controlel.notification_renderer import HomeAssistantNotificationRenderer
 from custom_components.controlel.notifications import (
     HomeAssistantNotificationCoordinator,
     HomeAssistantNotificationTransport,
@@ -35,14 +36,19 @@ class Hass:
         self.services = services
 
 
-def _policy(*, second: bool = False, disabled: bool = False) -> NotificationPolicy:
+def _policy(
+    *,
+    second: bool = False,
+    disabled: bool = False,
+    minimum_level: NotificationLevel = NotificationLevel.DEBUG,
+) -> NotificationPolicy:
     recipients = [
         NotificationRecipient(
             "phone",
             "home_assistant_notify",
             "notify.phone",
             enabled=not disabled,
-            minimum_level=NotificationLevel.DEBUG,
+            minimum_level=minimum_level,
         )
     ]
     if second:
@@ -51,7 +57,7 @@ def _policy(*, second: bool = False, disabled: bool = False) -> NotificationPoli
                 "tablet",
                 "home_assistant_notify",
                 "notify.tablet",
-                minimum_level=NotificationLevel.DEBUG,
+                minimum_level=minimum_level,
             )
         )
     return NotificationPolicy(enabled=True, recipients=tuple(recipients))
@@ -67,16 +73,26 @@ def _emit(stream: OperationalEventStream, code: OperationalEventCode, *, correla
     )
 
 
+def _renderer(hass: object) -> HomeAssistantNotificationRenderer:
+    async def translations(_language: str) -> dict[str, str]:
+        return {
+            f"notification_title_{code.value}": f"Human title for {code.value}" for code in OperationalEventCode
+        } | {f"notification_message_{code.value}": f"Human message for {code.value}" for code in OperationalEventCode}
+
+    return HomeAssistantNotificationRenderer(hass, translations)
+
+
 def test_configured_notify_services_are_called_independently() -> None:
     async def scenario():
         stream = OperationalEventStream()
         _emit(stream, OperationalEventCode.RUNTIME_RECOVERED)
         services = Services()
+        hass = Hass(services)
         policy = _policy(second=True)
         coordinator = HomeAssistantNotificationCoordinator(
             policy,
             stream.snapshot,
-            HomeAssistantNotificationTransport(Hass(services), policy),
+            HomeAssistantNotificationTransport(hass, policy, renderer=_renderer(hass)),
             logging.getLogger(__name__),
         )
         await coordinator.async_process_new_events()
@@ -87,7 +103,9 @@ def test_configured_notify_services_are_called_independently() -> None:
         ("notify", "phone", True),
         ("notify", "tablet", True),
     ]
-    assert all(call[2]["message"] == "notification_message_runtime_recovered" for call in calls)
+    assert all(call[2]["message"] == "Human message for runtime_recovered" for call in calls)
+    assert all(not call[2]["title"].startswith("notification_title_") for call in calls)
+    assert all(not call[2]["message"].startswith("notification_message_") for call in calls)
     assert diagnostics["counters"]["delivered"] == 2
     assert diagnostics["source_total_observed"] == 1
     assert diagnostics["source_last_processed_sequence"] == 1
@@ -178,3 +196,83 @@ def test_diagnostics_refresh_does_not_create_notification_traffic() -> None:
     assert services.calls == []
     assert diagnostics["source_total_observed"] == 0
     assert diagnostics["total_intents_produced"] == 0
+
+
+def test_renderer_fallback_still_delivers_without_exposing_raw_codes() -> None:
+    async def failing(_language: str) -> dict[str, str]:
+        raise RuntimeError("renderer secret must not escape")
+
+    async def scenario():
+        stream = OperationalEventStream()
+        _emit(stream, OperationalEventCode.RUNTIME_FATAL)
+        services = Services()
+        hass = Hass(services)
+        policy = _policy()
+        renderer = HomeAssistantNotificationRenderer(hass, failing)
+        coordinator = HomeAssistantNotificationCoordinator(
+            policy,
+            stream.snapshot,
+            HomeAssistantNotificationTransport(hass, policy, renderer=renderer),
+            logging.getLogger(__name__),
+        )
+        await coordinator.async_process_new_events()
+        return services.calls, coordinator.diagnostics()
+
+    calls, diagnostics = asyncio.run(scenario())
+    payload = calls[0][2]
+    assert payload["title"] == "Controlel notification"
+    assert payload["message"] == "Controlel generated an operational notification."
+    assert payload["data"]["renderer_fallback_code"] == "notification_render_failed"
+    assert "notification_title_" not in str(payload)
+    assert "notification_message_" not in str(payload)
+    assert "renderer secret" not in str(payload)
+    assert diagnostics["counters"]["delivered"] == 1
+
+
+def test_real_world_source_correction_keeps_selection_counts_and_cursor_unchanged() -> None:
+    sequence = (
+        OperationalEventCode.REPORTED_SOURCE_STATE_CHANGED,
+        OperationalEventCode.SOURCE_DRIFT_DETECTED,
+        OperationalEventCode.SOURCE_RECONCILIATION_STARTED,
+        OperationalEventCode.SOURCE_COMMAND_DEFERRED_MINIMUM_ON,
+        OperationalEventCode.SOURCE_DISABLE_REQUESTED,
+        OperationalEventCode.SOURCE_COMMAND_DISPATCHED,
+        OperationalEventCode.CORRECTIVE_ACTION_DISPATCHED,
+        OperationalEventCode.REPORTED_SOURCE_STATE_CHANGED,
+        OperationalEventCode.SOURCE_RECONCILIATION_COMPLETED,
+    )
+
+    async def scenario():
+        stream = OperationalEventStream()
+        for code in sequence:
+            _emit(stream, code, correlation="source-correction:1")
+        services = Services()
+        hass = Hass(services)
+        policy = _policy(minimum_level=NotificationLevel.OPERATIONAL)
+        coordinator = HomeAssistantNotificationCoordinator(
+            policy,
+            stream.snapshot,
+            HomeAssistantNotificationTransport(hass, policy, renderer=_renderer(hass)),
+            logging.getLogger(__name__),
+        )
+        await coordinator.async_process_new_events()
+        return services.calls, coordinator.diagnostics()
+
+    calls, diagnostics = asyncio.run(scenario())
+    assert len(calls) == 1
+    assert calls[0][2]["data"]["source_event_id"] == "event:00000007"
+    assert calls[0][2]["title"] == "Human title for corrective_action_dispatched"
+    assert calls[0][2]["message"] == "Human message for corrective_action_dispatched"
+    assert diagnostics["source_total_observed"] == 9
+    assert diagnostics["source_last_processed_sequence"] == 9
+    assert diagnostics["source_events_missed"] == 0
+    assert diagnostics["source_overflow_occurrences"] == 0
+    assert diagnostics["total_intents_produced"] == 1
+    assert diagnostics["counters"] == {
+        "delivered": 1,
+        "failed": 0,
+        "no_recipient": 0,
+        "rate_limited": 0,
+        "suppressed_duplicate": 0,
+        "suppressed_policy": 8,
+    }

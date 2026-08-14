@@ -123,6 +123,11 @@ influence. The custom sidebar UI and its write/test APIs remain deferred. M31C
 may add explainable statistics/analytics and must
 preserve the command/report/physical-reality distinctions.
 
+Integration `0.10.1` is the presentation-only follow-up: HA renders every
+reachable notification code into localized human-readable text with safe
+allowlisted interpolation and fail-safe generic fallback. Notification selection
+and M31B transport semantics are unchanged.
+
 ## Milestone 23: Home Assistant one-zone host vertical slice
 
 The first host integration proves:
