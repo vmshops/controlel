@@ -36,6 +36,10 @@ from controlel.application.services.heating_diagnostics_boundary import (
 from controlel.application.services.notification_planner import NotificationPlanner
 from controlel.application.services.operational_event_stream import operational_event_stream_to_dict
 from controlel.application.services.source_control_policy import SourceControlOutcome
+from controlel.application.services.user_activity_stream import (
+    UserActivityStream,
+    user_activity_snapshot_to_dict,
+)
 from controlel.application.state.heating_diagnostics import (
     empty_heating_diagnostics_snapshot,
 )
@@ -997,6 +1001,13 @@ class HomeAssistantControlelHost:
         if self._notification_coordinator is None:
             return NotificationPlanner(NotificationPolicy()).diagnostics()
         return self._notification_coordinator.diagnostics()
+
+    def user_activity_diagnostics(self) -> dict[str, object]:
+        """Return bounded activity composition state without affecting control."""
+
+        if self._notification_coordinator is None:
+            return user_activity_snapshot_to_dict(UserActivityStream().snapshot())
+        return self._notification_coordinator.activity_diagnostics()
 
     async def async_source_resilience_diagnostics(self) -> dict[str, object] | None:
         """Project bounded core resilience evidence on the runtime executor."""

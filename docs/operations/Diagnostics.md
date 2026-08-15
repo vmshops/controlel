@@ -37,7 +37,7 @@ false. No raw sample history, arbitrary exception message, secret, or physical
 burner/heat confirmation is included. Successful command dispatch and reported
 controller state remain separate fields.
 
-Home Assistant integration `0.10.1` consumes core `0.8.0` and includes the bounded
+Home Assistant integration `0.11.0` consumes public Core `0.10.0` and includes the bounded
 runtime-supervision projection to downloaded diagnostics. It reports phase,
 command authority, normalized fatal cause, restart attempts/budget/deadline,
 and recovery timestamps without arbitrary exception text or physical-state
@@ -68,8 +68,16 @@ no timer, polling, command, Home Assistant event, or Recorder history.
 
 ## M31B notification diagnostics
 
-Downloaded diagnostics include a separate `notification_policy` object with
-schema version 1, enabled state, redacted recipient summaries, bounded outcome
+Downloaded diagnostics include a separate `user_activities` object with schema
+version 2, capacity, total and retained activity counts, exact revision count,
+source operational-event cursor and overflow evidence, open activity count,
+latest timestamp, and bounded retained activities. Activity records contain
+only localization-neutral identifiers, lifecycle/status/level, explicit
+command and reported evidence, and allowlisted scalar parameters. Notification
+targets, arbitrary details, secrets, and exception messages are removed.
+
+The separate `notification_policy` object uses Core schema version 2 and
+contains enabled state, redacted recipient summaries, bounded outcome
 counters, latest intent and delivery evidence, and at most the configured
 bounded number of recent semantic intent/result records. It also reports
 `source_total_observed`, `source_last_processed_sequence`,
@@ -84,3 +92,8 @@ cursor, the exact sequence gap is counted rather than reconstructed. Delivery
 runs outside serialized control through one coalesced HA drain task. A failed
 notify service becomes a stable `failed` result and cannot alter commands,
 source authority, runtime lifecycle, event retention, or later evaluations.
+
+Integration `0.10.1` was the presentation-only release on Core `0.8.0`.
+Integration `0.11.0` migrates the production drain to UserActivity snapshots
+from immutable public Core `0.10.0`. It adds no Activity frontend, persistence,
+polling, retry queue, M31C analytics/anomalies, or control influence.

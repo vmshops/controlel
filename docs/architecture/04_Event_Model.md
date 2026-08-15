@@ -211,9 +211,10 @@ explicit reported agreement, not merely after corrective command dispatch.
 
 The foundation has no scheduler, polling, persistence, host dependency, command
 port, or feedback into regulation. M31B.2 switches only the Core notification
-consumer to this public activity boundary. A future Home Assistant `0.11.0`
-adapter update is separate and is not implemented here. Reload/restart begins
-new in-memory lifecycle state and never fabricates continuity.
+consumer to this public activity boundary. The separate Home Assistant
+`0.11.0` candidate now hosts that public pipeline through one deterministic
+compose-before-notify drain. Reload/restart begins new in-memory lifecycle state
+and never fabricates continuity.
 
 Performance and anomaly assessment remain outside M31B.1. Insufficient
 temperature rise, falling temperature, time-to-target, actuator response, water

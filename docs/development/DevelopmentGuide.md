@@ -10,11 +10,11 @@ dependency. Use these separate suites:
 python -m pytest tests/domain tests/application tests/infrastructure \
   tests/architecture tests/packaging
 
-# B. Released Home Assistant adapter tests with public Core 0.8.0
+# B. Home Assistant adapter tests with public Core 0.10.0
 python -m pytest tests/integrations/home_assistant \
   --ignore=tests/integrations/home_assistant/framework
 
-# C. Real Home Assistant framework tests with public Core 0.8.0
+# C. Real Home Assistant framework tests with public Core 0.10.0
 python -m pytest tests/integrations/home_assistant/framework
 ```
 
@@ -35,7 +35,7 @@ python3.14 -m venv .venv-ha
 ./.venv-ha/bin/python -m pip install \
   --no-cache-dir \
   --index-url https://pypi.org/simple \
-  controlel==0.8.0
+  controlel==0.10.0
 CONTROLEL_FRAMEWORK_COMPOSITION=public \
   ./.venv-ha/bin/python -m pytest \
   tests/integrations/home_assistant/framework
@@ -45,10 +45,10 @@ This environment loads `custom_components/controlel` from the checkout through
 the normal Home Assistant custom-component test mechanism, but imports the core
 from `site-packages`. It must not add `src` to `PYTHONPATH`.
 
-Integration `0.10.1` declares Core `0.8.0`; it is intentionally not a required
-compatibility target for repository Core `0.10.0`. The former editable-Core HA
-composition is postponed until HA `0.11.0` performs the explicit activity-driven
-notification migration. Core `0.10.0` remains covered by suite A.
+Integration `0.10.1` is the previous released Core `0.8.0` composition. The
+`0.11.0` migration candidate declares immutable public Core `0.10.0` and runs
+both HA suites against its external site-packages installation. Suite A remains
+the independent repository-Core boundary.
 
 Home Assistant 2026.7.3 imports POSIX-only `fcntl` and `resource` modules in
 its pytest bootstrap, so the standard framework command does not run in native
@@ -63,7 +63,7 @@ py -3.14 -m venv .venv-ha
 .\.venv-ha\Scripts\python.exe -m pip install `
     --require-hashes `
     -r requirements\ha-test.txt
-.\.venv-ha\Scripts\python.exe -m pip install controlel==0.8.0
+.\.venv-ha\Scripts\python.exe -m pip install controlel==0.10.0
 ```
 
 Do not use globally installed pytest or packaging tools.
@@ -106,7 +106,7 @@ python3 -m script.hassfest --action validate \
 ```
 
 Framework compatibility is separate from HACS release validation. The manifest
-pins the published core as `controlel==0.8.0`; HACS metadata and deterministic
+pins the published core as `controlel==0.10.0`; HACS metadata and deterministic
 integration release packaging are validated without publishing anything.
 
 ## HACS release candidate
@@ -115,10 +115,10 @@ Build and independently validate the fixed-name release candidate from the
 repository root:
 
 ```text
-python scripts/packaging/build_hacs_release.py --version 0.10.1
+python scripts/packaging/build_hacs_release.py --version 0.11.0
 python scripts/packaging/validate_hacs_release.py \
   dist/hacs/controlel.zip \
-  --version 0.10.1 \
+  --version 0.11.0 \
   --checksum dist/hacs/controlel.zip.sha256
 ```
 
@@ -133,8 +133,9 @@ rejection behavior. Generated files remain below ignored `dist/hacs/`.
 
 ## Configuration and options development
 
-The integration candidate version is `0.10.1`; its manifest pins the published,
-immutable core `controlel==0.8.0`.
+The implementation and release metadata are prepared as the unpublished
+`0.11.0` migration candidate. Its manifest pins published immutable Core
+`controlel==0.10.0`.
 
 New-entry configuration defaults are 0.3/0.1 Â°C hysteresis and 10/5-minute
 minimum on/off times. Legacy entries normalize missing values to zero.

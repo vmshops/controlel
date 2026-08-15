@@ -99,8 +99,8 @@ def test_manifest_pins_published_core_and_keeps_version_independent() -> None:
     core_version = load_pyproject()["project"]["version"]
 
     assert core_version == "0.10.0"
-    assert manifest["requirements"] == ["controlel==0.8.0"]
-    assert manifest["version"] == "0.10.1"
+    assert manifest["requirements"] == ["controlel==0.10.0"]
+    assert manifest["version"] == "0.11.0"
     assert manifest["version"] != core_version
     assert manifest["issue_tracker"] == "https://github.com/vmshops/controlel/issues"
 
@@ -230,7 +230,7 @@ def test_ci_separates_repository_core_from_released_ha_public_core_compositions(
     assert "home-assistant-framework-local:" not in workflow
     assert "CONTROLEL_FRAMEWORK_COMPOSITION: local" not in workflow
     assert "CONTROLEL_FRAMEWORK_COMPOSITION: public" in workflow
-    assert workflow.count("controlel==0.8.0") == 2
+    assert workflow.count("controlel==0.10.0") == 2
     assert workflow.count("python scripts/ci/verify_public_core.py") == 2
     assert workflow.count("--asyncio-mode=auto") == 1
     assert "candidate-core-wheel" not in workflow
@@ -256,12 +256,12 @@ def test_public_core_provenance_records_history_and_current_composition_hash() -
     assert "equivalent to `core-v0.3.0`" in release_guide
     assert wheel_hash in release_guide
     assert sdist_hash in release_guide
-    assert "controlel-0.8.0-py3-none-any.whl" in checker
-    assert "PUBLIC_WHEEL_SIZE = 141_379" in checker
-    assert "b9f12d0fadf8a0a53e7bd102fc707bf2b518e776b92a2cdbee240562b4079d8f" in checker
-    assert "controlel-0.8.0.tar.gz" in checker
-    assert "PUBLIC_SDIST_SIZE = 89_285" in checker
-    assert "3aa051d187ab5b5305584f67893ed8a89c82bd7061fa3a28ecc4f9136b0fa84c" in checker
+    assert "controlel-0.10.0-py3-none-any.whl" in checker
+    assert "PUBLIC_WHEEL_SIZE = 151_194" in checker
+    assert "fdc15bf881b173f255bc8f7f0ef7295c13bbc0f9f736c2f79c4b766f583bbfaf" in checker
+    assert "controlel-0.10.0.tar.gz" in checker
+    assert "PUBLIC_SDIST_SIZE = 98_034" in checker
+    assert "babe73fb5779e49a59b57cabbd17522c0cb2c506e228e1b1c3dc4683d414e4dc" in checker
     assert 'distribution.read_text("direct_url.json") is None' in checker
 
 

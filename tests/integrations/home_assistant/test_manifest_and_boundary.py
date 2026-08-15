@@ -25,9 +25,9 @@ def test_manifest_has_required_custom_component_contract():
         "issue_tracker": "https://github.com/vmshops/controlel/issues",
         "integration_type": "hub",
         "iot_class": "local_push",
-        "requirements": ["controlel==0.8.0"],
+        "requirements": ["controlel==0.10.0"],
         "single_config_entry": True,
-        "version": "0.10.1",
+        "version": "0.11.0",
     }
 
 
@@ -37,8 +37,8 @@ def test_core_and_integration_versions_are_intentionally_independent():
         core_version = tomllib.load(pyproject_file)["project"]["version"]
 
     assert core_version == "0.10.0"
-    assert manifest["version"] == INTEGRATION_VERSION == "0.10.1"
-    assert manifest["requirements"] == ["controlel==0.8.0"]
+    assert manifest["version"] == INTEGRATION_VERSION == "0.11.0"
+    assert manifest["requirements"] == ["controlel==0.10.0"]
     assert manifest["version"] != manifest["requirements"][0].partition("==")[2]
 
 
@@ -49,7 +49,7 @@ def test_released_ha_tests_use_declared_public_core_not_repository_candidate() -
     assert "home-assistant-framework-public:" in workflow
     assert "home-assistant-framework-local:" not in workflow
     assert "CONTROLEL_FRAMEWORK_COMPOSITION: local" not in workflow
-    assert workflow.count("controlel==0.8.0") == 2
+    assert workflow.count("controlel==0.10.0") == 2
     assert "tests/integrations/home_assistant \\" in workflow
     assert "--ignore=tests/integrations/home_assistant/framework" in workflow
     assert workflow.count("--asyncio-mode=auto") == 1
@@ -59,7 +59,7 @@ def test_manifest_requirement_is_one_exact_public_distribution_pin():
     manifest = json.loads((COMPONENT / "manifest.json").read_text(encoding="utf-8"))
     requirements = manifest["requirements"]
 
-    assert requirements == ["controlel==0.8.0"]
+    assert requirements == ["controlel==0.10.0"]
     assert len(requirements) == 1
     assert not any(marker in requirements[0] for marker in ("~=", ">=", "<=", " @ ", "git+", "-e ", "file:"))
 
@@ -187,6 +187,16 @@ def test_home_assistant_diagnostics_consumes_only_application_snapshot_boundary(
     assert "controlel.domain.heat_delivery" not in imported_modules
     assert "HeatingEpisode" not in host_source
     assert "_diagnostic_evidence_timestamp" not in host_source
+
+
+def test_home_assistant_notification_pipeline_uses_public_user_activity_boundaries() -> None:
+    source = (COMPONENT / "notifications.py").read_text(encoding="utf-8")
+
+    assert "UserActivityComposer" in source
+    assert "NotificationProcessor(policy, self.composer.snapshot" in source
+    assert "user_activity_snapshot_to_dict" in source
+    assert "intent.source_activity_id" in source
+    assert "intent.source_event_id" not in source
 
 
 def test_normal_project_dependencies_exclude_home_assistant():
