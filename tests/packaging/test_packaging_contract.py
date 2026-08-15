@@ -100,7 +100,7 @@ def test_manifest_pins_published_core_and_keeps_version_independent() -> None:
 
     assert core_version == "0.10.0"
     assert manifest["requirements"] == ["controlel==0.10.0"]
-    assert manifest["version"] == "0.10.1"
+    assert manifest["version"] == "0.11.0"
     assert manifest["version"] != core_version
     assert manifest["issue_tracker"] == "https://github.com/vmshops/controlel/issues"
 

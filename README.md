@@ -30,8 +30,8 @@ Use the latest published release for HACS custom-repository installation.
 Core `0.10.0` is the published immutable M31B.2 activity-driven notification
 release. Integration `0.10.1` is the previous presentation-only release on
 Core `0.8.0`. Integration `0.11.0` is the unpublished UserActivity migration
-candidate and pins exactly `controlel==0.10.0`; its version bump remains a
-separate release-boundary change.
+candidate and pins exactly `controlel==0.10.0`. Its source and manifest version
+are now prepared at the separate release boundary; it is not yet published.
 Controlel is not listed in the default HACS store.
 
 ## Home Assistant installation
@@ -229,9 +229,8 @@ The isolated, hashed environment is defined by `requirements/ha-test.in` and
 `requirements/ha-test.txt`; setup and suite commands are in the
 [development guide](docs/development/DevelopmentGuide.md). The compatibility
 harness is separate from HACS release validation. HACS metadata and
-deterministic release packaging remains a separate `0.11.0` release-boundary
-step; the migration candidate has not been published and no default-store
-publication exists.
+deterministic release packaging must pass before the unpublished `0.11.0`
+candidate may be tagged; no default-store publication exists.
 
 ## Core package artifacts
 

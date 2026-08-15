@@ -49,7 +49,7 @@ def source() -> OperationalSnapshotSource:
             debug_expiry_deadline=None,
             debug_profile_duration_seconds=3600.0,
             trace_capacity=20,
-            integration_version="0.10.1",
+            integration_version="0.11.0",
             core_version="0.7.0",
         )
     )

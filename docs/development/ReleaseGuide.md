@@ -17,9 +17,10 @@ must use the immutable Core `0.10.0` wheel (`151,194` bytes, SHA-256
 `fdc15bf881b173f255bc8f7f0ef7295c13bbc0f9f736c2f79c4b766f583bbfaf`)
 and sdist (`98,034` bytes, SHA-256
 `babe73fb5779e49a59b57cabbd17522c0cb2c506e228e1b1c3dc4683d414e4dc`).
-The integration version bump, HACS artifact, tag, and GitHub Release remain a
-separate release-boundary workflow. No Activity frontend, persistence, retry
-queue, M31C analytics/anomalies, or control feedback belongs in `0.11.0`.
+The separate release boundary now sets the integration and manifest versions to
+`0.11.0`. The HACS artifact, tag, and GitHub Release remain prohibited until
+final validation succeeds. No Activity frontend, persistence, retry queue,
+M31C analytics/anomalies, or control feedback belongs in `0.11.0`.
 
 ## Milestone 31B.2 core 0.10.0 release boundary
 
@@ -242,8 +243,8 @@ version is the static `project.version` in `pyproject.toml`. Runtime access uses
 
 The custom-component manifest version is a separate integration version.
 Integration `0.10.1` is the current published release; the implementation is
-prepared for candidate `0.11.0`, whose version bump remains a separate release
-boundary. Neither version is a second source for the core package version.
+prepared as unpublished candidate `0.11.0` at its separate release boundary.
+Neither version is a second source for the core package version.
 
 ## Permanent tag namespaces
 
@@ -568,7 +569,7 @@ the declared core automatically.
 
 Integration releases use a separate version stream:
 
-- manifest and `INTEGRATION_VERSION`: `0.11.0` after the separate version bump;
+- manifest and `INTEGRATION_VERSION`: `0.11.0`;
 - future integration tag: `v0.11.0`;
 - GitHub Release name:
   `Controlel Home Assistant Integration v0.11.0`;

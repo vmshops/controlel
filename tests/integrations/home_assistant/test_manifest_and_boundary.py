@@ -27,7 +27,7 @@ def test_manifest_has_required_custom_component_contract():
         "iot_class": "local_push",
         "requirements": ["controlel==0.10.0"],
         "single_config_entry": True,
-        "version": "0.10.1",
+        "version": "0.11.0",
     }
 
 
@@ -37,7 +37,7 @@ def test_core_and_integration_versions_are_intentionally_independent():
         core_version = tomllib.load(pyproject_file)["project"]["version"]
 
     assert core_version == "0.10.0"
-    assert manifest["version"] == INTEGRATION_VERSION == "0.10.1"
+    assert manifest["version"] == INTEGRATION_VERSION == "0.11.0"
     assert manifest["requirements"] == ["controlel==0.10.0"]
     assert manifest["version"] != manifest["requirements"][0].partition("==")[2]
 

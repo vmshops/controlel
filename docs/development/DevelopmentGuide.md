@@ -133,8 +133,8 @@ rejection behavior. Generated files remain below ignored `dist/hacs/`.
 
 ## Configuration and options development
 
-The implementation is the `0.11.0` migration candidate; its release-boundary
-version bump is separate. Its manifest pins published immutable Core
+The implementation and release metadata are prepared as the unpublished
+`0.11.0` migration candidate. Its manifest pins published immutable Core
 `controlel==0.10.0`.
 
 New-entry configuration defaults are 0.3/0.1 Â°C hysteresis and 10/5-minute
