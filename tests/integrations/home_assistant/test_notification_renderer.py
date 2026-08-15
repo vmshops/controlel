@@ -10,7 +10,8 @@ from controlel.domain.notifications import (
     NotificationLevel,
     NotificationParameter,
 )
-from controlel.domain.operational_events import OperationalEventCategory, OperationalEventCode
+from controlel.domain.operational_events import OperationalEventCategory
+from controlel.domain.user_activities import UserActivityType
 from custom_components.controlel.notification_renderer import (
     FALLBACK_MESSAGE,
     FALLBACK_TITLE,
@@ -23,8 +24,8 @@ NOW = datetime(2026, 1, 1, tzinfo=UTC)
 
 def _intent(
     *,
-    title_code: str = "notification_title_corrective_action_dispatched",
-    message_code: str = "notification_message_corrective_action_dispatched",
+    title_code: str = "notification_title_source_state_corrected",
+    message_code: str = "notification_message_source_state_corrected",
     parameters: tuple[NotificationParameter, ...] = (),
 ) -> NotificationIntent:
     return NotificationIntent(
@@ -34,10 +35,12 @@ def _intent(
         OperationalEventCategory.SOURCE_RESILIENCE,
         title_code,
         message_code,
-        "event:00000001",
+        "activity:00000001",
+        UserActivityType.SOURCE_STATE_CORRECTED,
         "phone",
-        zone_id="living_room",
-        source_id="heat_source",
+        correlation_id="source-reconciliation:00000001",
+        zone_ids=("living_room",),
+        source_ids=("heat_source",),
         parameters=parameters,
     )
 
@@ -49,7 +52,7 @@ def _catalog(path: Path) -> dict[str, str]:
 def test_every_reachable_notification_code_has_matching_english_translation() -> None:
     source = _catalog(COMPONENT / "strings.json")
     english = _catalog(COMPONENT / "translations" / "en.json")
-    expected = {f"notification_{kind}_{code.value}" for code in OperationalEventCode for kind in ("title", "message")}
+    expected = {f"notification_{kind}_{item.value}" for item in UserActivityType for kind in ("title", "message")}
 
     assert set(source) == expected
     assert english == source
@@ -59,17 +62,17 @@ def test_every_reachable_notification_code_has_matching_english_translation() ->
 def test_renderer_returns_human_text_and_interpolates_only_safe_scalars() -> None:
     async def translations(_language: str) -> dict[str, str]:
         return {
-            "notification_title_corrective_action_dispatched": "Correction for {source_id}",
-            "notification_message_corrective_action_dispatched": (
-                "Requested {requested_command}; outcome {command_outcome}; zone {zone_id}; "
-                "deadline {deadline}; ignored {secret}; missing {event_detail_attempt}."
+            "notification_title_source_state_corrected": "Correction for {source_ids}",
+            "notification_message_source_state_corrected": (
+                "Requested {requested_action}; outcome {command_outcome}; zones {zone_ids}; "
+                "deadline {activity_parameter_deadline}; ignored {secret}; missing {activity_parameter_attempt}."
             ),
         }
 
     parameters = (
+        NotificationParameter("activity_parameter_deadline", "2026-01-01T00:10:00+00:00"),
         NotificationParameter("command_outcome", "dispatched"),
-        NotificationParameter("deadline", "2026-01-01T00:10:00+00:00"),
-        NotificationParameter("requested_command", "disable_heating"),
+        NotificationParameter("requested_action", "disable_heating"),
         NotificationParameter("secret", "must-not-leak"),
     )
     rendered = asyncio.run(
@@ -78,7 +81,7 @@ def test_renderer_returns_human_text_and_interpolates_only_safe_scalars() -> Non
 
     assert rendered.title == "Correction for heat_source"
     assert rendered.message == (
-        "Requested disable_heating; outcome dispatched; zone living_room; "
+        "Requested disable_heating; outcome dispatched; zones living_room; "
         "deadline 2026-01-01T00:10:00+00:00; ignored unknown; missing unknown."
     )
     assert "must-not-leak" not in rendered.message
@@ -88,8 +91,8 @@ def test_renderer_returns_human_text_and_interpolates_only_safe_scalars() -> Non
 def test_nested_or_untrusted_parameter_values_are_not_rendered() -> None:
     async def translations(_language: str) -> dict[str, str]:
         return {
-            "notification_title_corrective_action_dispatched": "Correction",
-            "notification_message_corrective_action_dispatched": "Outcome: {command_outcome}",
+            "notification_title_source_state_corrected": "Correction",
+            "notification_message_source_state_corrected": "Outcome: {command_outcome}",
         }
 
     intent = _intent(parameters=(NotificationParameter("command_outcome", "safe"),))

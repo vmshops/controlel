@@ -16,17 +16,22 @@ _SAFE_PARAMETER_NAMES = frozenset(
     {
         "command_outcome",
         "correlation_id",
-        "deadline",
-        "event_code",
-        "event_detail_attempt",
-        "event_detail_budget",
-        "event_detail_transition_history",
-        "new_state",
-        "previous_state",
+        "activity_parameter_attempt",
+        "activity_parameter_budget",
+        "activity_parameter_deadline",
+        "activity_parameter_desired_state",
+        "activity_parameter_duration_seconds",
+        "activity_parameter_protection_reason",
+        "activity_parameter_transition_history",
+        "activity_type",
+        "completion_outcome",
         "reason_code",
-        "requested_command",
-        "source_id",
-        "zone_id",
+        "reported_state",
+        "requested_action",
+        "source_activity_id",
+        "source_ids",
+        "status",
+        "zone_ids",
     }
 )
 _SCALAR_TYPES = (str, int, float, bool)
@@ -64,7 +69,7 @@ class HomeAssistantNotificationRenderer:
             message_template = _translation(translations, intent.message_code)
             if title_template is None or message_template is None:
                 return _fallback("notification_translation_missing")
-            parameters = _safe_parameters(intent)
+            parameters = safe_notification_parameters(intent)
             return RenderedNotification(
                 _render_template(title_template, parameters),
                 _render_template(message_template, parameters),
@@ -83,11 +88,15 @@ def _translation(translations: Mapping[str, str], code: str) -> str | None:
     return value if isinstance(value, str) and value.strip() else None
 
 
-def _safe_parameters(intent: NotificationIntent) -> dict[str, str]:
+def safe_notification_parameters(intent: NotificationIntent) -> dict[str, str]:
+    """Project only allowlisted scalar intent evidence for presentation."""
+
     candidates: dict[str, object] = {
+        "activity_type": intent.activity_type.value,
         "correlation_id": intent.correlation_id,
-        "source_id": intent.source_id,
-        "zone_id": intent.zone_id,
+        "source_activity_id": intent.source_activity_id,
+        "source_ids": ", ".join(intent.source_ids),
+        "zone_ids": ", ".join(intent.zone_ids),
     }
     candidates.update({parameter.key: parameter.value for parameter in intent.parameters})
     return {

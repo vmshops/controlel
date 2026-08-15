@@ -12,14 +12,14 @@ from urllib.request import Request, urlopen
 import controlel
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-CORE_VERSION = "0.8.0"
+CORE_VERSION = "0.10.0"
 CORE_REQUIREMENT = f"controlel=={CORE_VERSION}"
-PUBLIC_WHEEL_FILENAME = "controlel-0.8.0-py3-none-any.whl"
-PUBLIC_WHEEL_SIZE = 141_379
-PUBLIC_WHEEL_SHA256 = "b9f12d0fadf8a0a53e7bd102fc707bf2b518e776b92a2cdbee240562b4079d8f"
-PUBLIC_SDIST_FILENAME = "controlel-0.8.0.tar.gz"
-PUBLIC_SDIST_SIZE = 89_285
-PUBLIC_SDIST_SHA256 = "3aa051d187ab5b5305584f67893ed8a89c82bd7061fa3a28ecc4f9136b0fa84c"
+PUBLIC_WHEEL_FILENAME = "controlel-0.10.0-py3-none-any.whl"
+PUBLIC_WHEEL_SIZE = 151_194
+PUBLIC_WHEEL_SHA256 = "fdc15bf881b173f255bc8f7f0ef7295c13bbc0f9f736c2f79c4b766f583bbfaf"
+PUBLIC_SDIST_FILENAME = "controlel-0.10.0.tar.gz"
+PUBLIC_SDIST_SIZE = 98_034
+PUBLIC_SDIST_SHA256 = "babe73fb5779e49a59b57cabbd17522c0cb2c506e228e1b1c3dc4683d414e4dc"
 PYPI_METADATA_URL = f"https://pypi.org/pypi/controlel/{CORE_VERSION}/json"
 
 

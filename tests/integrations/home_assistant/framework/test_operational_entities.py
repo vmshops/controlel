@@ -711,8 +711,16 @@ async def test_diagnostics_are_allowlisted_json_safe_and_redact_unknown_entry_da
     assert "decision_code" not in operational_events["events"][0]
     assert diagnostics["counters"]["operational_event_records"] == operational_events["retained_count"]
     assert json.loads(json.dumps(operational_events, sort_keys=True)) == operational_events
+    user_activities = diagnostics["user_activities"]
+    assert user_activities["schema_version"] == 2
+    assert user_activities["capacity"] == 200
+    assert user_activities["retained_count"] <= user_activities["capacity"]
+    assert user_activities["source_last_processed_sequence"] <= operational_events["total_emitted"]
+    assert user_activities["source_events_missed"] == 0
+    assert user_activities["source_overflow_occurrences"] == 0
+    assert json.loads(json.dumps(user_activities, sort_keys=True)) == user_activities
     notification_policy = diagnostics["notification_policy"]
-    assert notification_policy["schema_version"] == 1
+    assert notification_policy["schema_version"] == 2
     assert notification_policy["enabled"] is False
     assert notification_policy["configured_recipient_count"] == 0
     assert notification_policy["recipients"] == []
