@@ -175,8 +175,14 @@ message codes are resolved through HA translations, interpolated from an explici
 safe scalar allowlist, and replaced by generic text on any rendering failure.
 Event selection, policy, cursor, deduplication, and rate limiting remain unchanged.
 
-M31C may consume operational events for statistics. Aggregation is not part of
-M31A or M31B.
+M31C.1 introduces passive heating-performance assessment from existing bounded
+episode observations. It deliberately emits no new `OperationalEvent`: the
+first slice establishes evidence, deterministic assessment, recovery, and a
+read boundary without finalizing anomaly transition policy. Repeated
+calculations therefore cannot create event or notification noise. M31C.2 may
+define meaningful, deduplicated performance transitions; M31C.3 may then map
+those transitions through `UserActivity` to notifications. Aggregation remains
+outside M31A and M31B.
 
 ## M31B.1 user-activity foundation
 

@@ -101,3 +101,45 @@ active immediately; there is no implicit action or indefinite mode.
 There is no persistence, polling, background thread, production scheduler
 adapter, modulation, DHW behavior, valve control, source routing,
 multiple-source topology, or real hardware adapter.
+
+## Passive heating-performance assessment
+
+M31C.1 evolves the existing heating-episode observation boundary into a
+deterministic, passive performance read model. The architectural meanings stay
+separate:
+
+- observation records measured, commanded, and reported evidence;
+- assessment explains what that retained evidence supports;
+- user activity describes a human-meaningful occurrence;
+- notification selects a user activity for a recipient;
+- a control decision chooses regulation behavior and may create a command.
+
+`HeatingPerformanceAssessor` evaluates only immutable episode snapshots. It
+describes temperature response while a successful heating-permission dispatch
+is explicitly present; it does not claim that a burner ran or that heat was
+physically delivered. Valid conclusions require a bounded multi-sample window,
+a minimum duration, a fresh latest measurement, stable target evidence, and no
+conflicting or truncated history. Missing, stale, out-of-order, conflicting, or
+evicted evidence produces `insufficient_evidence` rather than a fabricated
+failure.
+
+The initial live taxonomy is deliberately small: `heating_progress`,
+`temperature_trend`, and `target_approach`, with statuses
+`insufficient_evidence`, `normal`, `degraded`, `anomalous`, and `recovered`.
+Flat or falling response is reported only after configured evidence bounds are
+met. Being near target prevents a harmless small rise from being described as
+poor performance. Target changes rebase the window, episode identity prevents
+cross-episode sample reuse, and recovery requires distinct consecutive normal
+assessment revisions.
+
+`HeatingPerformanceMonitor` coalesces at most one pending immutable snapshot
+per zone, retains a bounded assessment history, isolates per-zone assessor
+failures, and exposes a versioned JSON-safe read snapshot. It owns no command
+port, scheduler, timer, polling loop, persistence, or control feedback. The
+runtime only submits snapshots; the existing explicit shadow drain performs
+assessment after control execution.
+
+M31C.2 remains responsible for finalized anomaly policy and broader
+source/actuator classifications. M31C.3 remains responsible for projecting
+canonical results into user activities, notifications, and adapter-facing
+analytics presentation.

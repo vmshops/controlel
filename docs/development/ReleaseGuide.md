@@ -1,26 +1,39 @@
 # Release guide
 
-## Home Assistant 0.11.0 UserActivity migration candidate
+## Core 0.11.0 M31C.1 heating-performance assessment foundation
 
 Core `0.10.0` is public and immutable from `core-v0.10.0`. Home Assistant
-integration `0.10.1` is the previous released presentation boundary on Core
-`0.8.0`. The unpublished `0.11.0` candidate pins exactly
-`controlel==0.10.0` and migrates the production notification path to
-`OperationalEventStream -> UserActivityComposer -> UserActivityStream ->
-NotificationPlanner -> NotificationProcessor -> HomeAssistantNotificationTransport`.
+integration `0.11.0` is the current released HA integration on that public core
+and keeps the manifest dependency pinned to `controlel==0.10.0`. The separate
+repository branch prepares the unpublished Core `0.11.0` candidate for the
+M31C.1 heating-performance assessment foundation.
 
-Core remains responsible for activity composition, policy, recipient-level
-selection, de-duplication, rate limits, and cursors. HA owns one coalesced
-event-loop drain, localization, notify-service transport, lifecycle, and
-bounded redacted diagnostics. The manifest and CI public-package compositions
-must use the immutable Core `0.10.0` wheel (`151,194` bytes, SHA-256
-`fdc15bf881b173f255bc8f7f0ef7295c13bbc0f9f736c2f79c4b766f583bbfaf`)
-and sdist (`98,034` bytes, SHA-256
-`babe73fb5779e49a59b57cabbd17522c0cb2c506e228e1b1c3dc4683d414e4dc`).
-The separate release boundary now sets the integration and manifest versions to
-`0.11.0`. The HACS artifact, tag, and GitHub Release remain prohibited until
-final validation succeeds. No Activity frontend, persistence, retry queue,
-M31C analytics/anomalies, or control feedback belongs in `0.11.0`.
+The semantic boundary is explicit:
+
+- Observation = directly measured / commanded / reported evidence
+- Assessment = deterministic interpretation of observations
+- UserActivity = human-meaningful occurrence
+- Notification = selected UserActivity consumer
+- Control Decision = separate regulation path
+
+Core `0.11.0` includes the canonical passive heating performance monitoring
+contracts: `HeatingPerformanceAssessmentCriteria`,
+`HeatingPerformanceAssessmentType`, `HeatingPerformanceStatus`,
+`HeatingPerformanceParameter`, `HeatingPerformanceWindowEvidence`,
+`HeatingPerformanceWindowAssessment`, `ZoneHeatingPerformanceState`,
+`HeatingPerformanceAssessmentErrorEvidence`, `HeatingPerformanceSnapshot`, and
+`HeatingPerformanceMonitor`; deterministic assessment and episode identities;
+JSON-safe diagnostics projection; bounded per-zone pending and assessment state;
+explicit evidence insufficiency; target-change rebasing; episode isolation;
+duplicate/out-of-order timestamp handling; deterministic recovery confirmation;
+independent multi-zone assessment; zero control feedback; no polling; no
+persistence; no HA dependency; no OperationalEvent transition emission yet; and
+no UserActivity/notification projection yet.
+
+This boundary does not claim M31C.2 anomaly transition policy is implemented.
+The public HA manifest remains pinned to immutable Core `0.10.0`, and no new HA
+release is prepared on this branch. The HACS artifact, tag, and GitHub Release
+remain prohibited until final validation succeeds.
 
 ## Milestone 31B.2 core 0.10.0 release boundary
 

@@ -7,10 +7,15 @@ from enum import StrEnum
 from threading import Lock
 from typing import Protocol
 
-from controlel.domain.heat_delivery import HeatingEpisode, HeatingPerformanceAssessment
+from controlel.domain.heat_delivery import (
+    HeatingEpisode,
+    HeatingPerformanceAssessment,
+    HeatingPerformanceSnapshot,
+)
 from controlel.domain.value_objects.zone_id import ZoneId
 
 from .heating_performance_assessor import HeatingPerformanceAssessor
+from .heating_performance_monitor import HeatingPerformanceMonitor
 
 MAX_RETAINED_HEATING_PERFORMANCE_ASSESSMENTS = 20
 
@@ -60,6 +65,7 @@ class ShadowHeatingPerformanceMonitor:
         max_assessments: int = MAX_RETAINED_HEATING_PERFORMANCE_ASSESSMENTS,
         max_pending_episodes: int = 20,
         assessor: EpisodeAssessor | None = None,
+        progress_monitor: HeatingPerformanceMonitor | None = None,
     ) -> None:
         if max_assessments <= 0:
             raise ValueError("max_assessments must be positive")
@@ -69,6 +75,7 @@ class ShadowHeatingPerformanceMonitor:
             raise ValueError("max_pending_episodes must be positive")
         self.enabled = enabled
         self._assessor = assessor or HeatingPerformanceAssessor()
+        self._progress_monitor = progress_monitor or HeatingPerformanceMonitor()
         self._max_pending_episodes = max_pending_episodes
         self._pending: deque[HeatingEpisode] = deque()
         self._assessments: deque[HeatingPerformanceAssessment] = deque(maxlen=max_assessments)
@@ -78,6 +85,12 @@ class ShadowHeatingPerformanceMonitor:
         self._last_dropped_pending_assessment: DroppedPendingAssessmentEvidence | None = None
         self._lock = Lock()
         self._drain_lock = Lock()
+
+    def submit_observation(self, episode: HeatingEpisode) -> None:
+        """Submit one immutable episode view for passive live-window assessment."""
+
+        if self.enabled:
+            self._progress_monitor.submit(episode)
 
     def submit_episode(self, episode: HeatingEpisode) -> None:
         if not self.enabled:
@@ -100,6 +113,7 @@ class ShadowHeatingPerformanceMonitor:
         """Assess queued episodes explicitly, outside control execution."""
 
         with self._drain_lock:
+            self._progress_monitor.assess_pending()
             completed = []
             while True:
                 with self._lock:
@@ -144,7 +158,14 @@ class ShadowHeatingPerformanceMonitor:
     @property
     def pending_episode_count(self) -> int:
         with self._lock:
-            return len(self._pending)
+            completed_count = len(self._pending)
+        return completed_count + self._progress_monitor.pending_observation_count
+
+    @property
+    def performance_snapshot(self) -> HeatingPerformanceSnapshot:
+        """Return the bounded M31C.1 diagnostics/read boundary."""
+
+        return self._progress_monitor.snapshot()
 
     @property
     def retained_assessment_count(self) -> int:

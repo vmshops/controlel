@@ -8,6 +8,7 @@ from controlel.application.runtime.runtime_processing_result import RuntimeProce
 from controlel.application.services.heating_diagnostics_projector import HeatingDiagnosticsProjector
 from controlel.application.services.heating_episode_observer import HeatingEpisodeObserver
 from controlel.application.services.heating_performance_assessor import HeatingPerformanceAssessor
+from controlel.application.services.heating_performance_monitor import HeatingPerformanceMonitor
 from controlel.application.services.shadow_heating_performance_monitor import ShadowHeatingPerformanceMonitor
 from controlel.application.services.source_control_policy import SourceControlOutcome
 from controlel.application.services.zone_heat_delivery_controller import ZoneHeatDeliveryController
@@ -25,6 +26,7 @@ from controlel.domain.heat_delivery import (
     HeatDeliveryMode,
     HeatDeliveryOwnership,
     HeatingEpisodeTerminationReason,
+    HeatingPerformanceAssessmentCriteria,
     ObservationQuality,
 )
 from controlel.domain.measurements.measurement import Measurement
@@ -272,6 +274,13 @@ class FailingPerformanceAssessor:
         raise RuntimeError(f"assessment failed for {episode.zone_id.value}")
 
 
+class FailingProgressAssessor:
+    criteria = HeatingPerformanceAssessmentCriteria()
+
+    def assess_progress(self, episode):
+        raise RuntimeError(f"live assessment failed for {episode.zone_id.value}")
+
+
 class FailingDiagnosticsProjector:
     def project(self, **kwargs):
         raise RuntimeError("diagnostic projection failed")
@@ -440,6 +449,7 @@ def control_trace(runtime, source, delivery_port, evaluations):
         ),
         runtime.source_control_state,
         runtime.zone_heat_demand_confirmation_states,
+        tuple(event.event_code for event in runtime.operational_event_stream.snapshot().events),
     )
 
 
@@ -522,15 +532,37 @@ def test_shadow_assessment_enabled_disabled_and_failed_have_identical_commands()
         runtimes.append(runtime)
 
     assert traces[0] == traces[1] == traces[2]
-    assert monitors[0].pending_episode_count == 1
+    assert monitors[0].pending_episode_count == 2
     assert monitors[1].pending_episode_count == 0
-    assert monitors[2].pending_episode_count == 1
+    assert monitors[2].pending_episode_count == 2
     for monitor in monitors:
         monitor.assess_pending()
     assert len(monitors[0].assessments) == 1
     assert monitors[1].assessments == ()
     assert monitors[2].errors == {ZoneId("bedroom"): "RuntimeError: assessment failed for bedroom"}
     assert all(runtime.heating_episode_observation_error is None for runtime in runtimes)
+
+
+def test_live_assessor_failure_after_control_execution_cannot_change_commands() -> None:
+    normal_runtime, normal_source, normal_delivery, sensor_id, _ = create_heat_delivery_runtime()
+    failed_runtime, failed_source, failed_delivery, failed_sensor_id, _ = create_heat_delivery_runtime()
+    failing_progress = HeatingPerformanceMonitor(assessor=FailingProgressAssessor())
+    failed_monitor = ShadowHeatingPerformanceMonitor(progress_monitor=failing_progress)
+    failed_runtime.heating_performance_monitor = failed_monitor
+
+    normal_results = run_heat_delivery_cycle(normal_runtime, sensor_id)
+    failed_results = run_heat_delivery_cycle(failed_runtime, failed_sensor_id)
+    failed_monitor.assess_pending()
+
+    assert [result.status for result in failed_results] == [result.status for result in normal_results]
+    assert [command.action for command in failed_source.commands] == [
+        command.action for command in normal_source.commands
+    ]
+    assert [(command.zone_id, command.kind, command.value) for command in failed_delivery.commands] == [
+        (command.zone_id, command.kind, command.value) for command in normal_delivery.commands
+    ]
+    assert failed_monitor.performance_snapshot.errors[0].exception_type == "RuntimeError"
+    assert failed_runtime.heating_episode_observation_error is None
 
 
 def test_shadow_assessment_enabled_and_disabled_have_identical_full_control_contracts() -> None:

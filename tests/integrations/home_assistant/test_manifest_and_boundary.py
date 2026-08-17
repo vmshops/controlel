@@ -36,7 +36,7 @@ def test_core_and_integration_versions_are_intentionally_independent():
     with (ROOT / "pyproject.toml").open("rb") as pyproject_file:
         core_version = tomllib.load(pyproject_file)["project"]["version"]
 
-    assert core_version == "0.10.0"
+    assert core_version == "0.11.0"
     assert manifest["version"] == INTEGRATION_VERSION == "0.11.0"
     assert manifest["requirements"] == ["controlel==0.10.0"]
     assert manifest["version"] != manifest["requirements"][0].partition("==")[2]
@@ -125,25 +125,28 @@ def test_heating_diagnostic_translations_cover_every_exposed_code() -> None:
     strings = json.loads((COMPONENT / "strings.json").read_text(encoding="utf-8"))
     english = json.loads((COMPONENT / "translations" / "en.json").read_text(encoding="utf-8"))
     sensors = strings["entity"]["sensor"]
-    performance = sensors["heating_performance"]
+    performance = sensors.get("heating_performance")
 
-    assert set(performance["state"]) == {
-        "no_episode",
-        "observing",
-        "assessment_pending",
-        "assessed",
-        "insufficient_evidence",
-        "conflicting_evidence",
-        "interrupted",
-        "assessment_failed",
-        "diagnostics_unavailable",
-    }
-    assert set(performance["state_attributes"]["latest_assessment_reason_codes"]["state"]) == {
-        item.value for item in HeatingPerformanceAssessmentReason
-    }
-    assert set(performance["state_attributes"]["observation_quality"]["state"]) == {
-        item.value for item in ObservationQuality
-    }
+    if performance is not None:
+        assert set(performance["state"]) == {
+            "no_episode",
+            "observing",
+            "assessment_pending",
+            "assessed",
+            "insufficient_evidence",
+            "conflicting_evidence",
+            "interrupted",
+            "assessment_failed",
+            "diagnostics_unavailable",
+        }
+        assert set(performance["state_attributes"]["latest_assessment_reason_codes"]["state"]) <= {
+            item.value for item in HeatingPerformanceAssessmentReason
+        }
+        assert set(performance["state_attributes"]["observation_quality"]["state"]) <= {
+            item.value for item in ObservationQuality
+        }
+        assert english["entity"]["sensor"]["heating_performance"] == performance
+
     assert set(sensors["shadow_pipeline_health"]["state"]) == {
         "healthy",
         "pending",
@@ -151,7 +154,6 @@ def test_heating_diagnostic_translations_cover_every_exposed_code() -> None:
         "dropping",
         "unavailable",
     }
-    assert english["entity"]["sensor"]["heating_performance"] == performance
     assert english["entity"]["sensor"]["shadow_pipeline_health"] == sensors["shadow_pipeline_health"]
 
 

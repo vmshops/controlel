@@ -3,6 +3,7 @@
 from collections import Counter
 from datetime import datetime
 
+from controlel.domain.commands.heating_action import HeatingAction
 from controlel.domain.heat_delivery import (
     HeatDeliveryObservation,
     HeatingEpisode,
@@ -11,11 +12,18 @@ from controlel.domain.heat_delivery import (
     HeatingPerformanceAssessmentCriteria,
     HeatingPerformanceAssessmentReason,
     HeatingPerformanceAssessmentStatus,
+    HeatingPerformanceAssessmentType,
     HeatingPerformanceEvidenceSummary,
+    HeatingPerformanceParameter,
+    HeatingPerformanceStatus,
+    HeatingPerformanceWindowAssessment,
+    HeatingPerformanceWindowEvidence,
     ObservationQuality,
     ObservationQualityCount,
     ObservedTemperatureDirection,
     ObservedTemperatureResponse,
+    heating_episode_id,
+    heating_performance_assessment_id,
 )
 
 
@@ -155,9 +163,194 @@ class HeatingPerformanceAssessor:
             termination_reason=episode.termination_reason,
         )
 
+    def assess_progress(self, episode: HeatingEpisode) -> HeatingPerformanceWindowAssessment:
+        """Assess a bounded active window without producing a control output."""
+
+        if not episode.samples:
+            raise ValueError("progress assessment requires at least one episode sample")
+        assessed_at = episode.samples[-1].captured_at
+        episode_identity = heating_episode_id(episode.zone_id, episode.started_at)
+        latest_sample = episode.samples[-1]
+        latest_source = latest_sample.source_observation
+        permission_enabled_at = latest_source.last_successful_dispatch_at
+        permission_enabled = latest_source.last_successful_dispatch_action is HeatingAction.ENABLE_HEATING
+        window_floor = assessed_at - self.criteria.observation_window
+        boundary = max(episode.started_at, window_floor)
+        if permission_enabled_at is not None:
+            boundary = max(boundary, permission_enabled_at)
+
+        target_changed = False
+        previous_target = None
+        for sample in episode.samples:
+            if sample.captured_at < boundary:
+                continue
+            if previous_target is not None and abs(sample.target_temperature - previous_target) > (
+                self.criteria.target_change_tolerance
+            ):
+                boundary = sample.captured_at
+                target_changed = True
+            previous_target = sample.target_temperature
+        selected = tuple(sample for sample in episode.samples if boundary <= sample.captured_at <= assessed_at)
+        if not selected:
+            selected = (latest_sample,)
+        window_started_at = selected[0].captured_at
+
+        values_by_timestamp: dict[datetime, float] = {}
+        duplicate_count = 0
+        conflicting = False
+        non_monotonic = False
+        previous_timestamp: datetime | None = None
+        for sample in selected:
+            observed = sample.zone_temperature
+            if observed.quality is not ObservationQuality.VALID:
+                continue
+            if observed.observed_at is None or observed.value is None:
+                raise ValueError("valid temperature observation must contain value and timestamp")
+            timestamp = observed.observed_at
+            value = float(observed.value)
+            if previous_timestamp is not None and timestamp < previous_timestamp:
+                non_monotonic = True
+            if timestamp in values_by_timestamp:
+                if values_by_timestamp[timestamp] == value:
+                    duplicate_count += 1
+                else:
+                    conflicting = True
+                continue
+            values_by_timestamp[timestamp] = value
+            previous_timestamp = timestamp
+
+        measurements = tuple(values_by_timestamp.items())
+        latest_observed = latest_sample.zone_temperature
+        evidence_quality = latest_observed.quality
+        reason: HeatingPerformanceAssessmentReason
+        status = HeatingPerformanceStatus.INSUFFICIENT_EVIDENCE
+
+        if episode.samples_truncated:
+            reason = HeatingPerformanceAssessmentReason.HISTORY_TRUNCATED
+            evidence_quality = ObservationQuality.DEGRADED
+        elif not permission_enabled or permission_enabled_at is None or permission_enabled_at > assessed_at:
+            reason = HeatingPerformanceAssessmentReason.HEATING_PERMISSION_NOT_ENABLED
+            evidence_quality = ObservationQuality.UNKNOWN
+        elif latest_observed.quality is not ObservationQuality.VALID:
+            reason = HeatingPerformanceAssessmentReason.NON_VALID_MEASUREMENTS_EXCLUDED
+        elif conflicting:
+            reason = HeatingPerformanceAssessmentReason.CONFLICTING_MEASUREMENTS
+            evidence_quality = ObservationQuality.CONFLICTING
+        elif non_monotonic:
+            reason = HeatingPerformanceAssessmentReason.NON_MONOTONIC_TIMESTAMPS
+            evidence_quality = ObservationQuality.CONFLICTING
+        elif latest_observed.observed_at is None or assessed_at - latest_observed.observed_at > (
+            self.criteria.maximum_measurement_age
+        ):
+            reason = HeatingPerformanceAssessmentReason.MEASUREMENT_NOT_FRESH
+            evidence_quality = ObservationQuality.STALE
+        elif len(measurements) < self.criteria.minimum_valid_sample_count:
+            reason = (
+                HeatingPerformanceAssessmentReason.TARGET_CHANGED
+                if target_changed
+                else HeatingPerformanceAssessmentReason.INSUFFICIENT_DISTINCT_MEASUREMENTS
+            )
+            evidence_quality = ObservationQuality.UNKNOWN
+        elif measurements[-1][0] - measurements[0][0] < self.criteria.minimum_observation_duration:
+            reason = (
+                HeatingPerformanceAssessmentReason.TARGET_CHANGED
+                if target_changed
+                else HeatingPerformanceAssessmentReason.MINIMUM_OBSERVATION_DURATION_NOT_MET
+            )
+            evidence_quality = ObservationQuality.UNKNOWN
+        else:
+            first_temperature = measurements[0][1]
+            latest_temperature = measurements[-1][1]
+            delta = latest_temperature - first_temperature
+            distance_now = latest_sample.target_temperature - latest_temperature
+            if abs(distance_now) <= self.criteria.near_target_tolerance and delta > (
+                -self.criteria.meaningful_temperature_change
+            ):
+                status = HeatingPerformanceStatus.NORMAL
+                reason = HeatingPerformanceAssessmentReason.NEAR_TARGET
+            elif delta >= self.criteria.meaningful_temperature_change:
+                status = HeatingPerformanceStatus.NORMAL
+                reason = HeatingPerformanceAssessmentReason.TEMPERATURE_RISING
+            elif delta <= -self.criteria.meaningful_temperature_change:
+                status = HeatingPerformanceStatus.ANOMALOUS
+                reason = HeatingPerformanceAssessmentReason.TEMPERATURE_FALLING
+            else:
+                status = HeatingPerformanceStatus.DEGRADED
+                reason = HeatingPerformanceAssessmentReason.TEMPERATURE_RESPONSE_FLAT
+            evidence_quality = ObservationQuality.VALID
+
+        evidence = _progress_evidence(
+            window_started_at=window_started_at,
+            assessed_at=assessed_at,
+            measurements=measurements,
+            target_temperature=latest_sample.target_temperature,
+            duplicate_count=duplicate_count,
+            evidence_quality=evidence_quality,
+            history_truncated=episode.samples_truncated,
+            source_observation_timestamps=tuple(sorted({sample.source_observation.captured_at for sample in selected})),
+        )
+        parameters = (
+            HeatingPerformanceParameter(
+                "permission_enabled_at",
+                permission_enabled_at.isoformat() if permission_enabled_at is not None else None,
+            ),
+            HeatingPerformanceParameter("target_rebased", target_changed),
+        )
+        return HeatingPerformanceWindowAssessment(
+            assessment_id=heating_performance_assessment_id(
+                episode_identity,
+                HeatingPerformanceAssessmentType.HEATING_PROGRESS,
+                assessed_at,
+            ),
+            assessment_type=HeatingPerformanceAssessmentType.HEATING_PROGRESS,
+            status=status,
+            assessed_at=assessed_at,
+            heating_episode_id=episode_identity,
+            zone_id=episode.zone_id,
+            source_id=None,
+            evidence=evidence,
+            reason=reason,
+            parameters=parameters,
+        )
+
 
 def _quality_counts(counts: Counter[ObservationQuality]) -> tuple[ObservationQualityCount, ...]:
     return tuple(ObservationQualityCount(quality=quality, count=counts[quality]) for quality in ObservationQuality)
+
+
+def _progress_evidence(
+    *,
+    window_started_at: datetime,
+    assessed_at: datetime,
+    measurements: tuple[tuple[datetime, float], ...],
+    target_temperature: float,
+    duplicate_count: int,
+    evidence_quality: ObservationQuality,
+    history_truncated: bool,
+    source_observation_timestamps: tuple[datetime, ...],
+) -> HeatingPerformanceWindowEvidence:
+    first_temperature = measurements[0][1] if measurements else None
+    latest_temperature = measurements[-1][1] if measurements else None
+    return HeatingPerformanceWindowEvidence(
+        observation_window_started_at=window_started_at,
+        observation_window_ended_at=assessed_at,
+        elapsed_duration=assessed_at - window_started_at,
+        starting_temperature=first_temperature,
+        latest_temperature=latest_temperature,
+        temperature_delta=(
+            latest_temperature - first_temperature
+            if first_temperature is not None and latest_temperature is not None
+            else None
+        ),
+        target_temperature=target_temperature,
+        distance_to_target_at_start=(target_temperature - first_temperature if first_temperature is not None else None),
+        distance_to_target_now=(target_temperature - latest_temperature if latest_temperature is not None else None),
+        sample_count=len(measurements),
+        duplicate_sample_count=duplicate_count,
+        evidence_quality=evidence_quality,
+        source_observation_timestamps=source_observation_timestamps,
+        history_truncated=history_truncated,
+    )
 
 
 def _has_actuator_command_evidence(observation: HeatDeliveryObservation) -> bool:

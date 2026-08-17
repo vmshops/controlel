@@ -20,19 +20,21 @@ The goal is to create a reliable heating controller capable of optimizing comfor
 
 ## Status
 
-Project phase: Home Assistant one-zone host vertical slice
+Project phase: Core M31C.1 heating-performance assessment foundation
 
-Core package version: 0.10.0 (published immutable M31B.2 release)
-
-Home Assistant integration candidate version: 0.11.0
+Core package version: 0.11.0 (unpublished M31C.1 release boundary)
+Home Assistant integration version: 0.11.0
 
 Use the latest published release for HACS custom-repository installation.
-Core `0.10.0` is the published immutable M31B.2 activity-driven notification
-release. Integration `0.10.1` is the previous presentation-only release on
-Core `0.8.0`. Integration `0.11.0` is the unpublished UserActivity migration
-candidate and pins exactly `controlel==0.10.0`. Its source and manifest version
-are now prepared at the separate release boundary; it is not yet published.
-Controlel is not listed in the default HACS store.
+Core `0.10.0` remains the latest public immutable release. Home Assistant
+integration `0.11.0` is the current released HA package on Core `0.10.0` and
+pins exactly `controlel==0.10.0`. The repository branch prepares the separate
+Core `0.11.0` candidate for M31C.1, which is passive observation/assessment
+only and is not yet published. It adds no control feedback, no anomaly
+OperationalEvent transition policy, and no UserActivity/notification projection.
+M31C.2 is future anomaly transition/policy work. M31C.3 is future
+UserActivity/notification projection work. Controlel is not listed in the
+default HACS store.
 
 ## Home Assistant installation
 
