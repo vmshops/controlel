@@ -1,0 +1,48 @@
+# release-metadata/releases.yaml
+# Schema version: 1
+# This file is repository-owned canonical release metadata for public releases.
+# Artifacts (paths/hashes) are recorded in provenance manifests produced by
+# the canonical build tooling (e.g., dist/core-0.11.0-final/core-release-provenance.json)
+
+metadata_version: 1
+
+releases:
+  - release_id: controlel-core-0.11.0
+    component: core
+    title: "Controlel Core 0.11.0"
+    version: "0.11.0"
+    status: published
+    tag: "core-v0.11.0"
+    commit_sha: "20d555accfcad8bf95318d588647484e829b73e9"
+    tagged_at: "2026-08-17T12:25:57+02:00"
+    summary: "M31C.1 Heating Performance Assessment Foundation (passive assessment only)"
+    highlights:
+      - "Canonical passive heating performance monitoring"
+      - "Deterministic assessment/episode identities and JSON-safe diagnostics"
+      - "Independent multi-zone assessment; duplicate/out-of-order handling"
+    compatibility:
+      home_assistant_integration: "0.11.0"
+      ha_manifest_pinned_core: "0.10.0"
+      python: ">=3.13"
+      pydantic: ">=2.0"
+    notes:
+      - "M31C.1 is passive observation/assessment only — no control feedback."
+      - "M31C.2 anomaly transition policy and M31C.3 notification projection are future work."
+
+  - release_id: controlel-home_assistant-0.11.0
+    component: home_assistant
+    title: "Controlel Home Assistant integration 0.11.0"
+    version: "0.11.0"
+    status: published
+    tag: "v0.11.0"
+    commit_sha: "cc0aaf423fa59d0d8a6dcd83f745c0a055835fbf"
+    tagged_at: "2026-08-15T12:25:43+02:00"  # tag creation timestamp (tagger date)
+    summary: "Home Assistant integration 0.11.0 (integration package)."
+    highlights:
+      - "HA integration 0.11.0 is published and intentionally pins controlel==0.10.0"
+    compatibility:
+      required_core: "0.10.0"
+      config_entry_version: 1
+    notes:
+      - "Core dependency for the HA integration remains pinned to the published core 0.10.0."
+      - "HA releases use GitHub Release model with the canonical controlel.zip artifact." 

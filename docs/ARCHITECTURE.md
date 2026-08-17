@@ -2,8 +2,8 @@
 
 The maintained architecture description is
 [architecture/02_Architecture.md](architecture/02_Architecture.md). Repository
-changes must also follow the boundary and truthfulness rules in
-[`AGENTS.md`](../AGENTS.md).
+changes must also follow the boundary and truthfulness rules in the repository
+root AGENTS.md (see the file at the repository root).
 
 The allowed internal dependency direction is:
 

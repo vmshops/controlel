@@ -22,19 +22,26 @@ The goal is to create a reliable heating controller capable of optimizing comfor
 
 Project phase: Core M31C.1 heating-performance assessment foundation
 
-Core package version: 0.11.0 (unpublished M31C.1 release boundary)
+Core package version: 0.11.0 (published on PyPI)
 Home Assistant integration version: 0.11.0
 
-Use the latest published release for HACS custom-repository installation.
-Core `0.10.0` remains the latest public immutable release. Home Assistant
-integration `0.11.0` is the current released HA package on Core `0.10.0` and
-pins exactly `controlel==0.10.0`. The repository branch prepares the separate
-Core `0.11.0` candidate for M31C.1, which is passive observation/assessment
-only and is not yet published. It adds no control feedback, no anomaly
-OperationalEvent transition policy, and no UserActivity/notification projection.
-M31C.2 is future anomaly transition/policy work. M31C.3 is future
-UserActivity/notification projection work. Controlel is not listed in the
-default HACS store.
+Important: Home Assistant integration 0.11.0 intentionally depends on the
+published Core 0.10.0 (see custom_components/controlel/manifest.json which pins
+`controlel==0.10.0`). The repository also maintains the Core 0.11.0 candidate
+(tag: `core-v0.11.0`) and its provenance records under `release-metadata/`.
+
+M31C.1 is a passive observation and deterministic assessment foundation:
+- passive assessment only (no control feedback)
+- no polling
+- no persistence
+- explicit insufficient-evidence handling
+
+Future milestones:
+- M31C.2: planned anomaly transition / OperationalEvent policy work
+- M31C.3: planned UserActivity → notification projection
+
+Refer to `release-metadata/releases.yaml` and `docs/releases/` for canonical
+release facts and human-oriented release pages.
 
 ## Home Assistant installation
 

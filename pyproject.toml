@@ -46,7 +46,10 @@ include = ["controlel*"]
 dev = [
     "pytest",
     "ruff",
-    "mypy"
+    "mypy",
+    "PyYAML>=6.0",
+    "mkdocs>=1.6",
+    "mkdocs-material>=9.0"
 ]
 
 

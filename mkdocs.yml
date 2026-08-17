@@ -1,0 +1,49 @@
+site_name: Controlel Documentation
+site_description: "Controlel technical documentation (developer & release docs)"
+repo_name: vmshops/controlel
+
+nav:
+  - Home: index.md
+  - Getting Started: operations/HomeAssistantInstallation.md
+  - Architecture: development/ReleaseGuide.md
+  - Releases:
+    - "Releases index": releases/index.md
+    - "Core 0.11.0": releases/core-0.11.0.md
+    - "Home Assistant 0.11.0": releases/home-assistant-0.11.0.md
+  - Development: development/DevelopmentGuide.md
+  - More:
+    - Architecture Overview: ARCHITECTURE.md
+    - Vision: VISION.md
+    - Project specification: ProjectSpecification.md
+    - Architecture Details:
+      - Vision: architecture/00_Vision.md
+      - Architecture: architecture/02_Architecture.md
+      - Domain model: architecture/03_Domain_Model.md
+      - Event model: architecture/04_Event_Model.md
+      - State model: architecture/05_State_Model.md
+      - Control flow: architecture/8_Control_Flow.md
+      - System architecture: architecture/SystemArchitecture.md
+      - Roadmap: architecture/07_Roadmap.md
+    - Release fragments: release-fragments/README.md
+    - Design:
+      - Data model: design/DataModel.md
+    - Operations:
+      - Deployment: operations/Deployment.md
+      - Diagnostics: operations/Diagnostics.md
+      - Entity reference: operations/EntityReference.md
+      - Troubleshooting: operations/Troubleshooting.md
+    - Assets:
+      - Architecture assets: assets/architecture/README.md
+      - Screenshots: assets/screenshots/README.md
+    - Decisions: decisions/ADR-001-core-independence.md
+
+theme:
+  name: material
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - toc:
+      permalink: true
