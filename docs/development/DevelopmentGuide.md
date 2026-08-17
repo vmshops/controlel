@@ -6,7 +6,7 @@ The ordinary development environment deliberately has no Home Assistant
 dependency. Use these separate suites:
 
 ```text
-# A. Repository Core 0.10.0 and release-contract tests
+# A. Repository Core 0.11.0 and release-contract tests
 python -m pytest tests/domain tests/application tests/infrastructure \
   tests/architecture tests/packaging
 
@@ -45,10 +45,10 @@ This environment loads `custom_components/controlel` from the checkout through
 the normal Home Assistant custom-component test mechanism, but imports the core
 from `site-packages`. It must not add `src` to `PYTHONPATH`.
 
-Integration `0.10.1` is the previous released Core `0.8.0` composition. The
-`0.11.0` migration candidate declares immutable public Core `0.10.0` and runs
-both HA suites against its external site-packages installation. Suite A remains
-the independent repository-Core boundary.
+Integration `0.11.0` is the current released HA package on public Core
+`0.10.0`. The repository Core `0.11.0` candidate remains separate and runs
+both HA suites against the external site-packages installation of the public
+core. Suite A remains the independent repository-Core boundary.
 
 Home Assistant 2026.7.3 imports POSIX-only `fcntl` and `resource` modules in
 its pytest bootstrap, so the standard framework command does not run in native
@@ -133,9 +133,9 @@ rejection behavior. Generated files remain below ignored `dist/hacs/`.
 
 ## Configuration and options development
 
-The implementation and release metadata are prepared as the unpublished
-`0.11.0` migration candidate. Its manifest pins published immutable Core
-`controlel==0.10.0`.
+The implementation and release metadata are prepared as the unpublished Core
+`0.11.0` M31C.1 candidate. Its integration manifest still pins the published
+immutable Core `controlel==0.10.0`.
 
 New-entry configuration defaults are 0.3/0.1 Â°C hysteresis and 10/5-minute
 minimum on/off times. Legacy entries normalize missing values to zero.
