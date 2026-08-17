@@ -147,7 +147,13 @@ There is no raw `OperationalEvent` notification production path, HA dependency,
 polling, retry loop, persistence, or control influence. The separate HA `0.11.0`
 candidate now consumes this public boundary through one coalesced
 activity-and-notification drain; that integration migration is not part of
-M31B.2. Activity frontend work and M31C analytics remain deferred.
+M31B.2. Activity frontend work remains deferred. M31C.1 now establishes the
+Core-only passive heating-performance assessment foundation: bounded episode
+windows, explicit evidence sufficiency, deterministic normal/degraded/anomalous
+and confirmed-recovery results, per-zone isolation, and a JSON-safe read
+boundary. It adds no polling, persistence, notification mapping, or control
+feedback. Final anomaly policy remains M31C.2 and human-facing activity and
+notification projection remains M31C.3.
 
 ## Milestone 23: Home Assistant one-zone host vertical slice
 

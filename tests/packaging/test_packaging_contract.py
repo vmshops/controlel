@@ -153,6 +153,14 @@ def test_core_artifact_verification_binds_representative_public_contracts() -> N
         "UserActivityStream",
         "UserActivityComposer",
         "user_activity_snapshot_to_dict",
+        "HeatingPerformanceAssessmentCriteria",
+        "HeatingPerformanceAssessmentType",
+        "HeatingPerformanceStatus",
+        "HeatingPerformanceWindowAssessment",
+        "HeatingPerformanceSnapshot",
+        "HeatingPerformanceAssessor",
+        "HeatingPerformanceMonitor",
+        "heating_performance_snapshot_to_dict",
     }
     assert all(contract in clean_install for contract in required_contracts)
     for module in (
@@ -177,6 +185,10 @@ def test_core_artifact_verification_binds_representative_public_contracts() -> N
         "domain/user_activities/__init__.py",
         "application/services/user_activity_stream.py",
         "application/services/user_activity_composer.py",
+        "domain/heat_delivery/performance.py",
+        "application/services/heating_performance_assessor.py",
+        "application/services/heating_performance_monitor.py",
+        "application/services/shadow_heating_performance_monitor.py",
     ):
         assert module in validator
 

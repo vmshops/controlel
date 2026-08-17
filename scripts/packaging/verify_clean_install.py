@@ -41,6 +41,11 @@ from controlel.application.services.user_activity_stream import (
 )
 from controlel.application.services.notification_planner import NotificationPlanner
 from controlel.application.services.notification_processor import NotificationProcessor
+from controlel.application.services.heating_performance_assessor import HeatingPerformanceAssessor
+from controlel.application.services.heating_performance_monitor import (
+    HeatingPerformanceMonitor,
+    heating_performance_snapshot_to_dict,
+)
 from controlel.application.services.notification_policy import (
     ACTIVITY_NOTIFICATION_RULES,
     notification_level_for_event,
@@ -79,6 +84,13 @@ from controlel.domain.notifications import (
     NotificationLevel,
     NotificationPolicy,
     NotificationRecipient,
+)
+from controlel.domain.heat_delivery import (
+    HeatingPerformanceAssessmentCriteria,
+    HeatingPerformanceAssessmentType,
+    HeatingPerformanceSnapshot,
+    HeatingPerformanceStatus,
+    HeatingPerformanceWindowAssessment,
 )
 from controlel.domain.runtime_supervision import CommandAuthority, RestartPolicy, SupervisorPhase
 from controlel.domain.repositories.sensor_repository import SensorRepository
@@ -209,6 +221,24 @@ assert notification_payload["enabled"] is False
 assert notification_level_for_event(OperationalEventCode.RUNTIME_FATAL) is NotificationLevel.CRITICAL
 assert set(ACTIVITY_NOTIFICATION_RULES) == set(UserActivityType)
 assert notification_rule_for_activity(UserActivityType.MEASUREMENT_DEGRADED) is not None
+
+m31c_1_contracts = (
+    HeatingPerformanceAssessmentCriteria,
+    HeatingPerformanceAssessmentType,
+    HeatingPerformanceStatus,
+    HeatingPerformanceWindowAssessment,
+    HeatingPerformanceSnapshot,
+    HeatingPerformanceAssessor,
+    HeatingPerformanceMonitor,
+)
+for contract in m31c_1_contracts:
+    module_path = Path(importlib.import_module(contract.__module__).__file__).resolve()
+    assert module_path.is_relative_to(package_path.parent)
+performance_monitor = HeatingPerformanceMonitor(assessment_capacity=2, pending_zone_capacity=2)
+performance_payload = heating_performance_snapshot_to_dict(performance_monitor.snapshot())
+assert performance_payload["schema_version"] == 1
+assert performance_payload["assessment_capacity"] == 2
+assert performance_payload["zones"] == []
 activity_notification_planner = NotificationPlanner(
     NotificationPolicy(
         enabled=True,

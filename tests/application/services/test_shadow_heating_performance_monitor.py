@@ -4,6 +4,7 @@ from threading import Event, Thread
 import pytest
 
 from controlel.application.services.heating_performance_assessor import HeatingPerformanceAssessor
+from controlel.application.services.heating_performance_monitor import heating_performance_snapshot_to_dict
 from controlel.application.services.shadow_heating_performance_monitor import (
     MAX_RETAINED_HEATING_PERFORMANCE_ASSESSMENTS,
     PendingAssessmentDropReason,
@@ -85,6 +86,25 @@ def test_disabled_monitor_produces_no_assessment() -> None:
     assert monitor.pending_episode_count == 0
     assert monitor.assessments == ()
     assert monitor.errors == {}
+
+
+def test_live_observation_is_assessed_only_by_explicit_shadow_drain() -> None:
+    monitor = ShadowHeatingPerformanceMonitor()
+    candidate = episode("living_room")
+
+    monitor.submit_observation(candidate)
+
+    assert monitor.pending_episode_count == 1
+    assert monitor.performance_snapshot.assessments == ()
+
+    monitor.assess_pending()
+    snapshot = monitor.performance_snapshot
+    payload = heating_performance_snapshot_to_dict(snapshot)
+
+    assert snapshot.pending_observation_count == 0
+    assert len(snapshot.assessments) == 1
+    assert snapshot.zones[0].active_heating_episode_id is None
+    assert payload["assessments"][0]["zone_id"] == "living_room"
 
 
 def test_assessor_failure_is_contained_as_zone_error_evidence() -> None:

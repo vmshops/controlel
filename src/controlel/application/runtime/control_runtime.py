@@ -1135,8 +1135,10 @@ class ControlRuntime:
                     source_observation=source_observation,
                     captured_at=captured_at,
                 )
-                if episode is not None and episode.ended_at is not None:
-                    self.heating_performance_monitor.submit_episode(episode)
+                if episode is not None:
+                    self.heating_performance_monitor.submit_observation(episode)
+                    if episode.ended_at is not None:
+                        self.heating_performance_monitor.submit_episode(episode)
             except Exception as error:
                 errors[zone_input.zone_id] = f"{type(error).__name__}: {error}"
                 error_evidence[zone_input.zone_id] = HeatingEpisodeObservationErrorEvidence(
@@ -1167,6 +1169,7 @@ class ControlRuntime:
                 reason=reason,
             )
             for episode in episodes:
+                self.heating_performance_monitor.submit_observation(episode)
                 self.heating_performance_monitor.submit_episode(episode)
             self.heating_episode_observation_global_error_evidence = None
         except Exception as error:
