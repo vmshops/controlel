@@ -1,0 +1,56 @@
+id: CTL-EDU-001
+kind: education
+topic: "Thermometer freshness"
+title: "What happens if your room thermometer stops sending fresh readings?"
+subtitle: "Why freshness matters and how Controlel protects your home"
+fps: 30
+duration_seconds: 64
+music:
+  file: public/audio/music/ambient.mp3
+  volume: 0.45
+scenes:
+  - id: intro
+    type: Intro
+    duration: 8
+    headline: "Your room thermometer reports 21.4 °C"
+    caption: "Fresh temperature readings are arriving normally."
+    voiceover: "In normal operation, your room thermometer sends fresh temperature readings to Controlel. The system uses these values to regulate heating."
+  - id: sensor
+    type: Sensor
+    duration: 10
+    start_value: 21.4
+    last_update_from_minutes: 2
+    last_update_to_minutes: 15
+    headline: "Thermometer stops reporting"
+    caption: "The last shown value still looks normal — but it is no longer fresh."
+    voiceover: "Sometimes a thermometer can stop reporting while the last number still looks fine. That number may be old. Controlel tracks freshness — not just the value."
+  - id: problem
+    type: Problem
+    duration: 9
+    headline: "Why this matters"
+    caption: "Heating with old numbers can be unsafe or inefficient."
+    voiceover: "Using old temperature values can cause a controller to act on incorrect information. A safe controller should avoid blind actions based on stale data."
+  - id: grace
+    type: Grace
+    duration: 14
+    headline: "Protection period"
+    caption: "Controlel waits for a configured protection period before acting."
+    voiceover: "Controlel does not react immediately. It waits for a configured protection period to allow temporary communication problems to recover. This prevents unnecessary shutdowns."
+  - id: fallback
+    type: SafeFallback
+    duration: 11
+    headline: "Safe fallback requested"
+    caption: "No fresh temperature arrived — a safe heating fallback is requested."
+    voiceover: "If no fresh temperature arrives before the protection period expires, Controlel requests a safe heating fallback to protect the system and occupants."
+  - id: recovery
+    type: Recovery
+    duration: 8
+    headline: "Fresh measurement received"
+    caption: "Normal operation can recover automatically."
+    voiceover: "When a fresh measurement returns, the warning clears and normal operation can resume automatically."
+  - id: outro
+    type: Outro
+    duration: 4
+    headline: "Controlel — protect and explain"
+    caption: "Regulate clearly · Protect the heating system · Show what happened"
+    voiceover: "Controlel is open-source intelligent control for Home Assistant. Test it, report issues, and help us improve." 

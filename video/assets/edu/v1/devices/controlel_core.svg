@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="140" height="140" viewBox="0 0 140 140">
+  <rect width="140" height="140" rx="20" fill="#07181a" />
+  <circle cx="70" cy="60" r="34" fill="#07181a" stroke="#00f0ff" stroke-width="6" />
+  <text x="70" y="76" text-anchor="middle" fill="#e6f5ff" font-size="14">CTL</text>
+</svg>

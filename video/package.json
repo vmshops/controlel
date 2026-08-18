@@ -1,0 +1,32 @@
+{
+  "name": "controlel-video",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "prepare": "node scripts/prepare-projects.mjs && node scripts/prepare-assets.mjs",
+    "prepare-assets": "node scripts/prepare-assets.mjs",
+    "typecheck": "npm run prepare && tsc --noEmit",
+    "studio": "npm run prepare && remotion studio",
+    "compositions": "npm run prepare && remotion compositions src/index.ts",
+    "render": "npm run prepare && remotion render CTL-EDU-001 output/CTL-EDU-001.mp4 --quiet",
+    "render:vis": "npm run prepare && remotion render CTL-VIS-001 output/CTL-VIS-001.mp4 --quiet"
+  },
+  "dependencies": {
+    "@remotion/cli": "^4.0.512",
+    "@remotion/lottie": "^4.0.512",
+    "js-yaml": "^4.3.1",
+    "lottie-web": "^5.13.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "remotion": "^4.0.512"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/react": "^18.2.21",
+    "@types/react-dom": "^18.2.7",
+    "typescript": "^5.6.2"
+  },
+  "allowScripts": {
+    "esbuild@0.28.1": true
+  }
+}

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="675" viewBox="0 0 1200 675">
+  <rect width="1200" height="675" fill="#071422"/>
+  <rect x="60" y="80" width="1080" height="490" rx="16" fill="#0f1720" stroke="#0b2a2f"/>
+  <g id="room">
+    <rect x="120" y="140" width="360" height="260" rx="12" fill="#0b2a2f"/>
+    <rect x="560" y="140" width="420" height="260" rx="12" fill="#0b2a2f"/>
+  </g>
+</svg>

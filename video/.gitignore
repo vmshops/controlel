@@ -1,0 +1,6 @@
+/output/
+/src/generated/projects.json
+/assets/vendor-local/
+/src/generated/assets/
+
+/node_modules/

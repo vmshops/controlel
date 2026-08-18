@@ -1,0 +1,41 @@
+assets:
+  living_room:
+    type: environment
+    format: svg
+    path: environments/room.svg
+  thermometer:
+    type: device
+    format: svg
+    path: devices/thermometer.svg
+    supported_states:
+      - normal
+      - stale
+      - offline
+      - recovered
+  radiator:
+    type: device
+    format: svg
+    path: devices/radiator.svg
+    supported_states:
+      - idle
+      - heating_low
+      - heating_high
+      - blocked
+  controlel_core:
+    type: device
+    format: svg
+    path: devices/controlel_core.svg
+    supported_states:
+      - normal
+      - evaluating
+      - waiting
+      - protection
+      - error
+  packet:
+    type: effect
+    format: svg
+    path: effects/packet.svg
+  timer:
+    type: icon
+    format: svg
+    path: icons/timer.svg

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="120" viewBox="0 0 320 120">
+  <rect x="0" y="0" width="320" height="120" fill="none"/>
+  <g id="radiator">
+    <rect x="10" y="30" width="300" height="60" rx="8" fill="#23333a" />
+    <g fill="#0b1012" opacity="0.08">
+      <rect x="26" y="36" width="40" height="48" rx="4" />
+      <rect x="86" y="36" width="40" height="48" rx="4" />
+      <rect x="146" y="36" width="40" height="48" rx="4" />
+      <rect x="206" y="36" width="40" height="48" rx="4" />
+      <rect x="266" y="36" width="40" height="48" rx="4" />
+    </g>
+  </g>
+</svg>
