@@ -176,13 +176,24 @@ safe scalar allowlist, and replaced by generic text on any rendering failure.
 Event selection, policy, cursor, deduplication, and rate limiting remain unchanged.
 
 M31C.1 introduces passive heating-performance assessment from existing bounded
-episode observations. It deliberately emits no new `OperationalEvent`: the
-first slice establishes evidence, deterministic assessment, recovery, and a
-read boundary without finalizing anomaly transition policy. Repeated
-calculations therefore cannot create event or notification noise. M31C.2 may
-define meaningful, deduplicated performance transitions; M31C.3 may then map
-those transitions through `UserActivity` to notifications. Aggregation remains
-outside M31A and M31B.
+episode observations. Anomaly v1 adds the first deliberately narrow M31C.2
+transition policy: an evidence-qualified `temperature_falling` assessment can
+emit `heating_anomaly_started`, confirmed recovery emits
+`heating_anomaly_cleared`, and an episode boundary without recovery evidence
+emits `heating_anomaly_observation_ended`. Observation end means that no
+further evidence is available; it does not claim recovery. The event vocabulary reserves
+`heating_anomaly_changed` for a future material lifecycle revision, but the
+single v1 detector does not produce one. Stable repeated assessments update
+bounded read state without repeatedly emitting identical events. Every event uses the
+existing `performance` category, operational stream, episode correlation, and
+anomaly lifecycle activity identity; evidence remains command/observation
+separated.
+
+These technical events are intentionally not composed into `UserActivity`, so
+they cannot reach the notification planner or processor. M31C.3 may add that
+mapping through the existing exhaustive activity and notification policies.
+Aggregation remains outside M31A and M31B. **Anomaly v1 is an observability
+feature, not a control feature.**
 
 ## M31B.1 user-activity foundation
 

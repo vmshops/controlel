@@ -10,12 +10,15 @@ from controlel.application.services.heating_performance_monitor import (
     HeatingPerformanceMonitor,
     heating_performance_snapshot_to_dict,
 )
+from controlel.application.services.operational_event_recorder import OperationalEventRecorder
 from controlel.domain.commands.heating_action import HeatingAction
 from controlel.domain.demands.building_heat_demand_status import BuildingHeatDemandStatus
 from controlel.domain.heat_delivery import (
+    HeatingAnomalyLifecycle,
     HeatingDemandTransition,
     HeatingEpisode,
     HeatingEpisodeSample,
+    HeatingEpisodeTerminationReason,
     HeatingPerformanceAssessmentCriteria,
     HeatingPerformanceAssessmentReason,
     HeatingPerformanceAssessmentType,
@@ -24,6 +27,7 @@ from controlel.domain.heat_delivery import (
     ObservationQuality,
     ObservedValue,
 )
+from controlel.domain.operational_events import OperationalEventCode
 from controlel.domain.value_objects.zone_id import ZoneId
 
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
@@ -101,6 +105,18 @@ def _criteria(**changes: object) -> HeatingPerformanceAssessmentCriteria:
         maximum_measurement_age=timedelta(minutes=10),
         recovery_confirmation_count=2,
         **changes,
+    )
+
+
+def _completed_episode(
+    episode: HeatingEpisode,
+    *,
+    reason: HeatingEpisodeTerminationReason = HeatingEpisodeTerminationReason.DEMAND_CLEARED,
+) -> HeatingEpisode:
+    return replace(
+        episode,
+        ended_at=episode.samples[-1].captured_at,
+        termination_reason=reason,
     )
 
 
@@ -213,6 +229,181 @@ def test_missing_or_stale_latest_measurement_is_insufficient(latest: HeatingEpis
 
     assert assessment.status is HeatingPerformanceStatus.INSUFFICIENT_EVIDENCE
     assert assessment.evidence.evidence_quality in {ObservationQuality.UNKNOWN, ObservationQuality.STALE}
+
+
+def test_indeterminate_assessment_does_not_create_an_anomaly() -> None:
+    monitor = HeatingPerformanceMonitor(criteria=_criteria())
+    monitor.submit(
+        _episode(
+            "living_room",
+            _sample(0, 20.0),
+            _sample(15, 19.8),
+            _sample(30, None, quality=ObservationQuality.UNKNOWN),
+        )
+    )
+
+    assessment = monitor.assess_pending()[0]
+    snapshot = monitor.snapshot()
+
+    assert assessment.status is HeatingPerformanceStatus.INSUFFICIENT_EVIDENCE
+    assert snapshot.active_anomalies == ()
+    assert snapshot.anomaly_transitions == ()
+
+
+def test_performance_anomaly_start_active_clear_is_deduplicated_and_correlated() -> None:
+    recorder = OperationalEventRecorder()
+    monitor = HeatingPerformanceMonitor(criteria=_criteria(), anomaly_event_recorder=recorder)
+    falling = _episode("living_room", _sample(0, 20.0), _sample(15, 19.85), _sample(30, 19.7))
+    continuing = _episode(
+        "living_room",
+        *falling.samples,
+        _sample(45, 19.5),
+    )
+    first_normal = _episode(
+        "living_room",
+        _sample(0, 20.0),
+        _sample(15, 19.85),
+        _sample(30, 19.7),
+        _sample(45, 19.9),
+        _sample(60, 20.1),
+    )
+    second_normal = replace(
+        first_normal,
+        total_sample_count=6,
+        samples=(*first_normal.samples, _sample(75, 20.3)),
+        current_temperature=20.3,
+    )
+
+    monitor.submit(falling)
+    monitor.assess_pending()
+    monitor.submit(falling)
+    monitor.assess_pending()
+    monitor.submit(continuing)
+    monitor.assess_pending()
+
+    active = monitor.snapshot().active_anomalies[0]
+    assert active.lifecycle is HeatingAnomalyLifecycle.ACTIVE
+    assert active.reason_code == "temperature_falling"
+    assert active.zone_id == ZoneId("living_room")
+    assert active.source_id is None
+    assert active.heating_episode_id == "heating_episode:living_room:2026-01-01T00:00:00+00:00"
+    assert active.last_observed_at == NOW + timedelta(minutes=45)
+    assert len(active.evidence.source_observation_timestamps) == 3
+
+    monitor.submit(first_normal)
+    monitor.assess_pending()
+    assert monitor.snapshot().active_anomalies[0].is_active is True
+    monitor.submit(second_normal)
+    monitor.assess_pending()
+
+    snapshot = monitor.snapshot()
+    assert snapshot.active_anomalies == ()
+    assert [item.lifecycle for item in snapshot.anomaly_transitions] == [
+        HeatingAnomalyLifecycle.STARTED,
+        HeatingAnomalyLifecycle.CLEARED,
+    ]
+    assert snapshot.total_anomaly_transitions_emitted == 2
+    assert snapshot.anomaly_transitions[-1].lifecycle_reason_code == "performance_recovered"
+    assert snapshot.anomaly_transitions[-1].cleared_at == NOW + timedelta(minutes=75)
+    events = recorder.stream.snapshot().events
+    assert [event.event_code for event in events] == [
+        OperationalEventCode.HEATING_ANOMALY_STARTED,
+        OperationalEventCode.HEATING_ANOMALY_CLEARED,
+    ]
+    assert len({event.activity_id for event in events}) == 1
+    assert {event.correlation_id for event in events} == {active.heating_episode_id}
+    assert all(event.requested_command is None and event.command_outcome is None for event in events)
+    assert all(event.event_code is not OperationalEventCode.HEATING_ANOMALY_OBSERVATION_ENDED for event in events)
+
+
+def test_episode_closure_while_anomaly_remains_present_ends_observation_without_clear() -> None:
+    recorder = OperationalEventRecorder()
+    monitor = HeatingPerformanceMonitor(criteria=_criteria(), anomaly_event_recorder=recorder)
+    falling = _episode("living_room", _sample(0, 20.0), _sample(15, 19.85), _sample(30, 19.7))
+    terminal = _completed_episode(
+        _episode(
+            "living_room",
+            *falling.samples,
+            _sample(45, 19.5),
+        )
+    )
+
+    monitor.submit(falling)
+    monitor.assess_pending()
+    monitor.submit(terminal)
+    terminal_assessment = monitor.assess_pending()[0]
+
+    assert terminal_assessment.status is HeatingPerformanceStatus.ANOMALOUS
+    snapshot = monitor.snapshot()
+    assert snapshot.active_anomalies == ()
+    assert [item.lifecycle for item in snapshot.anomaly_transitions] == [
+        HeatingAnomalyLifecycle.STARTED,
+        HeatingAnomalyLifecycle.OBSERVATION_ENDED,
+    ]
+    ended = snapshot.anomaly_transitions[-1]
+    assert ended.lifecycle_reason_code == "heating_episode_ended"
+    assert ended.cleared_at is None
+    assert ended.last_observed_at == terminal.ended_at
+    assert [event.event_code for event in recorder.stream.snapshot().events] == [
+        OperationalEventCode.HEATING_ANOMALY_STARTED,
+        OperationalEventCode.HEATING_ANOMALY_OBSERVATION_ENDED,
+    ]
+
+
+def test_episode_closure_with_insufficient_evidence_does_not_claim_recovery() -> None:
+    recorder = OperationalEventRecorder()
+    monitor = HeatingPerformanceMonitor(criteria=_criteria(), anomaly_event_recorder=recorder)
+    falling = _episode("living_room", _sample(0, 20.0), _sample(15, 19.85), _sample(30, 19.7))
+    terminal = _completed_episode(
+        _episode(
+            "living_room",
+            *falling.samples,
+            _sample(45, None, quality=ObservationQuality.UNKNOWN),
+        )
+    )
+
+    monitor.submit(falling)
+    monitor.assess_pending()
+    monitor.submit(terminal)
+    terminal_assessment = monitor.assess_pending()[0]
+
+    assert terminal_assessment.status is HeatingPerformanceStatus.INSUFFICIENT_EVIDENCE
+    snapshot = monitor.snapshot()
+    ended = snapshot.anomaly_transitions[-1]
+    assert ended.lifecycle is HeatingAnomalyLifecycle.OBSERVATION_ENDED
+    assert ended.cleared_at is None
+    assert ended.last_observed_at == NOW + timedelta(minutes=30)
+    assert ended.lifecycle_reason_code == "heating_episode_ended"
+    assert all(
+        event.event_code is not OperationalEventCode.HEATING_ANOMALY_CLEARED
+        for event in recorder.stream.snapshot().events
+    )
+
+
+def test_episode_replacement_ends_previous_observation_without_clear() -> None:
+    recorder = OperationalEventRecorder()
+    monitor = HeatingPerformanceMonitor(criteria=_criteria(), anomaly_event_recorder=recorder)
+    falling = _episode("living_room", _sample(0, 20.0), _sample(15, 19.85), _sample(30, 19.7))
+    replacement_start = NOW + timedelta(hours=2)
+    replacement = _episode(
+        "living_room",
+        _sample(120, 20.0, permission_enabled_at=replacement_start),
+        started_at=replacement_start,
+    )
+
+    monitor.submit(falling)
+    monitor.assess_pending()
+    monitor.submit(replacement)
+    monitor.assess_pending()
+
+    ended = monitor.snapshot().anomaly_transitions[-1]
+    assert ended.lifecycle is HeatingAnomalyLifecycle.OBSERVATION_ENDED
+    assert ended.lifecycle_reason_code == "heating_episode_replaced"
+    assert ended.cleared_at is None
+    assert [event.event_code for event in recorder.stream.snapshot().events] == [
+        OperationalEventCode.HEATING_ANOMALY_STARTED,
+        OperationalEventCode.HEATING_ANOMALY_OBSERVATION_ENDED,
+    ]
 
 
 def test_disabled_source_permission_is_explicitly_insufficient() -> None:

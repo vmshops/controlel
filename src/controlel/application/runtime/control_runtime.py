@@ -206,7 +206,9 @@ class ControlRuntime:
         self.heating_episode_observation_errors: dict[ZoneId, str] = {}
         self.heating_episode_observation_error_evidence: dict[ZoneId, HeatingEpisodeObservationErrorEvidence] = {}
         self.heating_episode_observation_global_error_evidence: HeatingEpisodeObservationErrorEvidence | None = None
-        self.heating_performance_monitor = ShadowHeatingPerformanceMonitor()
+        self.heating_performance_monitor = ShadowHeatingPerformanceMonitor(
+            anomaly_event_recorder=self.operational_event_recorder
+        )
         self.zone_demand_store = ZoneDemandStore()
         self.heat_demand_safety_state_store = HeatDemandSafetyStateStore()
         self.heat_source_state_store = HeatSourceStateStore()

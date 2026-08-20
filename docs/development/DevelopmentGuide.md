@@ -137,6 +137,22 @@ The implementation and release metadata are prepared as the unpublished Core
 `0.11.0` M31C.1 candidate. Its integration manifest still pins the published
 immutable Core `controlel==0.10.0`.
 
+Anomaly v1 extends the passive M31C development boundary with immutable,
+bounded observation state and transition-oriented operational events. New
+detectors must be justified by existing configuration and retained evidence;
+unknown or indeterminate assessments must not be promoted to anomalies.
+Commanded, successfully dispatched, reported, and physical state must remain
+separate in both model and test evidence. **Anomaly v1 is an observability
+feature, not a control feature.** Tests must continue to prove that enabling,
+disabling, failing, or projecting anomaly assessment cannot change demand,
+delivery commands, source commands, source protection, or safety results.
+
+Diagnostics/read-model schema versions follow backward-compatible evolution:
+adding optional fields or fields with deterministic defaults does not increment
+the schema version. A schema version increases only for a breaking semantic or
+type change, or when an existing field is removed. The anomaly additions are
+therefore additive schema-v1 fields.
+
 New-entry configuration defaults are 0.3/0.1 Â°C hysteresis and 10/5-minute
 minimum on/off times. Legacy entries normalize missing values to zero.
 New entries keep generated stable `sensor_id` and `zone_id` values in

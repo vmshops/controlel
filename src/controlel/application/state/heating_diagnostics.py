@@ -177,12 +177,40 @@ class PendingDropEvidenceV1:
 
 
 @dataclass(frozen=True)
+class HeatingAnomalyEvidenceItemV1:
+    key: str
+    value: str | int | float | bool | None
+
+
+@dataclass(frozen=True)
+class HeatingAnomalyDiagnosticsV1:
+    anomaly_id: str
+    category: str
+    severity: str
+    confidence: str
+    reason_code: str
+    lifecycle: str
+    first_observed_at: str
+    last_observed_at: str
+    updated_at: str
+    cleared_at: str | None
+    zone_id: str | None
+    source_id: str | None
+    heating_episode_id: str | None
+    assessment_id: str | None
+    lifecycle_reason_code: str
+    evidence_items: tuple[HeatingAnomalyEvidenceItemV1, ...]
+    source_observation_timestamps: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class ZoneHeatingDiagnosticsV1:
     zone_id: str
     active_episode: EpisodeDiagnosticsV1 | None
     latest_completed_episode: EpisodeDiagnosticsV1 | None
     latest_assessment: AssessmentDiagnosticsV1 | None
     observation_error: DiagnosticErrorEvidenceV1 | None
+    latest_anomaly: HeatingAnomalyDiagnosticsV1 | None = None
 
 
 @dataclass(frozen=True)
@@ -200,6 +228,10 @@ class ShadowPipelineDiagnosticsV1:
     assessment_errors: tuple[DiagnosticErrorEvidenceV1, ...]
     observation_errors: tuple[DiagnosticErrorEvidenceV1, ...]
     projection_error: DiagnosticErrorEvidenceV1 | None
+    active_anomaly_count: int = 0
+    total_anomaly_transitions_emitted: int = 0
+    retained_anomaly_transition_count: int = 0
+    dropped_anomaly_transition_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -233,6 +265,7 @@ def empty_heating_diagnostics_snapshot(zone_id: str) -> HeatingDiagnosticsSnapsh
                 latest_completed_episode=None,
                 latest_assessment=None,
                 observation_error=None,
+                latest_anomaly=None,
             ),
         ),
         pipeline=ShadowPipelineDiagnosticsV1(
@@ -249,5 +282,9 @@ def empty_heating_diagnostics_snapshot(zone_id: str) -> HeatingDiagnosticsSnapsh
             assessment_errors=(),
             observation_errors=(),
             projection_error=None,
+            active_anomaly_count=0,
+            total_anomaly_transitions_emitted=0,
+            retained_anomaly_transition_count=0,
+            dropped_anomaly_transition_count=0,
         ),
     )

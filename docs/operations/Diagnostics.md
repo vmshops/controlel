@@ -96,4 +96,24 @@ source authority, runtime lifecycle, event retention, or later evaluations.
 Integration `0.10.1` was the presentation-only release on Core `0.8.0`.
 Integration `0.11.0` migrates the production drain to UserActivity snapshots
 from immutable public Core `0.10.0`. It adds no Activity frontend, persistence,
-polling, retry queue, M31C analytics/anomalies, or control influence.
+polling, retry queue, or control influence.
+
+## M31C anomaly-v1 diagnostics
+
+Heating diagnostics add the latest bounded anomaly observation per zone and
+pipeline counts for active, total, retained, and dropped anomaly transitions.
+The observation includes lifecycle, category, severity, qualitative
+confidence, stable reason and lifecycle codes, zone/source/episode and optional
+assessment correlation, timestamps, structured scalar evidence, and all
+retained source-observation timestamps. Start, evidence-backed clear, and
+observation-ended transitions appear in the existing bounded
+`operational_events` stream under the `performance` category; the change event
+code is reserved for a future material revision and is not produced by the
+single v1 detector. Observation end means only that no further evidence is
+available. No new channel, entity, polling task, or persistence is created.
+
+Unknown or indeterminate evidence is not automatically anomalous. Successful
+heating-permission dispatch remains command evidence only, not proof of burner
+operation or physical heat. Anomaly events are not yet mapped to user
+activities, so they cannot produce notifications. **Anomaly v1 is an
+observability feature, not a control feature.**

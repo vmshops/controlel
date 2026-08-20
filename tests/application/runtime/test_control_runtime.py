@@ -47,6 +47,14 @@ class FixedClock:
         return NOW
 
 
+class MutableClock:
+    def __init__(self, now: datetime) -> None:
+        self.current = now
+
+    def now(self) -> datetime:
+        return self.current
+
+
 class NoOpScheduledTask:
     def cancel(self) -> None:
         pass
@@ -563,6 +571,45 @@ def test_live_assessor_failure_after_control_execution_cannot_change_commands() 
     ]
     assert failed_monitor.performance_snapshot.errors[0].exception_type == "RuntimeError"
     assert failed_runtime.heating_episode_observation_error is None
+
+
+def test_observed_performance_anomaly_cannot_change_controller_or_source_state() -> None:
+    runtime, source, delivery_port, sensor_id, zone_id = create_heat_delivery_runtime()
+    clock = MutableClock(NOW)
+    runtime.clock = clock
+    runtime.heat_demand_aggregator.clock = clock
+    runtime.temperature_aggregator.clock = clock
+    runtime.timestamp_validator.clock = clock
+    for minute, temperature in ((0, 20.0), (15, 19.85), (30, 19.7)):
+        clock.current = NOW + timedelta(minutes=minute)
+        runtime.process_temperature(
+            Measurement(
+                sensor_id=sensor_id,
+                value=Temperature(temperature),
+                timestamp=clock.current,
+            )
+        )
+
+    source_state_before = runtime.source_control_state
+    demand_state_before = runtime.zone_demand_store.get(zone_id)
+    source_commands_before = tuple(source.commands)
+    actuator_commands_before = tuple(delivery_port.commands)
+
+    runtime.heating_performance_monitor.assess_pending()
+
+    assert len(runtime.heating_performance_monitor.performance_snapshot.active_anomalies) == 1
+    assert runtime.source_control_state == source_state_before
+    assert runtime.zone_demand_store.get(zone_id) == demand_state_before
+    assert tuple(source.commands) == source_commands_before
+    assert tuple(delivery_port.commands) == actuator_commands_before
+    anomaly_events = [
+        event
+        for event in runtime.operational_event_stream.snapshot().events
+        if event.event_code is OperationalEventCode.HEATING_ANOMALY_STARTED
+    ]
+    assert len(anomaly_events) == 1
+    assert anomaly_events[0].requested_command is None
+    assert anomaly_events[0].command_outcome is None
 
 
 def test_shadow_assessment_enabled_and_disabled_have_identical_full_control_contracts() -> None:

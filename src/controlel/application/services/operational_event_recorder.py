@@ -18,6 +18,7 @@ from controlel.application.state.source_reconciliation_state import SourceReconc
 from controlel.application.state.zone_heat_demand_confirmation_state import ZoneHeatDemandConfirmationPhase
 from controlel.domain.commands.heating_action import HeatingAction
 from controlel.domain.demands.building_heat_demand_status import BuildingHeatDemandStatus
+from controlel.domain.heat_delivery import HeatingAnomalyLifecycle, HeatingAnomalyObservation
 from controlel.domain.operational_events import (
     MeasurementEventCondition,
 )
@@ -250,6 +251,57 @@ class OperationalEventRecorder:
             Code.EMERGENCY_DISABLE_REQUESTED,
             requested_command=HeatingAction.DISABLE_HEATING.value,
             command_outcome="requested",
+        )
+
+    def heating_anomaly(self, anomaly: HeatingAnomalyObservation) -> None:
+        """Record one passive anomaly transition without creating control intent."""
+
+        code = {
+            HeatingAnomalyLifecycle.STARTED: Code.HEATING_ANOMALY_STARTED,
+            HeatingAnomalyLifecycle.ACTIVE: Code.HEATING_ANOMALY_CHANGED,
+            HeatingAnomalyLifecycle.CLEARED: Code.HEATING_ANOMALY_CLEARED,
+            HeatingAnomalyLifecycle.OBSERVATION_ENDED: Code.HEATING_ANOMALY_OBSERVATION_ENDED,
+        }[anomaly.lifecycle]
+        previous_state = None if anomaly.lifecycle is HeatingAnomalyLifecycle.STARTED else "active"
+        new_state = {
+            HeatingAnomalyLifecycle.STARTED: "active",
+            HeatingAnomalyLifecycle.ACTIVE: "active",
+            HeatingAnomalyLifecycle.CLEARED: "cleared",
+            HeatingAnomalyLifecycle.OBSERVATION_ENDED: "observation_ended",
+        }[anomaly.lifecycle]
+        timestamps = anomaly.evidence.source_observation_timestamps
+        details = (
+            ("anomaly_category", anomaly.category.value),
+            ("anomaly_confidence", anomaly.confidence.value),
+            ("anomaly_id", anomaly.anomaly_id),
+            ("anomaly_severity", anomaly.severity.value),
+            ("assessment_id", anomaly.assessment_id),
+            ("evidence_source_observation_count", len(timestamps)),
+            (
+                "evidence_source_observation_first_at",
+                timestamps[0].isoformat() if timestamps else None,
+            ),
+            (
+                "evidence_source_observation_last_at",
+                timestamps[-1].isoformat() if timestamps else None,
+            ),
+            ("heating_episode_id", anomaly.heating_episode_id),
+            ("lifecycle_reason_code", anomaly.lifecycle_reason_code),
+            *((f"evidence_{item.key}", item.value) for item in anomaly.evidence.items),
+        )
+        self._emit(
+            anomaly.updated_at,
+            Category.PERFORMANCE,
+            Severity(anomaly.severity.value),
+            code,
+            reason_code=anomaly.reason_code,
+            zone_id=anomaly.zone_id.value if anomaly.zone_id is not None else None,
+            source_id=anomaly.source_id,
+            correlation_id=anomaly.heating_episode_id,
+            activity_id=anomaly.anomaly_id,
+            previous_state=previous_state,
+            new_state=new_state,
+            details=details,
         )
 
     def supervision(self, state: RuntimeSupervisionState, timestamp: datetime) -> None:

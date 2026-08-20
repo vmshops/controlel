@@ -139,7 +139,28 @@ port, scheduler, timer, polling loop, persistence, or control feedback. The
 runtime only submits snapshots; the existing explicit shadow drain performs
 assessment after control execution.
 
-M31C.2 remains responsible for finalized anomaly policy and broader
-source/actuator classifications. M31C.3 remains responsible for projecting
-canonical results into user activities, notifications, and adapter-facing
-analytics presentation.
+Anomaly v1 adds one immutable observational contract over that assessment. It
+records a broad category, severity, qualitative confidence, stable reason,
+zone/source/episode scope, optional assessment correlation, timestamps,
+explicit started/active/cleared/observation-ended lifecycle, JSON-safe evidence items, and the complete
+retained source-observation timestamps. The broad category vocabulary is
+`measurement`, `behavior`, `actuation`, `performance`, `contextual`, and
+`unknown`; v1 produces only a `performance` observation.
+
+The sole configured detector reuses the assessor's existing conservative
+`temperature_falling` result. It therefore requires valid fresh measurements,
+the configured sample count and duration, stable target evidence, retained
+history, and an explicit successful heating-permission dispatch. This is still
+not evidence that a burner ran or heat was physically delivered. Flat response
+remains `degraded`; insufficient, stale, conflicting, truncated, unknown, or
+indeterminate evidence is not classified as an anomaly. Recovery uses the
+existing distinct normal-window confirmation. An episode boundary ends the
+observation without claiming that the anomaly cleared or recovered.
+
+**Anomaly v1 is an observability feature, not a control feature.** It owns no
+command port and cannot change demand, source permission, targets, hysteresis,
+measurement validity, configuration, thresholds, or safety behavior.
+
+Broader source/actuator anomaly policy and threshold configuration remain
+future work. M31C.3 remains responsible for projecting canonical anomaly
+events into user activities and notifications; v1 does not do so.

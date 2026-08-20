@@ -15,7 +15,7 @@ from controlel.domain.heat_delivery import (
 from controlel.domain.value_objects.zone_id import ZoneId
 
 from .heating_performance_assessor import HeatingPerformanceAssessor
-from .heating_performance_monitor import HeatingPerformanceMonitor
+from .heating_performance_monitor import HeatingAnomalyEventRecorder, HeatingPerformanceMonitor
 
 MAX_RETAINED_HEATING_PERFORMANCE_ASSESSMENTS = 20
 
@@ -66,6 +66,7 @@ class ShadowHeatingPerformanceMonitor:
         max_pending_episodes: int = 20,
         assessor: EpisodeAssessor | None = None,
         progress_monitor: HeatingPerformanceMonitor | None = None,
+        anomaly_event_recorder: HeatingAnomalyEventRecorder | None = None,
     ) -> None:
         if max_assessments <= 0:
             raise ValueError("max_assessments must be positive")
@@ -75,7 +76,9 @@ class ShadowHeatingPerformanceMonitor:
             raise ValueError("max_pending_episodes must be positive")
         self.enabled = enabled
         self._assessor = assessor or HeatingPerformanceAssessor()
-        self._progress_monitor = progress_monitor or HeatingPerformanceMonitor()
+        self._progress_monitor = progress_monitor or HeatingPerformanceMonitor(
+            anomaly_event_recorder=anomaly_event_recorder
+        )
         self._max_pending_episodes = max_pending_episodes
         self._pending: deque[HeatingEpisode] = deque()
         self._assessments: deque[HeatingPerformanceAssessment] = deque(maxlen=max_assessments)

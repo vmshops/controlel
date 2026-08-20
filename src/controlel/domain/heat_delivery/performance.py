@@ -7,6 +7,7 @@ from math import isfinite
 
 from controlel.domain.value_objects.zone_id import ZoneId
 
+from .anomaly import HeatingAnomalyObservation
 from .observation import HeatingEpisodeTerminationReason, ObservationQuality
 
 DEFAULT_STABLE_TEMPERATURE_TOLERANCE = 0.1
@@ -266,6 +267,10 @@ class HeatingPerformanceSnapshot:
     zones: tuple[ZoneHeatingPerformanceState, ...]
     assessments: tuple[HeatingPerformanceWindowAssessment, ...]
     errors: tuple[HeatingPerformanceAssessmentErrorEvidence, ...]
+    total_anomaly_transitions_emitted: int = 0
+    dropped_anomaly_transition_count: int = 0
+    active_anomalies: tuple[HeatingAnomalyObservation, ...] = ()
+    anomaly_transitions: tuple[HeatingAnomalyObservation, ...] = ()
 
     def __post_init__(self) -> None:
         if self.schema_version != 1:
@@ -279,6 +284,8 @@ class HeatingPerformanceSnapshot:
                 self.total_assessments_emitted,
                 self.dropped_assessment_count,
                 self.pending_observations_dropped,
+                self.total_anomaly_transitions_emitted,
+                self.dropped_anomaly_transition_count,
             )
             < 0
         ):
@@ -289,6 +296,17 @@ class HeatingPerformanceSnapshot:
             raise ValueError("zone states must be unique and sorted")
         if error_zone_ids != tuple(sorted(set(error_zone_ids), key=lambda item: item.value)):
             raise ValueError("assessment errors must be unique and sorted")
+        if len(self.anomaly_transitions) > self.assessment_capacity:
+            raise ValueError("anomaly transition history must fit assessment_capacity")
+        if self.dropped_anomaly_transition_count != (
+            self.total_anomaly_transitions_emitted - len(self.anomaly_transitions)
+        ):
+            raise ValueError("dropped anomaly transition count must match bounded history")
+        active_ids = tuple(item.anomaly_id for item in self.active_anomalies)
+        if active_ids != tuple(sorted(set(active_ids))):
+            raise ValueError("active anomalies must be unique and sorted")
+        if any(not item.is_active for item in self.active_anomalies):
+            raise ValueError("active_anomalies cannot contain cleared observations")
 
 
 def heating_episode_id(zone_id: ZoneId, started_at: datetime) -> str:

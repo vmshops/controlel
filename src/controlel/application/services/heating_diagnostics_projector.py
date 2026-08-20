@@ -24,6 +24,8 @@ from controlel.application.state.heating_diagnostics import (
     DerivedValueDiagnosticsV1,
     DiagnosticErrorEvidenceV1,
     EpisodeDiagnosticsV1,
+    HeatingAnomalyDiagnosticsV1,
+    HeatingAnomalyEvidenceItemV1,
     HeatingDiagnosticsSnapshotV1,
     ObservedValueDiagnosticsV1,
     PendingDropEvidenceV1,
@@ -39,9 +41,11 @@ from controlel.domain.heat_delivery import (
     HeatDeliveryCapabilities,
     HeatDeliveryCommand,
     HeatDeliveryObservation,
+    HeatingAnomalyObservation,
     HeatingEpisode,
     HeatingPerformanceAssessment,
     HeatingPerformanceAssessmentReason,
+    HeatingPerformanceSnapshot,
     ObservationQuality,
     ObservedValue,
 )
@@ -60,10 +64,12 @@ class HeatingDiagnosticsProjector:
         monitor: ShadowPerformanceMonitorSnapshot,
         observation_errors: tuple[HeatingEpisodeObservationErrorEvidence, ...] = (),
         projection_error: DiagnosticErrorEvidenceV1 | None = None,
+        performance: HeatingPerformanceSnapshot | None = None,
     ) -> HeatingDiagnosticsSnapshotV1:
         active_by_zone = _latest_episodes(active_episodes)
         completed_by_zone = _latest_episodes(completed_episodes)
         assessments_by_zone = _latest_assessments(monitor.assessments)
+        anomalies_by_zone = _latest_anomalies(performance)
         observation_errors_by_zone = {
             item.zone_id: _observation_error(item) for item in observation_errors if item.zone_id is not None
         }
@@ -72,6 +78,7 @@ class HeatingDiagnosticsProjector:
             | set(active_by_zone)
             | set(completed_by_zone)
             | set(assessments_by_zone)
+            | set(anomalies_by_zone)
             | {item.zone_id for item in observation_errors if item.zone_id is not None}
             | {item.zone_id for item in monitor.errors}
         )
@@ -94,6 +101,7 @@ class HeatingDiagnosticsProjector:
                     latest_completed_episode=_episode(completed, matching_assessment),
                     latest_assessment=_assessment(assessment),
                     observation_error=observation_errors_by_zone.get(zone_id),
+                    latest_anomaly=_anomaly(anomalies_by_zone.get(zone_id)),
                 )
             )
 
@@ -153,6 +161,14 @@ class HeatingDiagnosticsProjector:
             assessment_errors=assessment_errors,
             observation_errors=normalized_observation_errors,
             projection_error=projection_error,
+            active_anomaly_count=(len(performance.active_anomalies) if performance is not None else 0),
+            total_anomaly_transitions_emitted=(
+                performance.total_anomaly_transitions_emitted if performance is not None else 0
+            ),
+            retained_anomaly_transition_count=(len(performance.anomaly_transitions) if performance is not None else 0),
+            dropped_anomaly_transition_count=(
+                performance.dropped_anomaly_transition_count if performance is not None else 0
+            ),
         )
         updated_at = _latest_evidence_timestamp(
             active_episodes=active_episodes,
@@ -161,6 +177,7 @@ class HeatingDiagnosticsProjector:
             observation_errors=observation_errors,
             monitor=monitor,
             projection_error=projection_error,
+            performance=performance,
         )
         return HeatingDiagnosticsSnapshotV1(
             schema_version=HEATING_DIAGNOSTICS_SCHEMA_VERSION,
@@ -450,6 +467,34 @@ def _observed(
     )
 
 
+def _anomaly(anomaly: HeatingAnomalyObservation | None) -> HeatingAnomalyDiagnosticsV1 | None:
+    if anomaly is None:
+        return None
+    return HeatingAnomalyDiagnosticsV1(
+        anomaly_id=anomaly.anomaly_id,
+        category=anomaly.category.value,
+        severity=anomaly.severity.value,
+        confidence=anomaly.confidence.value,
+        reason_code=anomaly.reason_code,
+        lifecycle=anomaly.lifecycle.value,
+        first_observed_at=_iso(anomaly.first_observed_at),
+        last_observed_at=_iso(anomaly.last_observed_at),
+        updated_at=_iso(anomaly.updated_at),
+        cleared_at=_iso(anomaly.cleared_at) if anomaly.cleared_at is not None else None,
+        zone_id=anomaly.zone_id.value if anomaly.zone_id is not None else None,
+        source_id=anomaly.source_id,
+        heating_episode_id=anomaly.heating_episode_id,
+        assessment_id=anomaly.assessment_id,
+        lifecycle_reason_code=anomaly.lifecycle_reason_code,
+        evidence_items=tuple(
+            HeatingAnomalyEvidenceItemV1(key=item.key, value=item.value) for item in anomaly.evidence.items
+        ),
+        source_observation_timestamps=tuple(
+            _iso(timestamp) for timestamp in anomaly.evidence.source_observation_timestamps
+        ),
+    )
+
+
 def _command(command: HeatDeliveryCommand | None) -> CommandEvidenceV1 | None:
     if command is None:
         return None
@@ -490,6 +535,21 @@ def _latest_assessments(
     return latest
 
 
+def _latest_anomalies(
+    performance: HeatingPerformanceSnapshot | None,
+) -> dict[ZoneId, HeatingAnomalyObservation]:
+    if performance is None:
+        return {}
+    latest: dict[ZoneId, HeatingAnomalyObservation] = {}
+    for anomaly in (*performance.anomaly_transitions, *performance.active_anomalies):
+        if anomaly.zone_id is None:
+            continue
+        current = latest.get(anomaly.zone_id)
+        if current is None or anomaly.updated_at >= current.updated_at:
+            latest[anomaly.zone_id] = anomaly
+    return latest
+
+
 def _pipeline_health_code(
     *,
     projection_error: DiagnosticErrorEvidenceV1 | None,
@@ -517,6 +577,7 @@ def _latest_evidence_timestamp(
     observation_errors: tuple[HeatingEpisodeObservationErrorEvidence, ...],
     monitor: ShadowPerformanceMonitorSnapshot,
     projection_error: DiagnosticErrorEvidenceV1 | None,
+    performance: HeatingPerformanceSnapshot | None,
 ) -> datetime | None:
     candidates: list[datetime] = []
     for episode in (*active_episodes, *completed_episodes):
@@ -529,6 +590,10 @@ def _latest_evidence_timestamp(
         candidates.append(monitor.latest_drop.episode_ended_at)
     if projection_error is not None and projection_error.evidence_at is not None:
         candidates.append(datetime.fromisoformat(projection_error.evidence_at))
+    if performance is not None:
+        candidates.extend(assessment.assessed_at for assessment in performance.assessments)
+        candidates.extend(anomaly.updated_at for anomaly in performance.anomaly_transitions)
+        candidates.extend(anomaly.updated_at for anomaly in performance.active_anomalies)
     return max(candidates) if candidates else None
 
 

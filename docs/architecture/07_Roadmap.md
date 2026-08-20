@@ -155,9 +155,14 @@ boundary is `Observation` = directly measured / commanded / reported evidence,
 and `Control Decision` = a separate regulation path. This release adds passive
 monitoring, explicit evidence insufficiency, deterministic assessment/episode
 identities, per-zone isolation, JSON-safe diagnostics, and zero control feedback.
-It does not add polling, persistence, HA dependency, UserActivity/notification
-projection, or anomaly transition policy. Final anomaly policy remains M31C.2
-and human-facing activity/notification projection remains M31C.3.
+The minimal anomaly-v1 follow-up reuses only the existing evidence-qualified
+falling-temperature assessment, adds bounded start/active/clear/observation-ended
+state, and emits deduplicated transitions into the existing operational event
+stream and heating diagnostics projection. **Anomaly v1 is an observability
+feature, not a control feature.** It adds no polling, persistence, HA entity,
+control feedback, threshold learning, or UserActivity/notification projection.
+Broader M31C.2 detection policy and human-facing M31C.3 activity/notification
+projection remain deferred.
 
 ## Milestone 23: Home Assistant one-zone host vertical slice
 

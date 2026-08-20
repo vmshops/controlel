@@ -1,5 +1,15 @@
 """Vendor-independent zone heat-delivery contracts."""
 
+from .anomaly import (
+    HeatingAnomalyCategory,
+    HeatingAnomalyConfidence,
+    HeatingAnomalyEvidence,
+    HeatingAnomalyEvidenceItem,
+    HeatingAnomalyLifecycle,
+    HeatingAnomalyObservation,
+    HeatingAnomalySeverity,
+    heating_anomaly_id,
+)
 from .model import (
     HeatDeliveryActuatorConfiguration,
     HeatDeliveryActuatorId,
@@ -55,6 +65,14 @@ from .performance import (
 )
 
 __all__ = (
+    "HeatingAnomalyCategory",
+    "HeatingAnomalyConfidence",
+    "HeatingAnomalyEvidence",
+    "HeatingAnomalyEvidenceItem",
+    "HeatingAnomalyLifecycle",
+    "HeatingAnomalyObservation",
+    "HeatingAnomalySeverity",
+    "heating_anomaly_id",
     "HeatDeliveryActuatorConfiguration",
     "HeatDeliveryActuatorId",
     "HeatDeliveryAssistPolicy",

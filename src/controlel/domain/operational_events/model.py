@@ -76,6 +76,10 @@ class OperationalEventCode(StrEnum):
     RESTART_ATTEMPT_FAILED = "restart_attempt_failed"
     RESTART_BUDGET_EXHAUSTED = "restart_budget_exhausted"
     COMMAND_AUTHORITY_CHANGED = "command_authority_changed"
+    HEATING_ANOMALY_STARTED = "heating_anomaly_started"
+    HEATING_ANOMALY_CHANGED = "heating_anomaly_changed"
+    HEATING_ANOMALY_CLEARED = "heating_anomaly_cleared"
+    HEATING_ANOMALY_OBSERVATION_ENDED = "heating_anomaly_observation_ended"
 
 
 @dataclass(frozen=True, slots=True)

@@ -27,14 +27,23 @@ from controlel.domain.heat_delivery import (
     HeatDeliveryCommandOutcome,
     HeatDeliveryMode,
     HeatDeliveryObservation,
+    HeatingAnomalyCategory,
+    HeatingAnomalyConfidence,
+    HeatingAnomalyEvidence,
+    HeatingAnomalyEvidenceItem,
+    HeatingAnomalyLifecycle,
+    HeatingAnomalyObservation,
+    HeatingAnomalySeverity,
     HeatingDemandTransition,
     HeatingEpisode,
     HeatingEpisodeSample,
     HeatingEpisodeTerminationReason,
     HeatingPerformanceAssessmentCriteria,
+    HeatingPerformanceSnapshot,
     HeatSourceObservation,
     ObservationQuality,
     ObservedValue,
+    heating_anomaly_id,
 )
 from controlel.domain.value_objects.zone_id import ZoneId
 
@@ -345,6 +354,80 @@ def test_active_episode_start_and_new_evidence_update_are_explicit() -> None:
     assert second.zones[0].active_episode is not None
     assert second.zones[0].active_episode.total_sample_count == 3
     assert second.zones[0].active_episode.temperature.latest_valid_temperature == 21.5
+
+
+def test_anomaly_is_projected_with_lifecycle_scope_and_structured_evidence() -> None:
+    episode_id = "heating_episode:zone:2026-01-01T00:00:00+00:00"
+    anomaly = HeatingAnomalyObservation(
+        anomaly_id=heating_anomaly_id(
+            category=HeatingAnomalyCategory.PERFORMANCE,
+            reason_code="temperature_falling",
+            zone_id=ZoneId("zone"),
+            heating_episode_id=episode_id,
+        ),
+        category=HeatingAnomalyCategory.PERFORMANCE,
+        severity=HeatingAnomalySeverity.WARNING,
+        confidence=HeatingAnomalyConfidence.HIGH,
+        reason_code="temperature_falling",
+        lifecycle=HeatingAnomalyLifecycle.STARTED,
+        first_observed_at=NOW + timedelta(minutes=30),
+        last_observed_at=NOW + timedelta(minutes=30),
+        updated_at=NOW + timedelta(minutes=30),
+        cleared_at=None,
+        zone_id=ZoneId("zone"),
+        source_id=None,
+        heating_episode_id=episode_id,
+        assessment_id="performance_assessment:1",
+        lifecycle_reason_code="condition_detected",
+        evidence=HeatingAnomalyEvidence(
+            items=(
+                HeatingAnomalyEvidenceItem("sample_count", 3),
+                HeatingAnomalyEvidenceItem("temperature_delta", -0.4),
+            ),
+            source_observation_timestamps=(NOW, NOW + timedelta(minutes=30)),
+        ),
+    )
+    performance = HeatingPerformanceSnapshot(
+        schema_version=1,
+        assessment_capacity=20,
+        total_assessments_emitted=0,
+        dropped_assessment_count=0,
+        pending_zone_capacity=64,
+        pending_observation_count=0,
+        pending_observations_dropped=0,
+        zones=(),
+        assessments=(),
+        errors=(),
+        total_anomaly_transitions_emitted=1,
+        dropped_anomaly_transition_count=0,
+        active_anomalies=(anomaly,),
+        anomaly_transitions=(anomaly,),
+    )
+
+    snapshot = HeatingDiagnosticsProjector().project(
+        zone_ids=(),
+        active_episodes=(),
+        completed_episodes=(),
+        monitor=monitor_snapshot(),
+        performance=performance,
+    )
+
+    projected = snapshot.zones[0].latest_anomaly
+    assert projected is not None
+    assert projected.lifecycle == "started"
+    assert projected.zone_id == "zone"
+    assert projected.source_id is None
+    assert projected.heating_episode_id == episode_id
+    assert {item.key: item.value for item in projected.evidence_items} == {
+        "sample_count": 3,
+        "temperature_delta": -0.4,
+    }
+    assert projected.source_observation_timestamps == (
+        NOW.isoformat(),
+        (NOW + timedelta(minutes=30)).isoformat(),
+    )
+    assert snapshot.pipeline.active_anomaly_count == 1
+    assert snapshot.pipeline.total_anomaly_transitions_emitted == 1
 
 
 def test_assessment_failure_uses_safe_normalized_error_evidence() -> None:

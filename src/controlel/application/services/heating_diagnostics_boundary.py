@@ -17,7 +17,7 @@ from controlel.application.state.heating_diagnostics import (
     DiagnosticErrorEvidenceV1,
     HeatingDiagnosticsSnapshotV1,
 )
-from controlel.domain.heat_delivery import HeatingEpisode
+from controlel.domain.heat_delivery import HeatingEpisode, HeatingPerformanceSnapshot
 from controlel.domain.value_objects.zone_id import ZoneId
 
 
@@ -56,6 +56,7 @@ class HeatingDiagnosticsBoundary:
         """Return one immutable snapshot, containing projection failures."""
 
         monitor = _empty_monitor_snapshot()
+        performance: HeatingPerformanceSnapshot | None = None
         active: tuple[HeatingEpisode, ...] = ()
         completed: tuple[HeatingEpisode, ...] = ()
         observation_errors: tuple[HeatingEpisodeObservationErrorEvidence, ...] = ()
@@ -79,12 +80,14 @@ class HeatingDiagnosticsBoundary:
                 completed = self._completed_episodes
                 observation_errors = self._observation_errors
             monitor = _monitor_snapshot(runtime)
+            performance = _performance_snapshot(runtime)
             snapshot = self._projector.project(
                 zone_ids=zone_ids,
                 active_episodes=active,
                 completed_episodes=completed,
                 monitor=monitor,
                 observation_errors=observation_errors,
+                performance=performance,
             )
         except Exception as error:
             exception_type = type(error).__name__
@@ -94,6 +97,7 @@ class HeatingDiagnosticsBoundary:
                     completed=completed,
                     monitor=monitor,
                     observation_errors=observation_errors,
+                    performance=performance,
                 )
                 or current.updated_at
             )
@@ -140,12 +144,19 @@ def _empty_monitor_snapshot() -> ShadowPerformanceMonitorSnapshot:
     )
 
 
+def _performance_snapshot(runtime: object) -> HeatingPerformanceSnapshot | None:
+    monitor = getattr(runtime, "heating_performance_monitor", None)
+    snapshot = getattr(monitor, "performance_snapshot", None)
+    return snapshot if isinstance(snapshot, HeatingPerformanceSnapshot) else None
+
+
 def _evidence_timestamp(
     *,
     active: tuple[HeatingEpisode, ...],
     completed: tuple[HeatingEpisode, ...],
     monitor: ShadowPerformanceMonitorSnapshot,
     observation_errors: tuple[HeatingEpisodeObservationErrorEvidence, ...],
+    performance: HeatingPerformanceSnapshot | None,
 ) -> str | None:
     candidates = []
     for episode in (*active, *completed):
@@ -157,4 +168,8 @@ def _evidence_timestamp(
     candidates.extend(error.episode_ended_at for error in monitor.errors)
     if monitor.latest_drop is not None:
         candidates.append(monitor.latest_drop.episode_ended_at)
+    if performance is not None:
+        candidates.extend(assessment.assessed_at for assessment in performance.assessments)
+        candidates.extend(anomaly.updated_at for anomaly in performance.anomaly_transitions)
+        candidates.extend(anomaly.updated_at for anomaly in performance.active_anomalies)
     return max(candidates).isoformat() if candidates else None
