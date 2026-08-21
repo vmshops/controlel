@@ -110,6 +110,22 @@ class SourceReconciliationPolicy:
             and current_state.reported is not None
             and current_state.reported.state is reported.state
         )
+        same_reported_evidence = same_drift and current_state.reported == reported
+        # A successful correction waits for new reported evidence; unrelated
+        # evaluations must not turn unchanged mismatch into a periodic retry.
+        if same_reported_evidence and current_state.status is SourceReconciliationStatus.CORRECTION_PENDING:
+            return self._assessment(
+                ownership,
+                desired_command,
+                last_successful_command,
+                reported,
+                SourceReconciliationStatus.CORRECTION_PENDING,
+                SourceReconciliationReason.AWAITING_REPORTED_AGREEMENT,
+                now,
+                drift_detected_at=current_state.drift_detected_at,
+                conservative_hold_deadline=current_state.conservative_hold_deadline,
+                corrective_intent=current_state.corrective_intent,
+            )
         if same_drift and current_state.next_reevaluation_at is not None and now < current_state.next_reevaluation_at:
             return self._assessment(
                 ownership,
@@ -179,7 +195,7 @@ class SourceReconciliationPolicy:
             status=SourceReconciliationStatus.CORRECTION_PENDING,
             reason=SourceReconciliationReason.AWAITING_REPORTED_AGREEMENT,
             corrective_intent=command,
-            next_reevaluation_at=dispatched_at + self.correction_retry_interval,
+            next_reevaluation_at=None,
             last_evaluated_at=dispatched_at,
         )
 

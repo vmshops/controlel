@@ -96,7 +96,7 @@ def test_external_ownership_observes_but_never_corrects() -> None:
     assert assessment.next_reevaluation_at is None
 
 
-def test_successful_correction_waits_for_report_and_repeated_events_do_not_storm() -> None:
+def test_successful_correction_waits_for_new_reported_evidence_without_retry_deadline() -> None:
     policy = _policy()
     required = policy.evaluate(
         ownership=SourceOwnership.CONTROLEL_OWNED,
@@ -114,12 +114,58 @@ def test_successful_correction_waits_for_report_and_repeated_events_do_not_storm
         last_successful_command=HeatingAction.DISABLE_HEATING,
         reported=_reported(ReportedSourceState.ENABLED, transition_at=NOW - HOLD),
         current_state=pending,
+        now=NOW + RETRY,
+    )
+
+    assert pending.next_reevaluation_at is None
+    assert repeated.status is SourceReconciliationStatus.CORRECTION_PENDING
+    assert repeated.corrective_command is None
+    assert repeated.reason is SourceReconciliationReason.AWAITING_REPORTED_AGREEMENT
+    assert repeated.next_reevaluation_at is None
+
+
+def test_new_mismatching_evidence_after_successful_correction_requires_new_correction() -> None:
+    policy = _policy()
+    reported = _reported(ReportedSourceState.ENABLED, transition_at=NOW - HOLD)
+    required = policy.evaluate(
+        ownership=SourceOwnership.CONTROLEL_OWNED,
+        desired_command=HeatingAction.DISABLE_HEATING,
+        last_successful_command=None,
+        reported=reported,
+        current_state=None,
+        now=NOW,
+    )
+    pending = policy.record_dispatched(required, dispatched_at=NOW)
+
+    repeated = policy.evaluate(
+        ownership=SourceOwnership.CONTROLEL_OWNED,
+        desired_command=HeatingAction.DISABLE_HEATING,
+        last_successful_command=HeatingAction.DISABLE_HEATING,
+        reported=ReportedSourceEvidence(
+            state=ReportedSourceState.ENABLED,
+            observed_at=NOW + timedelta(seconds=1),
+            transition_at=NOW - HOLD,
+        ),
+        current_state=pending,
         now=NOW + timedelta(seconds=1),
     )
 
-    assert repeated.status is SourceReconciliationStatus.CORRECTION_PENDING
-    assert repeated.corrective_command is None
-    assert repeated.next_reevaluation_at == NOW + RETRY
+    assert repeated.status is SourceReconciliationStatus.CORRECTION_REQUIRED
+    assert repeated.reason is SourceReconciliationReason.CORRECTIVE_RETRY_DUE
+    assert repeated.corrective_command is HeatingAction.DISABLE_HEATING
+
+
+def test_agreeing_evidence_after_successful_correction_completes_reconciliation() -> None:
+    policy = _policy()
+    required = policy.evaluate(
+        ownership=SourceOwnership.CONTROLEL_OWNED,
+        desired_command=HeatingAction.DISABLE_HEATING,
+        last_successful_command=None,
+        reported=_reported(ReportedSourceState.ENABLED, transition_at=NOW - HOLD),
+        current_state=None,
+        now=NOW,
+    )
+    pending = policy.record_dispatched(required, dispatched_at=NOW)
 
     agreed = policy.evaluate(
         ownership=SourceOwnership.CONTROLEL_OWNED,
@@ -129,10 +175,12 @@ def test_successful_correction_waits_for_report_and_repeated_events_do_not_storm
             state=ReportedSourceState.DISABLED,
             observed_at=NOW + timedelta(seconds=2),
         ),
-        current_state=repeated.state,
+        current_state=pending,
         now=NOW + timedelta(seconds=2),
     )
+
     assert agreed.status is SourceReconciliationStatus.AGREED
+    assert agreed.reason is SourceReconciliationReason.REPORTED_STATE_AGREES
     assert agreed.state.drift_detected_at is None
 
 

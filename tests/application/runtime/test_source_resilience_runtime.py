@@ -143,7 +143,7 @@ def _report(
     return ReportedSourceEvidence(state=state, observed_at=at, transition_at=transition_at)
 
 
-def test_external_on_no_heat_is_held_then_corrected_without_command_storm() -> None:
+def test_external_on_no_heat_is_held_then_new_mismatch_allows_another_correction() -> None:
     runtime, clock, scheduler, source = _runtime()
     runtime.ingest_reported_source_state(_report(ReportedSourceState.ENABLED, NOW))
 
@@ -164,14 +164,88 @@ def test_external_on_no_heat_is_held_then_corrected_without_command_storm() -> N
     assert [command.action for command in source.commands] == [HeatingAction.DISABLE_HEATING]
     assert runtime.source_reconciliation_state.status is SourceReconciliationStatus.CORRECTION_PENDING
 
-    runtime.ingest_reported_source_state(_report(ReportedSourceState.ENABLED, deadline))
-    assert len(source.commands) == 1
+    repeated = runtime.ingest_reported_source_state(_report(ReportedSourceState.ENABLED, deadline))
+    assert repeated.status is HeatDemandEvaluationStatus.RESILIENCE_COMMAND_EXECUTED
+    assert len(source.commands) == 2
 
     agreed = runtime.ingest_reported_source_state(
         _report(ReportedSourceState.DISABLED, deadline + timedelta(seconds=1))
     )
     assert agreed.source_reconciliation_assessment.status is SourceReconciliationStatus.AGREED
-    assert len(source.commands) == 1
+    assert len(source.commands) == 2
+
+
+def test_successful_corrective_dispatch_does_not_retry_without_new_reported_evidence() -> None:
+    runtime, clock, scheduler, source = _runtime()
+    runtime.ingest_reported_source_state(
+        _report(
+            ReportedSourceState.DISABLED,
+            NOW,
+            transition_at=NOW - timedelta(minutes=10),
+        )
+    )
+
+    corrected = runtime.process_temperature(_measurement(19, NOW)).heat_demand_evaluation
+
+    assert corrected.status is HeatDemandEvaluationStatus.RESILIENCE_COMMAND_EXECUTED
+    assert [command.action for command in source.commands] == [HeatingAction.ENABLE_HEATING]
+    assert runtime.source_reconciliation_state.status is SourceReconciliationStatus.CORRECTION_PENDING
+    assert runtime.source_reconciliation_state.next_reevaluation_at is None
+    assert not any(task.when == NOW + timedelta(seconds=30) and not task.cancelled for task in scheduler.tasks)
+
+    clock.current = NOW + timedelta(seconds=30)
+    unchanged = runtime.reevaluate_heat_demand()
+
+    assert unchanged.status is HeatDemandEvaluationStatus.RESILIENCE_COMMAND_HELD
+    assert [command.action for command in source.commands] == [HeatingAction.ENABLE_HEATING]
+
+
+def test_new_mismatching_report_after_successful_correction_dispatches_again() -> None:
+    runtime, clock, _, source = _runtime()
+    runtime.ingest_reported_source_state(
+        _report(
+            ReportedSourceState.DISABLED,
+            NOW,
+            transition_at=NOW - timedelta(minutes=10),
+        )
+    )
+    runtime.process_temperature(_measurement(19, NOW))
+
+    clock.current = NOW + timedelta(seconds=1)
+    repeated = runtime.ingest_reported_source_state(
+        _report(
+            ReportedSourceState.DISABLED,
+            clock.current,
+            transition_at=NOW - timedelta(minutes=10),
+        )
+    )
+
+    assert repeated.status is HeatDemandEvaluationStatus.RESILIENCE_COMMAND_EXECUTED
+    assert [command.action for command in source.commands] == [
+        HeatingAction.ENABLE_HEATING,
+        HeatingAction.ENABLE_HEATING,
+    ]
+
+
+def test_agreeing_report_after_successful_correction_completes_reconciliation() -> None:
+    runtime, clock, _, source = _runtime()
+    runtime.ingest_reported_source_state(
+        _report(
+            ReportedSourceState.DISABLED,
+            NOW,
+            transition_at=NOW - timedelta(minutes=10),
+        )
+    )
+    runtime.process_temperature(_measurement(19, NOW))
+
+    clock.current = NOW + timedelta(seconds=1)
+    agreed = runtime.ingest_reported_source_state(
+        _report(ReportedSourceState.ENABLED, clock.current, transition_at=clock.current)
+    )
+
+    assert agreed.source_reconciliation_assessment.status is SourceReconciliationStatus.AGREED
+    assert runtime.source_reconciliation_state.next_reevaluation_at is None
+    assert [command.action for command in source.commands] == [HeatingAction.ENABLE_HEATING]
 
 
 def test_known_minimum_on_remains_authoritative_for_corrective_disable() -> None:
@@ -318,7 +392,11 @@ def test_emergency_off_uses_existing_safety_disable_bypass() -> None:
     assert runtime.source_control_state.safety_bypass_active is True
     clock.current += timedelta(seconds=1)
     runtime.ingest_reported_source_state(_report(ReportedSourceState.ENABLED, clock.current))
-    assert len(source.commands) == 2
+    assert [command.action for command in source.commands] == [
+        HeatingAction.ENABLE_HEATING,
+        HeatingAction.DISABLE_HEATING,
+        HeatingAction.DISABLE_HEATING,
+    ]
 
 
 def test_manual_recovery_expiry_requests_disable_when_normal_demand_is_unknown() -> None:
