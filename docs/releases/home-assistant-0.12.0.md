@@ -26,7 +26,9 @@ release must separately review activation and migration before exposing them.
 
 ## Publication gate
 
-Do not tag or publish integration 0.12.0 until Core 0.12.0 is available from
-PyPI, its immutable wheel/sdist provenance is recorded, and HA framework tests
-have been rerun against that public package rather than the local candidate.
-
+Core publication gate is satisfied: `controlel==0.12.0` is available from
+PyPI, and its immutable wheel/sdist identities match the final tag-bound
+provenance. Integration 0.12.0 remains a candidate until both HA suites,
+release/package validators, Hassfest/HACS validation, and final artifact review
+have succeeded against that public package. Do not create `v0.12.0` or publish
+the GitHub/HACS release during release preparation.

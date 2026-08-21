@@ -42,15 +42,15 @@ def test_core_and_integration_versions_are_intentionally_independent():
     assert manifest["version"] == manifest["requirements"][0].partition("==")[2]
 
 
-def test_release_candidate_ha_tests_install_the_exact_repository_core() -> None:
+def test_release_ha_tests_install_the_exact_public_core() -> None:
     workflow = (ROOT / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8")
 
-    assert "home-assistant-candidate:" in workflow
-    assert "home-assistant-framework-candidate:" in workflow
-    assert "home-assistant-public:" not in workflow
-    assert "CONTROLEL_FRAMEWORK_COMPOSITION: candidate" in workflow
-    assert workflow.count("python -m pip install --no-cache-dir .") == 2
-    assert workflow.count("python scripts/ci/verify_candidate_core.py") == 2
+    assert "home-assistant-public:" in workflow
+    assert "home-assistant-framework-public:" in workflow
+    assert "home-assistant-candidate:" not in workflow
+    assert "CONTROLEL_FRAMEWORK_COMPOSITION: public" in workflow
+    assert workflow.count("python -m pip install --no-cache-dir controlel==0.12.0") == 2
+    assert workflow.count("python scripts/ci/verify_public_core.py") == 2
     assert "tests/integrations/home_assistant \\" in workflow
     assert "--ignore=tests/integrations/home_assistant/framework" in workflow
     assert workflow.count("--asyncio-mode=auto") == 1

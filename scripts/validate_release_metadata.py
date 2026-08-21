@@ -8,10 +8,14 @@ unique component+version pairs, and simple published-release field presence.
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
 import yaml
+
+FULL_SHA = re.compile(r"[0-9a-f]{40}\Z")
+SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 
 
 def load_yaml(path: Path):
@@ -59,6 +63,43 @@ def validate(releases_yaml: dict) -> int:
                 if tagged_at is None or not isinstance(tagged_at, str):
                     print("tag-bound published release missing tagged_at (tag object timestamp)", r, file=sys.stderr)
                     return 2
+            publication_fields = {"published_at", "provenance", "artifacts"}
+            present_publication_fields = publication_fields.intersection(r)
+            if present_publication_fields and present_publication_fields != publication_fields:
+                print("published provenance must include published_at, provenance, and artifacts", r, file=sys.stderr)
+                return 2
+            if present_publication_fields:
+                if not isinstance(r["published_at"], str):
+                    print("published_at must be an ISO 8601 string", r, file=sys.stderr)
+                    return 2
+                provenance = r["provenance"]
+                if not isinstance(provenance, dict):
+                    print("provenance must be a mapping", r, file=sys.stderr)
+                    return 2
+                if (
+                    not isinstance(provenance.get("method"), str)
+                    or not FULL_SHA.fullmatch(str(provenance.get("tag_object_sha", "")))
+                    or provenance.get("resolved_tag_commit") != r.get("commit_sha")
+                    or provenance.get("verification_status") != "passed"
+                ):
+                    print("published provenance is incomplete or inconsistent", r, file=sys.stderr)
+                    return 2
+                artifacts = r["artifacts"]
+                if not isinstance(artifacts, dict) or set(artifacts) != {"wheel", "sdist"}:
+                    print("published artifacts must contain exactly wheel and sdist", r, file=sys.stderr)
+                    return 2
+                for artifact_type, artifact in artifacts.items():
+                    if (
+                        not isinstance(artifact, dict)
+                        or set(artifact) != {"filename", "size", "sha256", "uploaded_at"}
+                        or not isinstance(artifact["filename"], str)
+                        or not isinstance(artifact["size"], int)
+                        or artifact["size"] <= 0
+                        or not SHA256.fullmatch(str(artifact["sha256"]))
+                        or not isinstance(artifact["uploaded_at"], str)
+                    ):
+                        print(f"published {artifact_type} provenance is invalid", r, file=sys.stderr)
+                        return 2
     # Additional local consistency checks for Home Assistant integration
     # Verify that published HA release points to the pinned core required by manifest
     repo_root = Path(__file__).resolve().parents[1]

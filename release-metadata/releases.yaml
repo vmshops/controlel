@@ -1,8 +1,8 @@
 # release-metadata/releases.yaml
 # Schema version: 1
 # This file is repository-owned canonical release metadata for public releases.
-# Artifacts (paths/hashes) are recorded in provenance manifests produced by
-# the canonical build tooling (e.g., dist/core-0.11.0-final/core-release-provenance.json)
+# Published artifact identities are retained here after they have been checked
+# against the tag-bound provenance produced by the canonical build tooling.
 
 metadata_version: 1
 
@@ -11,9 +11,27 @@ releases:
     component: core
     title: "Controlel Core 0.12.0"
     version: "0.12.0"
-    status: candidate
-    tag: null
-    commit_sha: null
+    status: published
+    tag: "core-v0.12.0"
+    commit_sha: "992b291902318f4f0406c4b368282ff3a7ed4dbf"
+    tagged_at: "2026-08-21T18:38:05Z"
+    published_at: "2026-08-21T18:47:45.590591Z"
+    provenance:
+      method: "tag-bound deterministic build verified against public PyPI bytes"
+      tag_object_sha: "bac6ebd0814bdc9161169f52cc476e429373c0aa"
+      resolved_tag_commit: "992b291902318f4f0406c4b368282ff3a7ed4dbf"
+      verification_status: passed
+    artifacts:
+      wheel:
+        filename: "controlel-0.12.0-py3-none-any.whl"
+        size: 231118
+        sha256: "d8fd95c1534affd4f1c967e6765a8682587e05dc54528b86721332e950aaf78b"
+        uploaded_at: "2026-08-21T18:47:45.590591Z"
+      sdist:
+        filename: "controlel-0.12.0.tar.gz"
+        size: 160765
+        sha256: "6e59c5fae5098a35069458f5c09b2eed8e837cd9a95b7bd7156865a1acdde6a6"
+        uploaded_at: "2026-08-21T18:47:46.808832Z"
     summary: "Observational anomaly, deterministic Shadow simulation, and Setup/Discovery/Import foundations"
     highlights:
       - "Observational anomaly lifecycle remains isolated from control decisions"
@@ -26,7 +44,7 @@ releases:
       pydantic: ">=2.0"
     notes:
       - "Setup canonicalization is non-activating; unfinished runtime activation is not exposed."
-      - "The Home Assistant 0.12.0 release must wait until this Core version is published and verified on PyPI."
+      - "Published PyPI bytes match the deterministic final artifacts bound to core-v0.12.0."
 
   - release_id: controlel-home_assistant-0.12.0
     component: home_assistant
@@ -46,7 +64,7 @@ releases:
     notes:
       - "Existing legacy config entries continue using the unchanged runtime path; settings are never silently merged into canonical Setup."
       - "No frontend transport/UI or runtime activation is included."
-      - "Do not publish this integration before controlel==0.12.0 is publicly available and provenance-verified."
+      - "The public Core gate is satisfied; the integration remains unpublished pending its separate review, tag, and GitHub/HACS release."
 
   - release_id: controlel-core-0.11.0
     component: core

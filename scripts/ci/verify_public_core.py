@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.metadata
+import inspect
 import json
 import sys
 import tomllib
@@ -10,16 +11,32 @@ from pathlib import Path
 from urllib.request import Request, urlopen
 
 import controlel
+from controlel.application.setup import (
+    ActiveReference,
+    CanonicalConfigurationRevision,
+    DiscoverySnapshot,
+    DraftRevision,
+    ValidationReport,
+)
+from controlel.infrastructure.home_assistant import (
+    SETUP_STORAGE_VERSION,
+    ConfigEntryActiveReferenceStore,
+    HeatingBindingSelectionRequest,
+    HeatingSetupHostService,
+    HeatingSetupSessionDTO,
+    HomeAssistantDiscoveryAdapter,
+    HomeAssistantSetupRepository,
+)
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-CORE_VERSION = "0.10.0"
+CORE_VERSION = "0.12.0"
 CORE_REQUIREMENT = f"controlel=={CORE_VERSION}"
-PUBLIC_WHEEL_FILENAME = "controlel-0.10.0-py3-none-any.whl"
-PUBLIC_WHEEL_SIZE = 151_194
-PUBLIC_WHEEL_SHA256 = "fdc15bf881b173f255bc8f7f0ef7295c13bbc0f9f736c2f79c4b766f583bbfaf"
-PUBLIC_SDIST_FILENAME = "controlel-0.10.0.tar.gz"
-PUBLIC_SDIST_SIZE = 98_034
-PUBLIC_SDIST_SHA256 = "babe73fb5779e49a59b57cabbd17522c0cb2c506e228e1b1c3dc4683d414e4dc"
+PUBLIC_WHEEL_FILENAME = "controlel-0.12.0-py3-none-any.whl"
+PUBLIC_WHEEL_SIZE = 231_118
+PUBLIC_WHEEL_SHA256 = "d8fd95c1534affd4f1c967e6765a8682587e05dc54528b86721332e950aaf78b"
+PUBLIC_SDIST_FILENAME = "controlel-0.12.0.tar.gz"
+PUBLIC_SDIST_SIZE = 160_765
+PUBLIC_SDIST_SHA256 = "6e59c5fae5098a35069458f5c09b2eed8e837cd9a95b7bd7156865a1acdde6a6"
 PYPI_METADATA_URL = f"https://pypi.org/pypi/controlel/{CORE_VERSION}/json"
 
 
@@ -63,7 +80,7 @@ def main() -> int:
     assert importlib.metadata.version("controlel") == CORE_VERSION
     assert controlel.__version__ == CORE_VERSION
     assert "site-packages" in package_path.as_posix()
-    assert not package_path.is_relative_to(REPOSITORY_ROOT)
+    assert not package_path.is_relative_to(source_root)
     assert source_root not in {Path(entry or ".").resolve() for entry in sys.path}
     assert distribution.read_text("direct_url.json") is None
     assert not any(
@@ -71,10 +88,35 @@ def main() -> int:
         and ("editable" in path.name.casefold() or ("controlel" in path.name.casefold() and path.suffix == ".pth"))
         for path in package_path.parents[1].iterdir()
     )
-    assert importlib.metadata.requires("controlel") == ["pydantic>=2.0"]
+    assert importlib.metadata.requires("controlel") == [
+        "pydantic>=2.0",
+        'PyYAML>=6.0; extra == "simulation"',
+    ]
     assert project["dependencies"] == ["pydantic>=2.0"]
     assert not any("homeassistant" in dependency.casefold() for dependency in project["dependencies"])
     assert manifest["requirements"] == [CORE_REQUIREMENT]
+
+    setup_contracts = (
+        ActiveReference,
+        CanonicalConfigurationRevision,
+        DiscoverySnapshot,
+        DraftRevision,
+        ValidationReport,
+        ConfigEntryActiveReferenceStore,
+        HeatingBindingSelectionRequest,
+        HeatingSetupHostService,
+        HeatingSetupSessionDTO,
+        HomeAssistantDiscoveryAdapter,
+        HomeAssistantSetupRepository,
+    )
+    assert all(
+        Path(inspect.getmodule(contract).__file__).resolve().is_relative_to(package_path.parent)
+        for contract in setup_contracts
+    )
+    assert SETUP_STORAGE_VERSION == 1
+    assert hasattr(HeatingSetupHostService, "canonicalize_heating_draft")
+    assert not hasattr(HeatingSetupHostService, "activate")
+    assert not hasattr(HeatingSetupHostService, "activate_heating_draft")
     verify_public_artifact_metadata()
 
     print(

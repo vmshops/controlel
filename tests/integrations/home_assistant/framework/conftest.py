@@ -32,7 +32,7 @@ MANIFEST_REQUIREMENT = json.loads(
 )["requirements"][0]
 MANIFEST_CORE_VERSION = MANIFEST_REQUIREMENT.removeprefix("controlel==")
 FRAMEWORK_CORE_VERSION_BY_COMPOSITION = {
-    "candidate": MANIFEST_CORE_VERSION,
+    "public": MANIFEST_CORE_VERSION,
 }
 
 
