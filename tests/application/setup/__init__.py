@@ -1,0 +1,1 @@
+"""Setup application foundation tests."""
