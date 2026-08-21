@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Controlel — Setup Wizard (Prototype)</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="app-title">
+      <span class="app-logo" aria-hidden="true">C</span>
+      <div>
+        <h1>Controlel Setup</h1>
+        <p class="app-subtitle">Heating module · Setup wizard prototype · Mock data only · No backend calls</p>
+      </div>
+    </div>
+    <div id="draft-status" class="draft-status" hidden></div>
+  </header>
+
+  <main class="wizard">
+    <nav id="stepper" class="stepper" aria-label="Setup steps"></nav>
+    <section id="step-panel" class="step-panel" aria-live="polite"></section>
+    <footer id="wizard-footer" class="wizard-footer"></footer>
+  </main>
+
+  <script src="mock-data.js"></script>
+  <script src="components.js"></script>
+  <script src="wizard.js"></script>
+</body>
+</html>
