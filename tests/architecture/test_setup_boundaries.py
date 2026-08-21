@@ -3,6 +3,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).parents[2]
 SETUP_KERNEL = ROOT / "src" / "controlel" / "application" / "setup"
+HA_DISCOVERY_ADAPTER = ROOT / "src" / "controlel" / "infrastructure" / "home_assistant" / "setup_discovery.py"
 
 
 def test_shared_setup_kernel_has_no_heating_or_runtime_domain_dependency() -> None:
@@ -37,6 +38,15 @@ def test_shared_setup_kernel_has_no_home_assistant_adapter_dependency() -> None:
             for imported in imports
             for prefix in forbidden_prefixes
         ), f"{path.relative_to(ROOT)} imports a Home Assistant adapter"
+
+
+def test_heating_roles_do_not_leak_into_shared_setup_or_ha_discovery() -> None:
+    files = (*sorted(SETUP_KERNEL.rglob("*.py")), HA_DISCOVERY_ADAPTER)
+    for path in files:
+        source = path.read_text(encoding="utf-8")
+        assert "heating.primary_temperature" not in source
+        assert "heating.source." not in source
+        assert "heating.heat_delivery." not in source
 
 
 def test_production_layers_do_not_import_setup_module_adapter() -> None:

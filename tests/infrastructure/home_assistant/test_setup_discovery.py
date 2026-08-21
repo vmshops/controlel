@@ -61,6 +61,10 @@ class EntityEntry:
     config_subentry_id: str | None
     device_id: str | None
     area_id: str | None
+    device_class: str | None = None
+    original_device_class: str | None = None
+    unit_of_measurement: str | None = None
+    supported_features: int = 0
 
 
 FLOOR = FloorEntry("ground_floor")
@@ -84,6 +88,9 @@ ENTITY = EntityEntry(
     config_subentry_id="subentry-1",
     device_id=DEVICE.id,
     area_id=None,
+    device_class="temperature",
+    original_device_class="temperature",
+    unit_of_measurement="°C",
 )
 
 
@@ -129,9 +136,13 @@ def test_exact_registry_id_resolves_and_retains_minimal_registry_evidence() -> N
         "config_entry_id": "config-1",
         "config_subentry_id": "subentry-1",
         "domain": "sensor",
+        "device_class": "temperature",
+        "original_device_class": "temperature",
         "platform": "mqtt",
         "previous_unique_id": None,
         "unique_id": "living-temperature-1",
+        "unit_of_measurement": "°C",
+        "supported_features": 0,
     }
     assert {item.object_kind for item in snapshot.objects} == {
         HA_FLOOR_KIND,

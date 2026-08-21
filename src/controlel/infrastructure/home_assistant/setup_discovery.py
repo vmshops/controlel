@@ -186,6 +186,10 @@ class HomeAssistantDiscoveryAdapter:
                 "previous_unique_id": _optional_string(entry, "previous_unique_id"),
                 "config_entry_id": _optional_string(entry, "config_entry_id"),
                 "config_subentry_id": _optional_string(entry, "config_subentry_id"),
+                "device_class": _optional_string(entry, "device_class"),
+                "original_device_class": _optional_string(entry, "original_device_class"),
+                "unit_of_measurement": _optional_string(entry, "unit_of_measurement"),
+                "supported_features": _required_non_negative_integer(entry, "supported_features"),
             },
         )
 
@@ -407,6 +411,13 @@ def _optional_string(value: object, attribute: str) -> str | None:
         return None
     if not isinstance(result, str) or not result:
         raise ValueError(f"Home Assistant registry field {attribute} must be null or a non-empty string")
+    return result
+
+
+def _required_non_negative_integer(value: object, attribute: str) -> int:
+    result = getattr(value, attribute, None)
+    if not isinstance(result, int) or isinstance(result, bool) or result < 0:
+        raise ValueError(f"Home Assistant registry field {attribute} must be a non-negative integer")
     return result
 
 

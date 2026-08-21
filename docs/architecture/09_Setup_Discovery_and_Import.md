@@ -497,6 +497,15 @@ Home Assistant state values are transient evidence. Registry structure,
 advertised capability, current availability, and live measurements remain
 separate. Neither discovery nor resolution calls a Home Assistant service.
 
+The limited Heating milestone reads only entity-registry-advertised domain,
+device class, original device class, unit, and supported-feature flags for
+candidate classification. It does not read entity state. Heating recommends
+temperature measurements, simple source switches, supported climate target
+actuators, and reported source state only where the existing simple controlled
+switch path can consume it. Arbitrary external service targets remain
+selectable as explicitly unverified alternatives; they require confirmation
+and produce a validation warning rather than an invented capability claim.
+
 The provider-instance identity prevents imported REAL bindings from being
 silently resolved against another Home Assistant installation or a Shadow
 environment. Diagnostics continue to use explicit allowlists/redaction rather
@@ -956,9 +965,10 @@ After architecture approval, the smallest useful implementation is:
    durable Home Assistant storage for incomplete drafts, immutable revisions,
    and activation attempts. The config entry stores only `ActiveReference`.
 4. Add a limited read-only Home Assistant discovery adapter for floors, areas,
-   devices, registered entities, and only stable identity, topology, and
-   recovery evidence. There is no background loop or registry write. Broader
-   capability discovery remains module-adapter work for a later milestone.
+   devices, registered entities, stable identity, topology, recovery evidence,
+   and the minimal entity-registry-advertised capability fields used by the
+   first Heating adapter. There is no live-state read, background loop, or
+   registry write. Broader capability discovery remains later work.
 5. Add exact registry-ID resolution with current locator, missing, ambiguous,
    environment-mismatch, and ephemeral results. Secondary identity evidence
    produces confirmation-required candidates only.

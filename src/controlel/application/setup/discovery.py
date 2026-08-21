@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -12,7 +13,7 @@ from controlel.application.setup.json_data import (
     canonical_json,
     immutable_json_mapping,
 )
-from controlel.application.setup.model import IdentityQuality, ProviderReference
+from controlel.application.setup.model import DiscoverySnapshot, IdentityQuality, ProviderReference
 
 
 class ReferenceResolutionStatus(StrEnum):
@@ -109,6 +110,16 @@ class ProviderReferenceResolution(BaseModel):
                 ):
                     raise ValueError("recovery candidates must be new stable identities in the requested scope")
         return self
+
+
+class ProviderReferenceResolver(Protocol):
+    """Provider-neutral resolution port implemented by outer provider adapters."""
+
+    def resolve(
+        self,
+        reference: ProviderReference,
+        snapshot: DiscoverySnapshot,
+    ) -> ProviderReferenceResolution: ...
 
 
 def _stable_identity(reference: ProviderReference) -> tuple[str, str, str, str | None]:

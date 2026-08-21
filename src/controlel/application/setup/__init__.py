@@ -3,6 +3,7 @@
 from controlel.application.setup.activation import ActivationCoordinator
 from controlel.application.setup.discovery import (
     ProviderReferenceResolution,
+    ProviderReferenceResolver,
     RecoveryCandidate,
     ReferenceResolutionStatus,
 )
@@ -62,6 +63,7 @@ __all__ = [
     "LoadedRuntimeConfiguration",
     "ProviderObjectReference",
     "ProviderReference",
+    "ProviderReferenceResolver",
     "ProviderReferenceResolution",
     "RecoveryCandidate",
     "ReferenceResolutionStatus",
