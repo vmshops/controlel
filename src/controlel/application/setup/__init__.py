@@ -1,6 +1,11 @@
 """Module-neutral Setup / Discovery / Import foundation."""
 
 from controlel.application.setup.activation import ActivationCoordinator
+from controlel.application.setup.discovery import (
+    ProviderReferenceResolution,
+    RecoveryCandidate,
+    ReferenceResolutionStatus,
+)
 from controlel.application.setup.effective import (
     derive_real_runtime_configuration,
     derive_shadow_runtime_configuration,
@@ -57,6 +62,9 @@ __all__ = [
     "LoadedRuntimeConfiguration",
     "ProviderObjectReference",
     "ProviderReference",
+    "ProviderReferenceResolution",
+    "RecoveryCandidate",
+    "ReferenceResolutionStatus",
     "RuntimeConfigurationOrigin",
     "SelectionOrigin",
     "SetupConflictError",

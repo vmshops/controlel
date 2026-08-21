@@ -21,6 +21,24 @@ def test_shared_setup_kernel_has_no_heating_or_runtime_domain_dependency() -> No
         assert imports.isdisjoint(forbidden), f"{path.relative_to(ROOT)} imports Heating-specific code"
 
 
+def test_shared_setup_kernel_has_no_home_assistant_adapter_dependency() -> None:
+    forbidden_prefixes = (
+        "homeassistant",
+        "custom_components.controlel",
+        "controlel.infrastructure.home_assistant",
+    )
+    for path in sorted(SETUP_KERNEL.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        imports = {
+            node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom) and node.module is not None
+        }
+        assert not any(
+            imported == prefix or imported.startswith(f"{prefix}.")
+            for imported in imports
+            for prefix in forbidden_prefixes
+        ), f"{path.relative_to(ROOT)} imports a Home Assistant adapter"
+
+
 def test_production_layers_do_not_import_setup_module_adapter() -> None:
     adapter_module = "controlel.application.configuration.heating_setup_adapter"
     roots = (

@@ -474,14 +474,13 @@ operational-event boundary; discovery and draft reads emit no control events.
 
 The outer Home Assistant adapter supplies:
 
-- `HomeAssistantStructureDiscoveryAdapter`, which reads registry/state
-  structure and returns a normalized snapshot;
-- `HomeAssistantSourceResolver`, which resolves stable references to current
-  aliases/endpoints and reports `RESOLVED_EXACT`, `RESOLVED_EPHEMERAL`,
-  `MISSING`, `AMBIGUOUS`, or `ENVIRONMENT_MISMATCH` without changing a binding;
-- a separate candidate matcher that may return registry-recreation or
-  replacement candidates with ranked recovery evidence but never rewrites a
-  binding;
+- `HomeAssistantDiscoveryAdapter`, which reads registry structure and returns a
+  normalized snapshot;
+- `HomeAssistantReferenceResolver`, which reports `RESOLVED`, `EPHEMERAL`,
+  `MISSING`, `RECOVERY_CANDIDATE`, `AMBIGUOUS`, or `ENVIRONMENT_MISMATCH`
+  without changing a binding. Recovery matching is an internal adapter concern;
+  candidate results remain structurally separate from resolved references and
+  always require later confirmation;
 - draft and canonical-configuration repository implementations;
 - persisted activation-attempt storage and a host activation adapter that can
   construct a candidate from an explicit canonical revision and roll back to
@@ -957,8 +956,9 @@ After architecture approval, the smallest useful implementation is:
    durable Home Assistant storage for incomplete drafts, immutable revisions,
    and activation attempts. The config entry stores only `ActiveReference`.
 4. Add a limited read-only Home Assistant discovery adapter for floors, areas,
-   devices, registered entities, and only the capability evidence required by
-   the first Heating roles. There is no background loop or registry write.
+   devices, registered entities, and only stable identity, topology, and
+   recovery evidence. There is no background loop or registry write. Broader
+   capability discovery remains module-adapter work for a later milestone.
 5. Add exact registry-ID resolution with current locator, missing, ambiguous,
    environment-mismatch, and ephemeral results. Secondary identity evidence
    produces confirmation-required candidates only.
