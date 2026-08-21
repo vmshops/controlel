@@ -137,4 +137,4 @@
       },
     },
   };
-})(window);
+})(typeof window !== "undefined" ? window : globalThis);

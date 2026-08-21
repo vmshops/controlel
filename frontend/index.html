@@ -3,29 +3,48 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Controlel — Setup Wizard (Prototype)</title>
+  <title>Controlel (Prototype)</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <header class="app-header">
-    <div class="app-title">
-      <span class="app-logo" aria-hidden="true">C</span>
-      <div>
-        <h1>Controlel Setup</h1>
-        <p class="app-subtitle">Heating module · Setup wizard prototype · Mock data only · No backend calls</p>
+  <div id="app" class="app">
+    <aside class="app__sidebar">
+      <div class="app__brand">
+        <span class="app-logo" aria-hidden="true">C</span>
+        <div>
+          <h1 class="app__name">Controlel</h1>
+          <p class="app__tagline">Heating control platform</p>
+        </div>
+      </div>
+      <div id="app-nav" class="app__nav"></div>
+      <div class="app__sidebar-footer">
+        <p>Prototype · mock data only</p>
+        <p>No backend calls</p>
+      </div>
+    </aside>
+
+    <div class="app__main">
+      <header class="app__topbar">
+        <span class="app__topbar-label">Overall status</span>
+        <span id="topbar-status" class="app__topbar-status"></span>
+      </header>
+
+      <main id="view-root" class="app__content"></main>
+
+      <!-- Setup view: the existing wizard renders into these containers (wizard.js). -->
+      <div id="wizard-view" class="app__content app__content--wizard" hidden>
+        <div id="draft-status" class="draft-status" hidden></div>
+        <nav id="stepper" class="stepper" aria-label="Setup steps"></nav>
+        <section id="step-panel" class="step-panel" aria-live="polite"></section>
+        <footer id="wizard-footer" class="wizard-footer"></footer>
       </div>
     </div>
-    <div id="draft-status" class="draft-status" hidden></div>
-  </header>
-
-  <main class="wizard">
-    <nav id="stepper" class="stepper" aria-label="Setup steps"></nav>
-    <section id="step-panel" class="step-panel" aria-live="polite"></section>
-    <footer id="wizard-footer" class="wizard-footer"></footer>
-  </main>
+  </div>
 
   <script src="mock-data.js"></script>
+  <script src="mock-app-data.js"></script>
   <script src="components.js"></script>
   <script src="wizard.js"></script>
+  <script src="app.js"></script>
 </body>
 </html>
