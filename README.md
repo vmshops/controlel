@@ -1,24 +1,125 @@
 # Controlel
 
-Adaptive intelligent heating control platform.
+Controlel is a heating control integration for Home Assistant: it watches a room temperature sensor, decides when your zone needs heat, and — after safety checks — sends on/off commands to a heat source switch.
 
-## Vision
+## What Controlel does
 
-Controlel is a modular, explainable and adaptive heating regulation platform designed for Home Assistant integration.
+Controlel solves a common problem: a boiler or heat source that is switched on and off by a simple thermostat, with no explanation of *why* it acted and no protection against rapid cycling.
 
-The goal is to create a reliable heating controller capable of optimizing comfort, efficiency and condensation performance while maintaining safety and transparency.
+Controlel sits between your temperature sensor and your heat source and:
 
-## Main principles
+- **Decides when heat is needed** — based on your target temperature, a hysteresis deadband, and a confirmation interval that filters brief sensor drops.
+- **Protects the heat source** — minimum on/off times (anti-cycling) mean a blocked transition is shown as *deferred* and reevaluated at its deadline, instead of replaying a stored command.
+- **Explains its decisions** — every public entity, reason code, and decision trace is indexed in the [Home Assistant entity reference](docs/operations/EntityReference.md). You can see the latest decision, its reason, the requested command, and the service-call outcome.
+- **Behaves safely by default** — new entries default to "Turn heating off" after a sensor timeout, and safety-disable commands bypass minimum-on protection.
 
-- Safety first
-- Explainable decisions
-- Modular architecture
-- Hardware independence
-- Configuration through UI
-- Open-source ready
-- Adaptive regulation
+Controlel is event-driven: it reacts to sensor state changes and deterministic deadlines. It does not poll.
 
-## Status
+## What Controlel does NOT do
+
+It is important to know the boundary between a *command* and *physical reality*:
+
+- **A successful command is not physical confirmation.** "Service call dispatched" means Home Assistant accepted the service call. Controlel never claims the valve is at a position, the burner is running, or the boiler is physically on. Unknown is not false.
+- **One config entry, one zone, one primary sensor, one shared heat source.** There is no discovery, no multi-zone configuration UI, and no writable operational entities.
+- **No persistence.** Measurements, demand, timers, and lockout state are in-memory only and are not restored across reload or restart.
+- **No automatic retries** of failed service calls; failures are reported through logs and Repairs.
+- **No water-temperature or efficiency optimization.** Physical water-target dispatch is intentionally unsupported.
+- **Notifications are disabled by default** with no recipients; nothing is discovered or targeted automatically.
+- **No persistent decision history.** Diagnostics expose only the bounded in-memory trace.
+- **Custom-repository distribution only.** Controlel is not listed in the default HACS store.
+
+The full list of current limitations is in the [Home Assistant installation guide](docs/operations/HomeAssistantInstallation.md).
+
+## How it works (simple mental model)
+
+```text
+temperature sensor
+      → zone demand (hysteresis + confirmation interval)
+      → building demand
+      → heat source permission (anti-cycling, minimum on/off)
+      → safety checks (sensor validity, grace period, timeout action)
+      → command (switch on/off)
+```
+
+- **Zone demand** — the sensor is compared against your target with a hysteresis deadband; a new heat demand must stay continuous for the confirmation interval.
+- **Heat source permission** — the shared source policy checks minimum on/off protection. If a transition is blocked, it is deferred and reevaluated at its deadline.
+- **Safety checks** — invalid, stale, or missing measurements do not become measurements; after the grace period the configured timeout action applies.
+- **Command** — the result is a Home Assistant service call. Its success is command evidence, not physical feedback.
+
+## Requirements
+
+Before installing, make sure you have:
+
+- Home Assistant `2026.7.3` or newer.
+- Network access from Home Assistant to GitHub and PyPI.
+- A temperature sensor with a finite numeric state and a Celsius or Fahrenheit unit.
+- A dedicated Home Assistant entity (for example a switch) that can safely enable and disable the heat source.
+- HACS, for the primary installation path.
+
+Back up the Home Assistant configuration before installing or upgrading a custom integration.
+
+## Installation
+
+The supported distribution uses the public repository
+`https://github.com/vmshops/controlel` as a HACS custom repository.
+
+1. In HACS, open the menu and select **Custom repositories**.
+2. Add `https://github.com/vmshops/controlel` with category **Integration**.
+3. Download the latest released integration and restart Home Assistant.
+4. Open **Settings > Devices & services > Add integration** and select
+   **Controlel**.
+
+The integration manifest makes Home Assistant install the exact public core
+dependency `controlel==0.10.0`; users must not install the core manually.
+
+A manual installation fallback (release ZIP with SHA-256 verification),
+upgrade/rollback, and removal instructions are in the
+[Home Assistant installation guide](docs/operations/HomeAssistantInstallation.md).
+
+## First configuration
+
+The setup form asks for only the zone and sensor names, a temperature sensor,
+the target temperature, and one controlled switch. The temperature selector is
+restricted to `sensor` entities with a temperature device class.
+
+New entries default to a 21.0 °C target, a 15-minute maximum measurement age,
+a 30-second future timestamp tolerance, a 2-minute sensor-failure grace period,
+and **Turn heating off — recommended** after timeout.
+
+In simple mode Controlel derives the enable/disable calls from the selected
+switch (`switch.turn_on` / `switch.turn_off`) without asking for service names.
+For equipment that is not one normal switch, select **Use custom Home
+Assistant services** in the advanced settings.
+
+What to expect on first setup:
+
+- Setup subscribes to the configured temperature entity, processes its current
+  state, and then starts the control runtime. A valid fresh measurement can
+  therefore produce a heat-source service call immediately.
+- An unknown, stale, or malformed state does not become a measurement; demand
+  remains indeterminate during the grace period, after which the configured
+  timeout action applies.
+- A successful service return is not confirmation of physical heat-source
+  state. Service failures are reported through logs and Repairs and are not
+  retried automatically.
+
+Existing entries can be edited through **Settings > Devices & services >
+Controlel > Configure**; saving options preserves stable IDs and reloads the
+entry.
+
+## Support / reporting issues
+
+- **Troubleshooting:** see the [Troubleshooting guide](docs/operations/Troubleshooting.md) for failure diagnosis.
+- **Reporting defects:** open an issue at <https://github.com/vmshops/controlel/issues>. Include the integration version, Home Assistant version, relevant sanitized logs, and whether installation used HACS or the manual release archive.
+- **Security reports:** see [SECURITY.md](SECURITY.md). Do not place credentials, private configuration, or exploit details in a public issue.
+- **Diagnostics:** Home Assistant's config-entry diagnostics download contains normalized configuration, version data, the current operational snapshot, and a bounded in-memory trace.
+
+## Developer section
+
+> The following content is for contributors and maintainers. End users can
+> stop reading here.
+
+### Status
 
 Project phase: Core M31C.1 heating-performance assessment foundation
 
@@ -43,25 +144,7 @@ Future milestones:
 Refer to `release-metadata/releases.yaml` and `docs/releases/` for canonical
 release facts and human-oriented release pages.
 
-## Home Assistant installation
-
-The supported distribution uses the public repository
-`https://github.com/vmshops/controlel` as a HACS custom repository. The primary
-installation flow is:
-
-1. In HACS, open the menu and select **Custom repositories**.
-2. Add `https://github.com/vmshops/controlel` with category **Integration**.
-3. Download the latest released integration and restart Home Assistant.
-4. Open **Settings > Devices & services > Add integration** and select
-   **Controlel**.
-
-The integration manifest makes Home Assistant install the exact public core
-dependency `controlel==0.10.0`; users must not install the core manually.
-Detailed prerequisites, configuration, safety behavior, manual installation,
-upgrades, removal, and current limitations are in the
-[Home Assistant installation guide](docs/operations/HomeAssistantInstallation.md).
-
-## Home Assistant development integration
+### Home Assistant development integration
 
 The reusable core remains under `src/controlel`. The first Home Assistant host
 is a custom component under `custom_components/controlel`; its dependency
@@ -93,7 +176,7 @@ physical valve position without device feedback. Adaptive assist, learning,
 actuator travel verification, and source-water-temperature control are not part
 of this milestone.
 
-New entries default to asymmetric hysteresis of 0.3 Â°C below and 0.1 Â°C above
+New entries default to asymmetric hysteresis of 0.3 °C below and 0.1 °C above
 the target, a two-minute heat-demand confirmation interval, plus command-based
 minimum on/off times of 10/5 minutes. Existing entries resolve all five
 settings to zero until the user explicitly changes them. The controller
@@ -241,7 +324,7 @@ harness is separate from HACS release validation. HACS metadata and
 deterministic release packaging must pass before the unpublished `0.11.0`
 candidate may be tagged; no default-store publication exists.
 
-## Core package artifacts
+### Core package artifacts
 
 The reusable core is published as the `controlel` distribution and import
 package. Version `0.10.0` is the latest public immutable release. The static version source
@@ -257,7 +340,7 @@ Repository packaging CI remains validation-only and contains no publication
 automation. See the [core release guide](docs/development/ReleaseGuide.md) for
 the published release record, build validation, and version separation.
 
-## Zone heat-demand confirmation
+### Zone heat-demand confirmation
 
 Core `0.3.0` inserts a zone-owned confirmation policy after hysteresis.
 Milestone 29 keys that state independently per zone and places deterministic
@@ -272,3 +355,13 @@ This filter is separate from heat-source minimum-off protection and does not
 detect an open window. The shared source policy consumes confirmed aggregate
 demand only. Pending state is not persisted across reload or restart, and no
 state claims that a physical heat source is on or off.
+
+### Documentation
+
+- [Architecture](docs/ARCHITECTURE.md)
+- [Development guide](docs/development/DevelopmentGuide.md)
+- [Release guide](docs/development/ReleaseGuide.md)
+- [Home Assistant installation guide](docs/operations/HomeAssistantInstallation.md)
+- [Home Assistant entity reference](docs/operations/EntityReference.md)
+- [Troubleshooting](docs/operations/Troubleshooting.md)
+- [Roadmap](docs/architecture/07_Roadmap.md)
