@@ -45,6 +45,7 @@ EXPECTED_ARCHIVE_FILES = frozenset(
         "runtime_executor.py",
         "scheduler.py",
         "sensor.py",
+        "setup_backend.py",
         "strings.json",
         "translations/en.json",
     }

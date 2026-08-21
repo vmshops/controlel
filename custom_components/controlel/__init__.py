@@ -284,6 +284,17 @@ async def async_remove_entry(
     clear_entry_issues(hass, entry.entry_id)
 
 
+async def async_get_setup_service(
+    hass: HomeAssistant,
+    entry: ControlelConfigEntry,
+) -> Any:
+    """Lazily compose the non-activating Setup backend for a host/API caller."""
+
+    from .setup_backend import async_get_setup_service as get_setup_service
+
+    return await get_setup_service(hass, entry)
+
+
 async def _async_update_listener(
     hass: HomeAssistant,
     entry: ControlelConfigEntry,

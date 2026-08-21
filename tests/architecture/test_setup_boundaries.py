@@ -4,6 +4,10 @@ from pathlib import Path
 ROOT = Path(__file__).parents[2]
 SETUP_KERNEL = ROOT / "src" / "controlel" / "application" / "setup"
 HA_DISCOVERY_ADAPTER = ROOT / "src" / "controlel" / "infrastructure" / "home_assistant" / "setup_discovery.py"
+HA_SETUP_HOST = ROOT / "src" / "controlel" / "infrastructure" / "home_assistant" / "setup_host.py"
+HA_SETUP_PERSISTENCE = ROOT / "src" / "controlel" / "infrastructure" / "home_assistant" / "setup_persistence.py"
+INTEGRATION_INIT = ROOT / "custom_components" / "controlel" / "__init__.py"
+INTEGRATION_SETUP_BACKEND = ROOT / "custom_components" / "controlel" / "setup_backend.py"
 
 
 def test_shared_setup_kernel_has_no_heating_or_runtime_domain_dependency() -> None:
@@ -63,3 +67,31 @@ def test_production_layers_do_not_import_setup_module_adapter() -> None:
                 node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom) and node.module is not None
             }
             assert adapter_module not in imports
+
+
+def test_ha_setup_adapters_have_no_static_home_assistant_class_dependency() -> None:
+    for path in (HA_SETUP_HOST, HA_SETUP_PERSISTENCE):
+        source = path.read_text(encoding="utf-8")
+        assert "from homeassistant" not in source
+        assert "import homeassistant" not in source
+
+
+def test_new_setup_backend_never_reads_or_merges_legacy_runtime_settings() -> None:
+    source = INTEGRATION_SETUP_BACKEND.read_text(encoding="utf-8")
+    forbidden = (
+        "integration_config_from_entry",
+        "integration_config_from_entry_data",
+        "merged_entry_configuration",
+    )
+    assert not any(name in source for name in forbidden)
+    assert "setup.legacy_configuration_present" in source
+    assert "silently_merged=False" in source
+
+
+def test_setup_backend_is_lazy_relative_to_released_runtime_imports() -> None:
+    tree = ast.parse(INTEGRATION_INIT.read_text(encoding="utf-8"), filename=str(INTEGRATION_INIT))
+    top_level_imports = {
+        node.module for node in tree.body if isinstance(node, ast.ImportFrom) and node.module is not None
+    }
+    assert "setup_backend" not in top_level_imports
+    assert "async_get_setup_service" in INTEGRATION_INIT.read_text(encoding="utf-8")

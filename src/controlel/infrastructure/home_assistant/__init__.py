@@ -5,9 +5,33 @@ from controlel.infrastructure.home_assistant.setup_discovery import (
     HomeAssistantEphemeralEndpoint,
     HomeAssistantReferenceResolver,
 )
+from controlel.infrastructure.home_assistant.setup_host import (
+    DiscoverySnapshotDTO,
+    HeatingBindingSelectionRequest,
+    HeatingSetupHostService,
+    HeatingSetupSessionDTO,
+    LegacyConfigurationStatusDTO,
+    SetupValidationStatus,
+)
+from controlel.infrastructure.home_assistant.setup_persistence import (
+    ACTIVE_REFERENCE_KEY,
+    ConfigEntryActiveReferenceStore,
+    HomeAssistantSetupRepository,
+    SetupStorageIntegrityError,
+)
 
 __all__ = [
     "HomeAssistantDiscoveryAdapter",
     "HomeAssistantEphemeralEndpoint",
     "HomeAssistantReferenceResolver",
+    "ACTIVE_REFERENCE_KEY",
+    "ConfigEntryActiveReferenceStore",
+    "DiscoverySnapshotDTO",
+    "HeatingBindingSelectionRequest",
+    "HeatingSetupHostService",
+    "HeatingSetupSessionDTO",
+    "HomeAssistantSetupRepository",
+    "LegacyConfigurationStatusDTO",
+    "SetupStorageIntegrityError",
+    "SetupValidationStatus",
 ]
