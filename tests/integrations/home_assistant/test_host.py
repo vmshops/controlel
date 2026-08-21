@@ -42,7 +42,6 @@ from controlel.domain.source_control import (
 from controlel.domain.value_objects.sensor_id import SensorId
 from controlel.domain.value_objects.temperature import Temperature
 from controlel.domain.value_objects.zone_id import ZoneId
-from custom_components.controlel import ControlRuntime as HomeAssistantControlRuntime
 from custom_components.controlel.config import (
     DiagnosticConfiguration,
     HomeAssistantSensorBinding,
@@ -446,15 +445,14 @@ class FakeRuntime:
             reason=TemperatureNoDecisionReason.SECONDARY_MEASUREMENT,
         )
 
-    def start(self):
+    def record_runtime_started(self):
         self.worker_threads.append(get_ident())
         self.operations.append(("start", None))
         self.start_entered.set()
         self.start_release.wait()
-        return SimpleNamespace(
-            status=HeatDemandEvaluationStatus.INDETERMINATE_GRACE,
-            next_evaluation_at=NOW,
-        )
+
+    def begin_source_recovery(self):
+        return SimpleNamespace(status="waiting")
 
     def reevaluate_heat_demand(self):
         self.worker_threads.append(get_ident())
@@ -652,21 +650,17 @@ def test_notification_runtime_signals_use_one_coalesced_drain_task() -> None:
     assert task_released is True
 
 
-def test_home_assistant_runtime_start_does_not_evaluate_empty_core_state(monkeypatch):
+def test_home_assistant_runtime_start_uses_shared_non_evaluating_boundary(monkeypatch):
     recorded_starts = []
 
-    def fail_if_called(runtime):
-        raise AssertionError("core startup evaluation must not run before a real HA state")
-
-    monkeypatch.setattr(CoreControlRuntime, "start", fail_if_called)
     monkeypatch.setattr(
         CoreControlRuntime,
         "record_runtime_started",
         lambda runtime: recorded_starts.append(runtime),
     )
-    runtime = object.__new__(HomeAssistantControlRuntime)
+    runtime = object.__new__(CoreControlRuntime)
 
-    assert runtime.start() is None
+    assert runtime.record_runtime_started() is None
     assert recorded_starts == [runtime]
 
 

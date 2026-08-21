@@ -14,7 +14,7 @@ authors = [
     {name = "vmshops"}
 ]
 dependencies = [
-    "pydantic>=2.0"
+    "pydantic>=2.0",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -31,6 +31,12 @@ classifiers = [
 Source = "https://github.com/vmshops/controlel"
 Issues = "https://github.com/vmshops/controlel/issues"
 Documentation = "https://github.com/vmshops/controlel/tree/main/docs"
+
+
+[project.optional-dependencies]
+simulation = [
+    "PyYAML>=6.0",
+]
 
 
 [tool.setuptools]

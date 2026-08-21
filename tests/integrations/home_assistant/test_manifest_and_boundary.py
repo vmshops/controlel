@@ -216,7 +216,10 @@ def test_custom_component_does_not_contain_duplicate_core_source():
 
 def test_home_assistant_uses_narrow_public_runtime_start_boundary() -> None:
     integration_source = (COMPONENT / "__init__.py").read_text(encoding="utf-8")
+    host_source = (COMPONENT / "host.py").read_text(encoding="utf-8")
 
-    assert "self.record_runtime_started()" in integration_source
+    assert "ControlRuntimeStartup(self._runtime)" in host_source
+    assert "startup.begin" in host_source
+    assert "class ControlRuntime(" not in integration_source
     assert "_record_operational" not in integration_source
     assert "emit(" not in integration_source

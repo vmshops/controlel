@@ -9,7 +9,10 @@ CORE = ROOT / "src" / "controlel"
 
 
 def _module_name(path: Path) -> str:
-    relative = path.relative_to(ROOT / "src").with_suffix("")
+    try:
+        relative = path.relative_to(ROOT / "src").with_suffix("")
+    except ValueError:
+        relative = path.relative_to(ROOT).with_suffix("")
     parts = relative.parts
     if parts[-1] == "__init__":
         parts = parts[:-1]
@@ -50,6 +53,7 @@ def test_domain_does_not_depend_on_application_infrastructure_or_home_assistant(
         (
             "controlel.application",
             "controlel.infrastructure",
+            "controlel.simulation",
             "custom_components",
             "homeassistant",
         ),
@@ -61,7 +65,27 @@ def test_application_does_not_depend_on_infrastructure_or_home_assistant() -> No
         CORE / "application",
         (
             "controlel.infrastructure",
+            "controlel.simulation",
             "custom_components",
             "homeassistant",
         ),
     )
+
+
+def test_production_infrastructure_does_not_depend_on_simulation() -> None:
+    _assert_no_import_prefixes(CORE / "infrastructure", ("controlel.simulation",))
+
+
+def test_simulation_does_not_depend_on_home_assistant_or_production_infrastructure() -> None:
+    _assert_no_import_prefixes(
+        CORE / "simulation",
+        (
+            "controlel.infrastructure",
+            "custom_components",
+            "homeassistant",
+        ),
+    )
+
+
+def test_home_assistant_composition_does_not_depend_on_simulation() -> None:
+    _assert_no_import_prefixes(ROOT / "custom_components" / "controlel", ("controlel.simulation",))

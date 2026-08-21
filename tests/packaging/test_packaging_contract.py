@@ -44,6 +44,7 @@ def test_project_metadata_and_runtime_dependencies_match_release_contract() -> N
     assert project["license"] == "MIT"
     assert project["authors"] == [{"name": "vmshops"}]
     assert project["dependencies"] == ["pydantic>=2.0"]
+    assert project["optional-dependencies"] == {"simulation": ["PyYAML>=6.0"]}
     assert project["classifiers"] == [
         "Development Status :: 3 - Alpha",
         "Intended Audience :: Developers",

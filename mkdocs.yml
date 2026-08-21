@@ -22,6 +22,7 @@ nav:
       - Event model: architecture/04_Event_Model.md
       - State model: architecture/05_State_Model.md
       - Control flow: architecture/8_Control_Flow.md
+      - Shadow runtime and simulation: architecture/08_Shadow_Runtime_and_Simulation.md
       - System architecture: architecture/SystemArchitecture.md
       - Roadmap: architecture/07_Roadmap.md
     - Release fragments: release-fragments/README.md

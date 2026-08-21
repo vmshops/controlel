@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol, cast
 
 from controlel.application.runtime.control_runtime import ControlRuntime
+from controlel.application.runtime.control_runtime_startup import ControlRuntimeStartup
 from controlel.application.runtime.fatal_shutdown_result import (
     FatalShutdownEmergencyOutcome,
     FatalShutdownResult,
@@ -260,13 +261,11 @@ class HomeAssistantControlelHost:
             snapshot = self._state_getter(self._temperature_entity_id)
             source_snapshot = self._state_getter(self._source_entity_id) if self._source_entity_id else None
 
+            startup = ControlRuntimeStartup(self._runtime)
             try:
-                begin_recovery = getattr(self._runtime, "begin_source_recovery", None)
-                if callable(begin_recovery):
-                    await self._async_submit_runtime(begin_recovery)
+                await self._async_submit_runtime(startup.begin)
                 if source_snapshot is not None:
-                    await self._async_ingest_reported_source(source_snapshot)
-                startup_result = await self._async_submit_runtime(self._runtime.start)
+                    await self._async_ingest_reported_source(source_snapshot, startup=startup)
             except HomeAssistantServiceCallError as error:
                 self._handle_synchronous_failure(error)
             except Exception as error:
@@ -283,13 +282,8 @@ class HomeAssistantControlelHost:
                         timestamp=now,
                     ),
                 )
-                if isinstance(startup_result, HeatDemandEvaluationResult):
-                    self._observe_evaluation_result(startup_result)
-                if startup_result is not None:
-                    self._log_evaluation_result(startup_result)
-
             if snapshot is not None:
-                await self._async_process_state_now(snapshot)
+                await self._async_process_state_now(snapshot, startup=startup)
             await self._async_drain_setup_buffer()
             if self._fatal_error is not None:
                 raise self._fatal_error
@@ -696,6 +690,8 @@ class HomeAssistantControlelHost:
         self,
         state: StateLike | None,
         previous_state: StateLike | None = None,
+        *,
+        startup: ControlRuntimeStartup | None = None,
     ) -> None:
         evidence = _reported_source_evidence(
             state,
@@ -709,7 +705,10 @@ class HomeAssistantControlelHost:
         if self._runtime_supervisor is not None:
             await self._async_submit_runtime(self._runtime_supervisor.ingest_reported_source, evidence)
         try:
-            result = await self._async_submit_runtime(self._runtime.ingest_reported_source_state, evidence)
+            operation = (
+                startup.ingest_reported_source if startup is not None else self._runtime.ingest_reported_source_state
+            )
+            result = await self._async_submit_runtime(operation, evidence)
         except RuntimeStoppedError:
             return
         if isinstance(result, HeatDemandEvaluationResult):
@@ -726,6 +725,8 @@ class HomeAssistantControlelHost:
     async def _async_process_state_now(
         self,
         state: StateLike | None,
+        *,
+        startup: ControlRuntimeStartup | None = None,
     ) -> RuntimeProcessingResult | None:
         version = self._measurement_mapper.state_version(state)
         if version is not None and version == self._last_state_version:
@@ -740,10 +741,12 @@ class HomeAssistantControlelHost:
                 await self._async_submit_runtime(self._runtime_supervisor.update_trusted_evidence, None)
                 if self._runtime_supervisor.state.command_authority is CommandAuthority.FAILSAFE:
                     return None
-            result = await self._async_submit_runtime(
-                self._runtime.mark_measurement_indeterminate,
-                MeasurementEventCondition.UNAVAILABLE,
+            operation = (
+                startup.mark_measurement_indeterminate
+                if startup is not None
+                else self._runtime.mark_measurement_indeterminate
             )
+            result = await self._async_submit_runtime(operation, MeasurementEventCondition.UNAVAILABLE)
             if isinstance(result, HeatDemandEvaluationResult):
                 self._observe_evaluation_result(result)
             self._logger.debug(
@@ -764,10 +767,8 @@ class HomeAssistantControlelHost:
                 return None
 
         try:
-            result = await self._async_submit_runtime(
-                self._runtime.process_temperature,
-                mapping.measurement,
-            )
+            operation = startup.ingest_temperature if startup is not None else self._runtime.process_temperature
+            result = await self._async_submit_runtime(operation, mapping.measurement)
         except RuntimeStoppedError as error:
             if self._stopping or self._stopped:
                 self._logger.debug("Ignored temperature state during Controlel shutdown")

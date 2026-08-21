@@ -12,7 +12,9 @@ if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
 
 from controlel.application.ports.heat_source_port import HeatSourcePort
-from controlel.application.runtime.control_runtime import ControlRuntime as CoreControlRuntime
+from controlel.application.runtime.control_runtime import ControlRuntime
+from controlel.application.runtime.control_runtime_assembly import ControlRuntimeAssembly
+from controlel.application.runtime.control_runtime_startup import ControlRuntimeStartup
 from controlel.application.runtime.failsafe_runtime import FailsafeRuntime
 from controlel.application.runtime.runtime_supervisor import RuntimeSupervisor
 from controlel.application.services.operational_event_recorder import OperationalEventRecorder
@@ -40,15 +42,6 @@ from .scheduler import HomeAssistantScheduler
 
 LOGGER = logging.getLogger(__name__)
 PLATFORMS = ("sensor", "binary_sensor")
-
-
-class ControlRuntime(CoreControlRuntime):
-    """Use HA state objects, rather than an empty core evaluation, to begin regulation."""
-
-    def start(self) -> None:
-        """Start the HA-owned lifecycle without fabricating a measurement."""
-
-        self.record_runtime_started()
 
 
 @dataclass
@@ -160,7 +153,8 @@ async def async_setup_entry(
                     )
                 },
             )
-        runtime_arguments: dict[str, Any] = dict(
+        operational_event_recorder = OperationalEventRecorder()
+        runtime_assembly = ControlRuntimeAssembly(
             sensor_repository=sensor_repository,
             zone_repository=zone_repository,
             clock=SystemClock(),
@@ -174,26 +168,17 @@ async def async_setup_entry(
             heat_demand_confirmation_duration=(zone_control.heat_demand_confirmation_duration),
             minimum_heating_on_time=heat_source_configuration.minimum_heating_on_time,
             minimum_heating_off_time=heat_source_configuration.minimum_heating_off_time,
+            heat_delivery_controller=heat_delivery_controller,
+            source_ownership=SourceOwnership.CONTROLEL_OWNED,
+            source_capabilities=SourceCapabilities(),
+            operational_event_recorder=operational_event_recorder,
         )
-        operational_event_recorder = OperationalEventRecorder()
-        runtime_arguments["operational_event_recorder"] = operational_event_recorder
-        if heat_delivery_controller is not None:
-            runtime_arguments["heat_delivery_controller"] = heat_delivery_controller
 
         def build_runtime(
             source_port: HeatSourcePort,
             handover: RuntimeHandoverEvidence | None = None,
         ) -> ControlRuntime:
-            runtime = ControlRuntime(
-                heat_source_port=source_port,
-                source_ownership=SourceOwnership.CONTROLEL_OWNED,
-                source_capabilities=SourceCapabilities(),
-                **runtime_arguments,
-            )
-            if handover is not None:
-                runtime.reported_source_evidence = handover.reported_source
-                runtime.source_control_state = handover.source_control_state
-                runtime.source_reconciliation_state = handover.reconciliation_state
+            runtime = runtime_assembly.build(source_port, handover=handover)
             return runtime
 
         def failsafe_factory(source_port: HeatSourcePort) -> FailsafeRuntime:
@@ -213,8 +198,7 @@ async def async_setup_entry(
 
         def restart_factory(source_port: HeatSourcePort, handover: RuntimeHandoverEvidence) -> ControlRuntime:
             candidate = build_runtime(source_port, handover)
-            candidate.begin_source_recovery()
-            candidate.start()
+            ControlRuntimeStartup(candidate).begin()
             if host is None:
                 raise RuntimeError("Controlel host is unavailable during runtime restart")
             host.replace_runtime_after_handover(candidate)
@@ -222,7 +206,7 @@ async def async_setup_entry(
 
         supervisor = RuntimeSupervisor(
             source=heat_source_port,
-            clock=runtime_arguments["clock"],
+            clock=runtime_assembly.clock,
             scheduler=scheduler,
             failsafe_factory=failsafe_factory,
             restart_factory=restart_factory,
