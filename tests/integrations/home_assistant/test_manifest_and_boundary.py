@@ -25,9 +25,9 @@ def test_manifest_has_required_custom_component_contract():
         "issue_tracker": "https://github.com/vmshops/controlel/issues",
         "integration_type": "hub",
         "iot_class": "local_push",
-        "requirements": ["controlel==0.10.0"],
+        "requirements": ["controlel==0.12.0"],
         "single_config_entry": True,
-        "version": "0.11.0",
+        "version": "0.12.0",
     }
 
 
@@ -36,20 +36,21 @@ def test_core_and_integration_versions_are_intentionally_independent():
     with (ROOT / "pyproject.toml").open("rb") as pyproject_file:
         core_version = tomllib.load(pyproject_file)["project"]["version"]
 
-    assert core_version == "0.11.0"
-    assert manifest["version"] == INTEGRATION_VERSION == "0.11.0"
-    assert manifest["requirements"] == ["controlel==0.10.0"]
-    assert manifest["version"] != manifest["requirements"][0].partition("==")[2]
+    assert core_version == "0.12.0"
+    assert manifest["version"] == INTEGRATION_VERSION == "0.12.0"
+    assert manifest["requirements"] == ["controlel==0.12.0"]
+    assert manifest["version"] == manifest["requirements"][0].partition("==")[2]
 
 
-def test_released_ha_tests_use_declared_public_core_not_repository_candidate() -> None:
+def test_release_candidate_ha_tests_install_the_exact_repository_core() -> None:
     workflow = (ROOT / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8")
 
-    assert "home-assistant-public:" in workflow
-    assert "home-assistant-framework-public:" in workflow
-    assert "home-assistant-framework-local:" not in workflow
-    assert "CONTROLEL_FRAMEWORK_COMPOSITION: local" not in workflow
-    assert workflow.count("controlel==0.10.0") == 2
+    assert "home-assistant-candidate:" in workflow
+    assert "home-assistant-framework-candidate:" in workflow
+    assert "home-assistant-public:" not in workflow
+    assert "CONTROLEL_FRAMEWORK_COMPOSITION: candidate" in workflow
+    assert workflow.count("python -m pip install --no-cache-dir .") == 2
+    assert workflow.count("python scripts/ci/verify_candidate_core.py") == 2
     assert "tests/integrations/home_assistant \\" in workflow
     assert "--ignore=tests/integrations/home_assistant/framework" in workflow
     assert workflow.count("--asyncio-mode=auto") == 1
@@ -59,7 +60,7 @@ def test_manifest_requirement_is_one_exact_public_distribution_pin():
     manifest = json.loads((COMPONENT / "manifest.json").read_text(encoding="utf-8"))
     requirements = manifest["requirements"]
 
-    assert requirements == ["controlel==0.10.0"]
+    assert requirements == ["controlel==0.12.0"]
     assert len(requirements) == 1
     assert not any(marker in requirements[0] for marker in ("~=", ">=", "<=", " @ ", "git+", "-e ", "file:"))
 
@@ -74,6 +75,7 @@ def test_required_integration_files_exist():
         "host.py",
         "runtime_executor.py",
         "scheduler.py",
+        "setup_backend.py",
         "measurement_ingestion.py",
         "observability.py",
         "heat_source.py",

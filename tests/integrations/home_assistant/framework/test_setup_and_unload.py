@@ -7,6 +7,7 @@ import pytest
 from homeassistant.const import ATTR_UNIT_OF_MEASUREMENT, UnitOfTemperature
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+import controlel.application.runtime.control_runtime_assembly as runtime_assembly_module
 import custom_components.controlel as component
 from controlel.domain.repositories.sensor_repository import SensorRepository
 from controlel.domain.repositories.zone_repository import ZoneRepository
@@ -39,10 +40,10 @@ class InstrumentedRuntime(ControlRuntime):
         self.threads.append(get_ident())
         return super().process_temperature(measurement)
 
-    def start(self):
+    def record_runtime_started(self) -> None:
         self.operations.append("start")
         self.threads.append(get_ident())
-        return super().start()
+        super().record_runtime_started()
 
     def stop(self) -> None:
         self.operations.append("stop")
@@ -71,7 +72,7 @@ async def test_real_setup_initializes_once_starts_then_processes_snapshot_and_un
     with (
         patch.object(component, "SensorRepository", wraps=SensorRepository) as sensor_repositories,
         patch.object(component, "ZoneRepository", wraps=ZoneRepository) as zone_repositories,
-        patch.object(component, "ControlRuntime", InstrumentedRuntime),
+        patch.object(runtime_assembly_module, "ControlRuntime", InstrumentedRuntime),
         patch.object(
             component.HomeAssistantControlelHost,
             "async_initialize",
@@ -198,7 +199,7 @@ async def test_partial_setup_failure_cleans_every_constructed_resource_and_prese
     class FailingRuntime(InstrumentedRuntime):
         instances: list["FailingRuntime"] = []
 
-        def start(self):
+        def record_runtime_started(self) -> None:
             self.operations.append("start")
             self.threads.append(get_ident())
             raise RuntimeError("demonstrated setup failure")
@@ -219,7 +220,7 @@ async def test_partial_setup_failure_cleans_every_constructed_resource_and_prese
     entry.add_to_hass(hass)
 
     with (
-        patch.object(component, "ControlRuntime", FailingRuntime),
+        patch.object(runtime_assembly_module, "ControlRuntime", FailingRuntime),
         patch.object(component, "HomeAssistantControlelHost", CapturingHost),
         pytest.raises(RuntimeError, match="demonstrated setup failure"),
     ):

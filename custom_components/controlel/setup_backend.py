@@ -13,17 +13,14 @@ from importlib import import_module
 from typing import Any, cast
 
 from controlel.application.setup import DiscoverySnapshot
-from controlel.infrastructure.home_assistant.setup_discovery import HomeAssistantDiscoveryAdapter
-from controlel.infrastructure.home_assistant.setup_host import (
-    HeatingSetupHostService,
-    LegacyConfigurationStatusDTO,
-)
-from controlel.infrastructure.home_assistant.setup_persistence import (
+from controlel.infrastructure.home_assistant import (
     ACTIVE_REFERENCE_KEY,
     SETUP_STORAGE_VERSION,
     ConfigEntryActiveReferenceStore,
+    HeatingSetupHostService,
+    HomeAssistantDiscoveryAdapter,
     HomeAssistantSetupRepository,
-    HomeAssistantStorePort,
+    LegacyConfigurationStatusDTO,
 )
 
 from .const import DOMAIN
@@ -42,10 +39,7 @@ async def async_get_setup_service(hass: Any, entry: Any) -> HeatingSetupHostServ
 
     storage_module = import_module("homeassistant.helpers.storage")
     store_type = getattr(storage_module, "Store")
-    store = cast(
-        HomeAssistantStorePort,
-        store_type(hass, SETUP_STORAGE_VERSION, f"{DOMAIN}.setup.{entry.entry_id}"),
-    )
+    store = cast(Any, store_type(hass, SETUP_STORAGE_VERSION, f"{DOMAIN}.setup.{entry.entry_id}"))
 
     def update_entry_data(data: Mapping[str, object]) -> None:
         hass.config_entries.async_update_entry(entry, data=dict(data))

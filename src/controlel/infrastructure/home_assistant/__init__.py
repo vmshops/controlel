@@ -15,6 +15,7 @@ from controlel.infrastructure.home_assistant.setup_host import (
 )
 from controlel.infrastructure.home_assistant.setup_persistence import (
     ACTIVE_REFERENCE_KEY,
+    SETUP_STORAGE_VERSION,
     ConfigEntryActiveReferenceStore,
     HomeAssistantSetupRepository,
     SetupStorageIntegrityError,
@@ -25,6 +26,7 @@ __all__ = [
     "HomeAssistantEphemeralEndpoint",
     "HomeAssistantReferenceResolver",
     "ACTIVE_REFERENCE_KEY",
+    "SETUP_STORAGE_VERSION",
     "ConfigEntryActiveReferenceStore",
     "DiscoverySnapshotDTO",
     "HeatingBindingSelectionRequest",

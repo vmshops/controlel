@@ -1,5 +1,43 @@
 # Release guide
 
+## Core and Home Assistant 0.12.0 Setup release candidates
+
+Core `0.11.0` and Home Assistant integration `0.11.0` are published and
+immutable from `core-v0.11.0` and `v0.11.0`. The next feature release is
+`0.12.0`; a patch version would be inappropriate because this candidate adds
+new public foundations and host APIs rather than correcting the 0.11 contract.
+
+Core 0.12.0 packages the observational anomaly, deterministic Shadow Runtime,
+and Setup / Discovery / Import foundations. Its Setup public boundary includes
+the immutable authority contracts and the optional
+`controlel.infrastructure.home_assistant` discovery, persistence, DTO, and
+Heating setup-host adapters consumed by the integration. Clean-install tests
+must prove those imports require no Home Assistant dependency. The host service
+supports discovery, recommendations, incomplete draft persistence/resume,
+validation, readiness, and inactive canonicalization. It deliberately exposes
+no runtime activation operation.
+
+Integration 0.12.0 pins exact `controlel==0.12.0`. Existing version-1 config
+entries and the legacy runtime path remain compatible; this candidate does not
+silently convert or merge them with canonical Setup. No config-entry migration
+is required. Legacy conversion, frontend transport/UI, and runtime activation
+are separate future changes.
+
+The publication order is mandatory:
+
+1. review and merge the Core 0.12.0 release boundary;
+2. build and clean-install deterministic Core artifacts;
+3. create annotated `core-v0.12.0`, publish Core to PyPI, and record immutable
+   wheel/sdist provenance;
+4. replace candidate-wheel HA CI proof with public `controlel==0.12.0`
+   provenance verification and rerun both HA suites;
+5. only then review/tag `v0.12.0` and publish the HACS artifact.
+
+Until step 4, repository HA CI installs the local 0.12.0 candidate as a normal,
+non-editable package. This validates the upcoming API boundary but is not proof
+that a public artifact exists. Integration tagging or upload before the public
+Core verification is prohibited.
+
 ## Core 0.11.0 M31C.1 heating-performance assessment foundation
 
 Core `0.10.0` is public and immutable from `core-v0.10.0`. Home Assistant
@@ -230,10 +268,11 @@ Controlel uses distinct release states:
    backend under `dist/`.
 3. **Verified wheel** has passed metadata, archive-content, and clean
    out-of-checkout installation checks.
-4. **Published core package** is the verified `controlel==0.10.0` release on
+4. **Published core package** is currently immutable `controlel==0.11.0` on
    PyPI.
-5. **Home Assistant exact dependency pin** is the integration contract
-   `"requirements": ["controlel==0.10.0"]` for the `0.11.0` candidate.
+5. **Home Assistant exact dependency pin** for the next candidate is
+   `"requirements": ["controlel==0.12.0"]`; it becomes publishable only after
+   that Core version reaches state 4.
 6. **HACS readiness** additionally requires integration release packaging and
    HACS metadata. A verified or published core wheel alone does not provide
    HACS readiness.
@@ -242,11 +281,12 @@ Controlel uses distinct release states:
 
 The distribution name and Python import package are both `controlel`. Versions
 `0.1.0`, `0.2.0`, `0.3.0`, `0.4.0`, `0.5.0`, `0.6.0`, `0.7.0`, `0.8.0`,
-`0.9.0`, and `0.10.0` are publicly available on PyPI and immutable.
+`0.9.0`, `0.10.0`, and `0.11.0` are publicly available on PyPI and immutable.
 PyPI versions are immutable; corrections always require a higher version.
 
-The current public core release is immutable `0.10.0`. The `0.11.0` integration
-candidate and both public-integration composition checks pin that exact release.
+The current public core release is immutable `0.11.0`. Candidate Core and
+integration metadata are `0.12.0`; candidate composition checks install the
+local package until public Core provenance can be recorded.
 
 The first core release is `0.1.0`. The single authoritative release
 version is the static `project.version` in `pyproject.toml`. Runtime access uses
@@ -255,8 +295,8 @@ version is the static `project.version` in `pyproject.toml`. Runtime access uses
 `0.0.0+uninstalled`; it never pretends to be a release.
 
 The custom-component manifest version is a separate integration version.
-Integration `0.10.1` is the current published release; the implementation is
-prepared as unpublished candidate `0.11.0` at its separate release boundary.
+Integration `0.11.0` is the current published release; the implementation is
+prepared as unpublished candidate `0.12.0` at its separate release boundary.
 Neither version is a second source for the core package version.
 
 ## Permanent tag namespaces

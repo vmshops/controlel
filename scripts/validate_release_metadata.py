@@ -61,7 +61,7 @@ def validate(releases_yaml: dict) -> int:
                     return 2
     # Additional local consistency checks for Home Assistant integration
     # Verify that published HA release points to the pinned core required by manifest
-    repo_root = Path(__file__).resolve().parents[2]
+    repo_root = Path(__file__).resolve().parents[1]
     manifest_path = repo_root / "custom_components" / "controlel" / "manifest.json"
     const_path = repo_root / "custom_components" / "controlel" / "const.py"
     try:
@@ -76,9 +76,19 @@ def validate(releases_yaml: dict) -> int:
         print("failed to read manifest.json:", e, file=sys.stderr)
         return 2
 
-    # find HA entry
-    for r in releases:
-        if r.get("component") == "home_assistant" and r.get("status") == "published":
+    # Validate the release entry matching the checked-out manifest. Historical
+    # published entries remain immutable and need not match a newer candidate.
+    manifest_version = manifest.get("version") if manifest else None
+    matching_ha_releases = [
+        release
+        for release in releases
+        if release.get("component") == "home_assistant" and release.get("version") == manifest_version
+    ]
+    if manifest and len(matching_ha_releases) != 1:
+        print("release metadata must contain exactly one HA entry matching manifest version", file=sys.stderr)
+        return 2
+    for r in matching_ha_releases:
+        if r.get("status") in {"candidate", "pretag", "published"}:
             comp = r.get("compatibility", {})
             required_core = comp.get("required_core") or comp.get("ha_manifest_pinned_core")
             if manifest:

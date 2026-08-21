@@ -7,6 +7,47 @@
 metadata_version: 1
 
 releases:
+  - release_id: controlel-core-0.12.0
+    component: core
+    title: "Controlel Core 0.12.0"
+    version: "0.12.0"
+    status: candidate
+    tag: null
+    commit_sha: null
+    summary: "Observational anomaly, deterministic Shadow simulation, and Setup/Discovery/Import foundations"
+    highlights:
+      - "Observational anomaly lifecycle remains isolated from control decisions"
+      - "Deterministic Shadow Runtime v0.1 and reproducible bounded soak validation"
+      - "Module-neutral Setup authority, HA discovery/resolution, and resumable Heating setup host APIs"
+      - "Evidence-driven source reconciliation avoids periodic successful-command retries"
+    compatibility:
+      home_assistant_integration_candidate: "0.12.0"
+      python: ">=3.13"
+      pydantic: ">=2.0"
+    notes:
+      - "Setup canonicalization is non-activating; unfinished runtime activation is not exposed."
+      - "The Home Assistant 0.12.0 release must wait until this Core version is published and verified on PyPI."
+
+  - release_id: controlel-home_assistant-0.12.0
+    component: home_assistant
+    title: "Controlel Home Assistant integration 0.12.0"
+    version: "0.12.0"
+    status: candidate
+    tag: null
+    commit_sha: null
+    summary: "Host-facing resumable Setup backend over the Core 0.12.0 setup authority"
+    highlights:
+      - "Read-only HA registry discovery and exact registry-ID resolution"
+      - "Transparent Heating recommendations, incomplete drafts, validation, and non-active canonicalization"
+      - "Durable HA-backed Setup repositories with revision and CAS protections"
+    compatibility:
+      required_core: "0.12.0"
+      config_entry_version: 1
+    notes:
+      - "Existing legacy config entries continue using the unchanged runtime path; settings are never silently merged into canonical Setup."
+      - "No frontend transport/UI or runtime activation is included."
+      - "Do not publish this integration before controlel==0.12.0 is publicly available and provenance-verified."
+
   - release_id: controlel-core-0.11.0
     component: core
     title: "Controlel Core 0.11.0"

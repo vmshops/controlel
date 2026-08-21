@@ -355,8 +355,8 @@ async def test_canonicalization_is_durable_but_does_not_activate_or_write_settin
         source="setup_host",
         change_kind="CREATE",
         reason="initial_setup",
-        core_version="0.11.0",
-        integration_version="0.11.0",
+        core_version="0.12.0",
+        integration_version="0.12.0",
     )
 
     restarted_repository = repository(store, entry)
@@ -401,7 +401,7 @@ async def test_config_entry_active_reference_is_cas_only_and_attempts_survive_re
         source="setup_host",
         change_kind="CREATE",
         reason="initial_setup",
-        core_version="0.11.0",
+        core_version="0.12.0",
     )
     repo = repository(store, entry)
     canonical = await repo.get_canonical_revision("canonical-1")

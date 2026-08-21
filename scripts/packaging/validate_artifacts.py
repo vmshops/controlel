@@ -90,7 +90,7 @@ def _validate_metadata(metadata: Message, *, source: str, distribution: str, ver
     if metadata["Requires-Python"] != ">=3.13":
         raise ArtifactValidationError(f"{source} has unexpected Requires-Python: {metadata['Requires-Python']}")
     requirements = metadata.get_all("Requires-Dist") or []
-    if requirements != ["pydantic>=2.0"]:
+    if requirements != ["pydantic>=2.0", 'PyYAML>=6.0; extra == "simulation"']:
         raise ArtifactValidationError(f"{source} has unexpected runtime dependencies: {requirements}")
 
 
@@ -128,6 +128,7 @@ def validate_wheel(wheel: Path, *, distribution: str, version: str) -> None:
             "controlel/application/services/heating_performance_assessor.py",
             "controlel/application/services/heating_performance_monitor.py",
             "controlel/application/services/shadow_heating_performance_monitor.py",
+            "controlel/application/setup/model.py",
             "controlel/application/state/notification_state.py",
             "controlel/application/services/source_reconciliation_policy.py",
             "controlel/application/services/source_recovery_policy.py",
@@ -142,6 +143,9 @@ def validate_wheel(wheel: Path, *, distribution: str, version: str) -> None:
             "controlel/domain/heat_delivery/performance.py",
             "controlel/domain/runtime_supervision/__init__.py",
             "controlel/domain/source_control/__init__.py",
+            "controlel/infrastructure/home_assistant/setup_discovery.py",
+            "controlel/infrastructure/home_assistant/setup_host.py",
+            "controlel/infrastructure/home_assistant/setup_persistence.py",
             f"{dist_info}/METADATA",
             f"{dist_info}/RECORD",
             f"{dist_info}/WHEEL",
@@ -195,6 +199,7 @@ def validate_sdist(sdist: Path, *, distribution: str, version: str) -> None:
             "src/controlel/application/services/heating_performance_assessor.py",
             "src/controlel/application/services/heating_performance_monitor.py",
             "src/controlel/application/services/shadow_heating_performance_monitor.py",
+            "src/controlel/application/setup/model.py",
             "src/controlel/application/services/notification_processor.py",
             "src/controlel/application/services/notification_policy.py",
             "src/controlel/application/state/notification_state.py",
@@ -211,6 +216,9 @@ def validate_sdist(sdist: Path, *, distribution: str, version: str) -> None:
             "src/controlel/domain/heat_delivery/performance.py",
             "src/controlel/domain/runtime_supervision/__init__.py",
             "src/controlel/domain/source_control/__init__.py",
+            "src/controlel/infrastructure/home_assistant/setup_discovery.py",
+            "src/controlel/infrastructure/home_assistant/setup_host.py",
+            "src/controlel/infrastructure/home_assistant/setup_persistence.py",
         }
         if missing := required - relative_names:
             raise ArtifactValidationError(f"{sdist.name} is missing required files: {sorted(missing)}")

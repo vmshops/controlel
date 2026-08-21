@@ -38,7 +38,7 @@ def test_project_metadata_and_runtime_dependencies_match_release_contract() -> N
     project = load_pyproject()["project"]
 
     assert project["name"] == "controlel"
-    assert project["version"] == "0.11.0"
+    assert project["version"] == "0.12.0"
     assert project["readme"] == "README.md"
     assert project["requires-python"] == ">=3.13"
     assert project["license"] == "MIT"
@@ -86,7 +86,7 @@ def test_project_version_is_the_only_release_version_source() -> None:
         path for path in (ROOT / "src" / "controlel").rglob("*.py") if "__version__" in path.read_text(encoding="utf-8")
     ]
 
-    assert project_version == "0.11.0"
+    assert project_version == "0.12.0"
     assert controlel.__version__ == project_version
     assert importlib.metadata.version("controlel") == project_version
     assert version_files == [ROOT / "src" / "controlel" / "__init__.py"]
@@ -99,9 +99,9 @@ def test_manifest_pins_published_core_and_keeps_version_independent() -> None:
     manifest = json.loads((ROOT / "custom_components" / "controlel" / "manifest.json").read_text(encoding="utf-8"))
     core_version = load_pyproject()["project"]["version"]
 
-    assert core_version == "0.11.0"
-    assert manifest["requirements"] == ["controlel==0.10.0"]
-    assert manifest["version"] == "0.11.0"
+    assert core_version == "0.12.0"
+    assert manifest["requirements"] == ["controlel==0.12.0"]
+    assert manifest["version"] == "0.12.0"
     assert manifest["version"] == core_version
     assert manifest["issue_tracker"] == "https://github.com/vmshops/controlel/issues"
 
@@ -162,6 +162,16 @@ def test_core_artifact_verification_binds_representative_public_contracts() -> N
         "HeatingPerformanceAssessor",
         "HeatingPerformanceMonitor",
         "heating_performance_snapshot_to_dict",
+        "CanonicalConfigurationRevision",
+        "DiscoverySnapshot",
+        "DraftRevision",
+        "ValidationReport",
+        "ConfigEntryActiveReferenceStore",
+        "HeatingBindingSelectionRequest",
+        "HeatingSetupHostService",
+        "HeatingSetupSessionDTO",
+        "HomeAssistantDiscoveryAdapter",
+        "HomeAssistantSetupRepository",
     }
     assert all(contract in clean_install for contract in required_contracts)
     for module in (
@@ -190,8 +200,47 @@ def test_core_artifact_verification_binds_representative_public_contracts() -> N
         "application/services/heating_performance_assessor.py",
         "application/services/heating_performance_monitor.py",
         "application/services/shadow_heating_performance_monitor.py",
+        "application/setup/model.py",
+        "infrastructure/home_assistant/setup_discovery.py",
+        "infrastructure/home_assistant/setup_host.py",
+        "infrastructure/home_assistant/setup_persistence.py",
     ):
         assert module in validator
+
+
+def test_setup_backend_uses_the_versioned_public_core_surface_without_activation() -> None:
+    from controlel.infrastructure import home_assistant
+
+    required = {
+        "SETUP_STORAGE_VERSION",
+        "ConfigEntryActiveReferenceStore",
+        "HeatingBindingSelectionRequest",
+        "HeatingSetupHostService",
+        "HeatingSetupSessionDTO",
+        "HomeAssistantDiscoveryAdapter",
+        "HomeAssistantSetupRepository",
+    }
+    backend = (ROOT / "custom_components" / "controlel" / "setup_backend.py").read_text(encoding="utf-8")
+
+    assert required <= set(home_assistant.__all__)
+    assert "from controlel.infrastructure.home_assistant import (" in backend
+    assert "controlel.infrastructure.home_assistant.setup_" not in backend
+    assert not hasattr(home_assistant.HeatingSetupHostService, "activate")
+    assert not hasattr(home_assistant.HeatingSetupHostService, "activate_heating_draft")
+
+
+def test_next_release_metadata_records_two_stage_012_candidate_boundary() -> None:
+    metadata = (ROOT / "release-metadata" / "releases.yaml").read_text(encoding="utf-8")
+    core_note = (ROOT / "docs" / "releases" / "core-0.12.0.md").read_text(encoding="utf-8")
+    integration_note = (ROOT / "docs" / "releases" / "home-assistant-0.12.0.md").read_text(encoding="utf-8")
+
+    assert "release_id: controlel-core-0.12.0" in metadata
+    assert "release_id: controlel-home_assistant-0.12.0" in metadata
+    assert metadata.count('version: "0.12.0"') == 2
+    assert metadata.count("status: candidate") >= 2
+    assert 'required_core: "0.12.0"' in metadata
+    assert "runtime activation is not exposed" in core_note
+    assert "Do not tag or publish integration 0.12.0 until Core 0.12.0" in integration_note
 
 
 def test_packaging_tools_are_pinned_and_isolated() -> None:
@@ -229,7 +278,7 @@ def test_packaging_ci_builds_and_validates_without_publishing() -> None:
     assert "token" not in workflow.casefold()
 
 
-def test_ci_separates_repository_core_from_released_ha_public_core_compositions() -> None:
+def test_ci_validates_ha_candidate_against_the_exact_candidate_core() -> None:
     workflow = (ROOT / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8")
 
     assert "tests/domain" in workflow
@@ -238,15 +287,14 @@ def test_ci_separates_repository_core_from_released_ha_public_core_compositions(
     assert "tests/architecture" in workflow
     assert "tests/packaging" in workflow
     assert "python -m pytest --ignore=tests/integrations/home_assistant/framework" not in workflow
-    assert "home-assistant-public:" in workflow
-    assert "home-assistant-framework-public:" in workflow
-    assert "home-assistant-framework-local:" not in workflow
-    assert "CONTROLEL_FRAMEWORK_COMPOSITION: local" not in workflow
-    assert "CONTROLEL_FRAMEWORK_COMPOSITION: public" in workflow
-    assert workflow.count("controlel==0.10.0") == 2
-    assert workflow.count("python scripts/ci/verify_public_core.py") == 2
+    assert "home-assistant-candidate:" in workflow
+    assert "home-assistant-framework-candidate:" in workflow
+    assert "home-assistant-public:" not in workflow
+    assert "CONTROLEL_FRAMEWORK_COMPOSITION: candidate" in workflow
+    assert workflow.count("python -m pip install --no-cache-dir .") == 2
+    assert workflow.count("python scripts/ci/verify_candidate_core.py") == 2
     assert workflow.count("--asyncio-mode=auto") == 1
-    assert "candidate-core-wheel" not in workflow
+    assert "controlel==0.10.0" not in workflow
 
 
 def test_core_and_integration_tag_namespaces_are_explicit() -> None:

@@ -63,7 +63,7 @@ class RecordingRuntime:
         finally:
             self.active = False
 
-    def start(self):
+    def record_runtime_started(self) -> None:
         assert self.active is False
         self.active = True
         try:
@@ -72,12 +72,11 @@ class RecordingRuntime:
             if self.start_gate is not None:
                 self.start_gate[0].set()
                 self.start_gate[1].wait()
-            return SimpleNamespace(
-                status=HeatDemandEvaluationStatus.INDETERMINATE_GRACE,
-                next_evaluation_at=NOW,
-            )
         finally:
             self.active = False
+
+    def begin_source_recovery(self):
+        return SimpleNamespace()
 
     def mark_measurement_indeterminate(self, condition=None):
         del condition

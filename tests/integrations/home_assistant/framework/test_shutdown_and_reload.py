@@ -12,6 +12,7 @@ from homeassistant.const import (
 )
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+import controlel.application.runtime.control_runtime_assembly as runtime_assembly_module
 import custom_components.controlel as component
 from controlel.domain.value_objects.sensor_id import SensorId
 from custom_components.controlel.const import (
@@ -141,7 +142,7 @@ async def test_real_reload_fully_unloads_then_constructs_fresh_in_memory_runtime
     entry.add_to_hass(hass)
 
     with (
-        patch.object(component, "ControlRuntime", ReloadRuntime),
+        patch.object(runtime_assembly_module, "ControlRuntime", ReloadRuntime),
         patch.object(component, "HomeAssistantRuntimeExecutor", CapturingExecutor),
         patch.object(component, "HomeAssistantControlelHost", CapturingHost),
     ):
@@ -209,7 +210,7 @@ async def test_repeated_options_updates_reload_once_and_leave_one_runtime(
     entry.add_to_hass(hass)
 
     with (
-        patch.object(component, "ControlRuntime", ReloadRuntime),
+        patch.object(runtime_assembly_module, "ControlRuntime", ReloadRuntime),
         patch.object(component, "HomeAssistantControlelHost", CapturingHost),
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
@@ -325,7 +326,7 @@ async def test_invalid_options_are_rejected_without_runtime_reload(
     entry = MockConfigEntry(domain=DOMAIN, data=entry_data, options={})
     entry.add_to_hass(hass)
 
-    with patch.object(component, "ControlRuntime", ReloadRuntime):
+    with patch.object(runtime_assembly_module, "ControlRuntime", ReloadRuntime):
         assert await hass.config_entries.async_setup(entry.entry_id)
         initial = await hass.config_entries.options.async_init(entry.entry_id)
         result = await hass.config_entries.options.async_configure(

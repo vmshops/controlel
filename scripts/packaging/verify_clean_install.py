@@ -60,6 +60,13 @@ from controlel.application.state.runtime_supervision_state import (
     RuntimeSupervisionDiagnosticsV1,
     RuntimeSupervisionState,
 )
+from controlel.application.setup import (
+    ActiveReference,
+    CanonicalConfigurationRevision,
+    DiscoverySnapshot,
+    DraftRevision,
+    ValidationReport,
+)
 from controlel.domain.commands.heating_action import HeatingAction
 from controlel.domain.entities.zone import Zone
 from controlel.domain.operating_mode import OperatingMode
@@ -107,6 +114,15 @@ from controlel.domain.source_control import (
 from controlel.domain.value_objects.sensor_id import SensorId
 from controlel.domain.value_objects.temperature import Temperature
 from controlel.domain.value_objects.zone_id import ZoneId
+from controlel.infrastructure.home_assistant import (
+    SETUP_STORAGE_VERSION,
+    ConfigEntryActiveReferenceStore,
+    HeatingBindingSelectionRequest,
+    HeatingSetupHostService,
+    HeatingSetupSessionDTO,
+    HomeAssistantDiscoveryAdapter,
+    HomeAssistantSetupRepository,
+)
 
 expected_version = os.environ["CONTROLEL_EXPECTED_VERSION"]
 repository_root = Path(os.environ["CONTROLEL_REPOSITORY_ROOT"]).resolve()
@@ -239,6 +255,28 @@ performance_payload = heating_performance_snapshot_to_dict(performance_monitor.s
 assert performance_payload["schema_version"] == 1
 assert performance_payload["assessment_capacity"] == 2
 assert performance_payload["zones"] == []
+
+setup_contracts = (
+    ActiveReference,
+    CanonicalConfigurationRevision,
+    DiscoverySnapshot,
+    DraftRevision,
+    ValidationReport,
+    ConfigEntryActiveReferenceStore,
+    HeatingBindingSelectionRequest,
+    HeatingSetupHostService,
+    HeatingSetupSessionDTO,
+    HomeAssistantDiscoveryAdapter,
+    HomeAssistantSetupRepository,
+)
+for contract in setup_contracts:
+    module_path = Path(importlib.import_module(contract.__module__).__file__).resolve()
+    assert module_path.is_relative_to(package_path.parent)
+assert SETUP_STORAGE_VERSION == 1
+assert hasattr(HeatingSetupHostService, "canonicalize_heating_draft")
+assert not hasattr(HeatingSetupHostService, "activate")
+assert not hasattr(HeatingSetupHostService, "activate_heating_draft")
+assert not any(name == "homeassistant" or name.startswith("homeassistant.") for name in sys.modules)
 activity_notification_planner = NotificationPlanner(
     NotificationPolicy(
         enabled=True,
