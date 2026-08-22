@@ -1,0 +1,28 @@
+name: Feature request
+description: Suggest a new capability or an improvement to Controlel.
+title: "[Feature] "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: What is missing or difficult today? Describe it in your own words.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What should Controlel do instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: Why is this useful?
+      description: Who benefits, and how often would you use it?
+    validations:
+      required: true

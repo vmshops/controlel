@@ -1,0 +1,63 @@
+name: Installation problem
+description: Controlel fails to install, load, or set up in Home Assistant.
+title: "[Install] "
+labels: [bug]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: In one or two sentences, where did the installation or setup stop?
+      placeholder: "Example: After restarting, Controlel does not appear in Settings > Devices & services."
+    validations:
+      required: true
+
+  - type: input
+    id: ha-version
+    attributes:
+      label: Home Assistant version
+      description: Find it under Settings > System > Overview.
+      placeholder: "2026.7.3"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install-method
+    attributes:
+      label: Installation method
+      description: How did you try to install Controlel?
+      options:
+        - HACS (custom repository)
+        - Manual
+    validations:
+      required: true
+
+  - type: textarea
+    id: error
+    attributes:
+      label: Error message
+      description: Paste the exact error text you saw, if any.
+      placeholder: "Example: 'Integration controlel failed to load: ...'"
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Paste the Home Assistant log lines from around the time of the problem, especially anything mentioning "controlel".
+      render: text
+    validations:
+      required: false
+
+  - type: dropdown
+    id: diagnostics
+    attributes:
+      label: Diagnostics download
+      description: If Controlel loaded far enough to create a device, you can attach its diagnostics download (device menu > Download diagnostics).
+      options:
+        - Attached to this issue
+        - I can attach it if asked
+        - Not available
+    validations:
+      required: true
