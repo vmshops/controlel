@@ -1,0 +1,85 @@
+name: Bug report
+description: Something in Controlel is not working the way it should.
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Short problem description
+      description: In one or two sentences, what is going wrong?
+      placeholder: "Example: Controlel keeps switching the boiler on and off every few minutes."
+    validations:
+      required: true
+
+  - type: input
+    id: controlel-version
+    attributes:
+      label: Controlel version
+      description: You can find it in the Controlel diagnostic entities, or in the diagnostics download (device menu > Download diagnostics).
+      placeholder: "0.12.0"
+    validations:
+      required: true
+
+  - type: input
+    id: ha-version
+    attributes:
+      label: Home Assistant version
+      description: Find it under Settings > System > Overview.
+      placeholder: "2026.7.3"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install-method
+    attributes:
+      label: Installation method
+      description: How did you install Controlel?
+      options:
+        - HACS (custom repository)
+        - Manual
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect Controlel to do?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What did Controlel actually do?
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Screenshots and logs
+      description: |
+        Attach screenshots of the relevant entities or screens.
+        If you have log lines, paste the ones from around the time of the
+        problem, especially anything mentioning "controlel".
+      render: text
+    validations:
+      required: false
+
+  - type: dropdown
+    id: diagnostics
+    attributes:
+      label: Diagnostics download
+      description: |
+        The diagnostics download is the single most useful artifact for a bug
+        report. You can create it from the Controlel device menu >
+        Download diagnostics.
+      options:
+        - Attached to this issue
+        - I can attach it if asked
+        - Not available
+    validations:
+      required: true
