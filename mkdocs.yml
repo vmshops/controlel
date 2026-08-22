@@ -25,6 +25,7 @@ nav:
       - Shadow runtime and simulation: architecture/08_Shadow_Runtime_and_Simulation.md
       - System architecture: architecture/SystemArchitecture.md
       - Roadmap: architecture/07_Roadmap.md
+      - Frontend API v1: architecture/FrontendAPI.md
     - Release fragments: release-fragments/README.md
     - Design:
       - Data model: design/DataModel.md

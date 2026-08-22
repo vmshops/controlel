@@ -33,6 +33,8 @@ EXPECTED_ARCHIVE_FILES = frozenset(
         "entity.py",
         "event_loop_bridge.py",
         "failure_sink.py",
+        "frontend_api.py",
+        "frontend_api_websocket.py",
         "heat_source.py",
         "heat_delivery.py",
         "host.py",

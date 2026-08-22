@@ -35,7 +35,10 @@ from controlel.application.services.heating_diagnostics_boundary import (
     HeatingDiagnosticsBoundary,
 )
 from controlel.application.services.notification_planner import NotificationPlanner
-from controlel.application.services.operational_event_stream import operational_event_stream_to_dict
+from controlel.application.services.operational_event_stream import (
+    OperationalEventStreamSnapshot,
+    operational_event_stream_to_dict,
+)
 from controlel.application.services.source_control_policy import SourceControlOutcome
 from controlel.application.services.user_activity_stream import (
     UserActivityStream,
@@ -85,6 +88,7 @@ from .operational import (
     EmergencyDisableOutcome,
     HeatDemandState,
     MeasurementStatus,
+    OperationalSnapshot,
     OperationalSnapshotSource,
     RuntimeStatus,
     SafetyState,
@@ -235,6 +239,52 @@ class HomeAssistantControlelHost:
     def heat_delivery_states(self) -> tuple[object, ...]:
         controller = getattr(self._runtime, "heat_delivery_controller", None)
         return controller.states if controller is not None else ()
+
+    @property
+    def frontend_api_operational_evidence(
+        self,
+    ) -> tuple[
+        OperationalSnapshot,
+        tuple[DecisionTraceRecord, ...],
+        int,
+        OperationalEventStreamSnapshot,
+        tuple[str, str | None, datetime | None],
+        bool,
+        ReportedSourceEvidence | None,
+    ]:
+        """Capture existing immutable read models without entering the runtime."""
+
+        source = self.snapshot_source
+        supervisor_state = self._runtime_supervisor.state if self._runtime_supervisor is not None else None
+        normal_authority = supervisor_state is None or supervisor_state.command_authority is CommandAuthority.NORMAL
+        if supervisor_state is not None and supervisor_state.failsafe_mode is not None:
+            mode = (
+                supervisor_state.failsafe_mode.name,
+                supervisor_state.failsafe_reason.value if supervisor_state.failsafe_reason else None,
+                None,
+            )
+        else:
+            mode_state = self._runtime.operating_mode_state
+            mode = (
+                (mode_state.mode.name, mode_state.reason.value, mode_state.activated_at)
+                if mode_state is not None
+                else ("UNKNOWN", None, None)
+            )
+        return (
+            source.current,
+            source.trace,
+            source.total_trace_records,
+            self._runtime.operational_event_stream.snapshot(),
+            mode,
+            normal_authority,
+            self._reported_source_evidence,
+        )
+
+    @property
+    def frontend_api_setup_ready(self) -> bool:
+        """Report only the completed loaded-entry lifecycle as ready Setup evidence."""
+
+        return self._initialized and self._accepting and not self._stopping and not self._stopped
 
     async def async_initialize(self) -> None:
         async with self._lifecycle_lock:

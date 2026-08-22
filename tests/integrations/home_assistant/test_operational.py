@@ -273,6 +273,7 @@ def test_trace_is_bounded_and_records_use_snapshot_revision_sequence() -> None:
         snapshots.update(now=timestamp, trace_record=trace(timestamp, number))
 
     assert len(snapshots.trace) == TRACE_LIMIT
+    assert snapshots.total_trace_records == TRACE_LIMIT + 5
     assert snapshots.trace[0].sequence == 6
     assert snapshots.trace[-1].sequence == TRACE_LIMIT + 5
     assert snapshots.current.last_decision is DecisionCode.COMMAND_DISPATCHED
