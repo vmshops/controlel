@@ -65,8 +65,8 @@ closes the command executor so a stale generation cannot dispatch.
 
 ## Custom-component packaging
 
-The integration source is `custom_components/controlel`. The `0.11.0` candidate
-declares one config entry and requires published `controlel==0.10.0`.
+The integration source is `custom_components/controlel`. The `0.12.0` integration
+declares one config entry and requires published `controlel==0.12.0`.
 The integration and core versions are independent, and the core is not
 vendored into the component.
 
@@ -77,10 +77,10 @@ The repository root HACS manifest defines a release asset named
 validator are:
 
 ```text
-python scripts/packaging/build_hacs_release.py --version 0.11.0
+python scripts/packaging/build_hacs_release.py --version 0.12.0
 python scripts/packaging/validate_hacs_release.py \
   dist/hacs/controlel.zip \
-  --version 0.11.0 \
+  --version 0.12.0 \
   --checksum dist/hacs/controlel.zip.sha256
 ```
 
@@ -117,13 +117,13 @@ python -m pip install --no-deps -e /path/to/controlel
 ```
 
 The editable install overrides the public core only for local development.
-Public-package validation instead installs `controlel==0.10.0` into a separate
+Public-package validation instead installs `controlel==0.12.0` into a separate
 environment and never installs the checkout as a distribution.
 
 For a supported custom-component deployment, Home Assistant can install the
 exact manifest dependency automatically; users do not need to install the core
-manually. The implementation is prepared for the unpublished `0.11.0`
-candidate; its version bump and deterministic release packaging remain a
+manually. The implementation is the published `0.12.0`
+integration; deterministic release packaging remains a
 separate release-boundary step. No default
 HACS-store entry exists. End-user
 installation instructions are in
@@ -135,6 +135,6 @@ and re-upload an existing version. See the
 [release guide](../development/ReleaseGuide.md) for its exact source commit and
 published hashes.
 
-Core `0.10.0` is public and immutable. The integration `0.11.0` candidate
-installs exactly `controlel==0.10.0`; local and public-package CI compositions
+Core `0.12.0` is public and immutable. The integration `0.12.0`
+installs exactly `controlel==0.12.0`; local and public-package CI compositions
 validate the same activity-driven notification API boundary.
