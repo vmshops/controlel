@@ -280,6 +280,12 @@ class HomeAssistantControlelHost:
             self._reported_source_evidence,
         )
 
+    @property
+    def frontend_api_setup_ready(self) -> bool:
+        """Report only the completed loaded-entry lifecycle as ready Setup evidence."""
+
+        return self._initialized and self._accepting and not self._stopping and not self._stopped
+
     async def async_initialize(self) -> None:
         async with self._lifecycle_lock:
             if self._initialized:

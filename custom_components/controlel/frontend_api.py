@@ -55,6 +55,9 @@ class FrontendApiHostV1(Protocol):
         ReportedSourceEvidence | None,
     ]: ...
 
+    @property
+    def frontend_api_setup_ready(self) -> bool: ...
+
 
 SetupEvidenceSource = Callable[[], SetupEvidenceV1]
 
@@ -64,7 +67,7 @@ class HomeAssistantFrontendApiEvidenceSourceV1:
     """Map existing HA/application snapshots without entering control paths."""
 
     host: FrontendApiHostV1
-    setup_source: SetupEvidenceSource = lambda: SetupEvidenceV1(state="ready")
+    setup_source: SetupEvidenceSource | None = None
 
     def snapshot(self) -> FrontendApiEvidenceV1:
         operational, trace, total_trace, events, mode, normal_authority, reported = (
@@ -121,7 +124,14 @@ class HomeAssistantFrontendApiEvidenceSourceV1:
             latest_decision=latest,
             retained_decision_count=len(trace),
             total_decisions=total_trace,
-            setup=self.setup_source(),
+            setup=(
+                self.setup_source()
+                if self.setup_source is not None
+                else SetupEvidenceV1(
+                    state="ready" if self.host.frontend_api_setup_ready else "unknown",
+                    reason_code=(None if self.host.frontend_api_setup_ready else "runtime_readiness_unknown"),
+                )
+            ),
         )
 
 
@@ -134,7 +144,7 @@ def create_frontend_api_provider_v1(
 
     source = HomeAssistantFrontendApiEvidenceSourceV1(
         host=host,
-        setup_source=setup_source or (lambda: SetupEvidenceV1(state="ready")),
+        setup_source=setup_source,
     )
     return FrontendApiProviderV1(source=source, clock=SystemClock())
 
