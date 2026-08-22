@@ -107,8 +107,7 @@ class FrontendApiProviderV1:
                 ),
             ),
             zones=tuple(
-                _zone(zone, now)
-                for zone in sorted(evidence.zones, key=lambda item: item.zone_id)[:DEFAULT_ZONE_LIMIT]
+                _zone(zone, now) for zone in sorted(evidence.zones, key=lambda item: item.zone_id)[:DEFAULT_ZONE_LIMIT]
             ),
         )
 

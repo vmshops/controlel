@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from importlib import metadata
 from typing import TYPE_CHECKING, Any
@@ -33,6 +34,7 @@ from controlel.infrastructure.time.system_clock import SystemClock
 from .config import HomeAssistantIntegrationConfig, integration_config_from_entry
 from .event_loop_bridge import HomeAssistantEventLoopBridge
 from .failure_sink import HomeAssistantScheduledFailureSink, clear_entry_issues
+from .frontend_api import create_frontend_api_provider_v1
 from .heat_source import HomeAssistantHeatSourcePort
 from .host import HomeAssistantControlelHost
 from .measurement_ingestion import HomeAssistantMeasurementMapper
@@ -49,12 +51,23 @@ class ControlelEntryRuntime:
     host: HomeAssistantControlelHost | None
     config: HomeAssistantIntegrationConfig
     reloading: bool = False
+    frontend_api_unregister: Callable[[], None] | None = None
 
 
 if TYPE_CHECKING:
     type ControlelConfigEntry = ConfigEntry[ControlelEntryRuntime]
 else:
     type ControlelConfigEntry = Any
+
+
+async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
+    """Register the authenticated process-wide read-only transport."""
+
+    from .frontend_api_websocket import async_register_frontend_api_v1
+
+    del config
+    async_register_frontend_api_v1(hass)
+    return True
 
 
 async def async_setup_entry(
@@ -248,13 +261,27 @@ async def async_setup_entry(
             LOGGER.exception("Failed to clean up a partially constructed Controlel host")
         raise
 
-    entry.runtime_data = ControlelEntryRuntime(host=host, config=config)
+    from .frontend_api_websocket import register_frontend_api_provider_v1
+
+    frontend_api_unregister = register_frontend_api_provider_v1(
+        hass,
+        entry.entry_id,
+        create_frontend_api_provider_v1(host),
+    )
+    entry.runtime_data = ControlelEntryRuntime(
+        host=host,
+        config=config,
+        frontend_api_unregister=frontend_api_unregister,
+    )
     try:
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     except BaseException:
+        frontend_api_unregister()
         await host.async_stop()
         entry.runtime_data.host = None
+        entry.runtime_data.frontend_api_unregister = None
         raise
+    entry.async_on_unload(frontend_api_unregister)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     return True
 
@@ -269,6 +296,10 @@ async def async_unload_entry(
         entry,
         PLATFORMS,
     )
+    unregister = runtime_data.frontend_api_unregister
+    if unregister is not None:
+        unregister()
+        runtime_data.frontend_api_unregister = None
     host = runtime_data.host
     if host is not None:
         await host.async_stop()

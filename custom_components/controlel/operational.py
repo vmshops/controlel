@@ -358,6 +358,7 @@ class OperationalSnapshotSource:
     ) -> None:
         self._snapshot = initial
         self._trace: deque[DecisionTraceRecord] = deque(maxlen=trace_limit)
+        self._total_trace_records = 0
         self._subscribers: dict[int, tuple[SnapshotSubscriber, bool]] = {}
         self._next_subscriber = 0
         self._closed = False
@@ -377,6 +378,13 @@ class OperationalSnapshotSource:
     def trace_capacity(self) -> int:
         with self._lock:
             return self._trace.maxlen or TRACE_LIMIT
+
+    @property
+    def total_trace_records(self) -> int:
+        """Return the lifetime count without exposing or recreating dropped trace."""
+
+        with self._lock:
+            return self._total_trace_records
 
     def set_trace_capacity(self, capacity: int) -> None:
         """Resize bounded future retention while preserving newest records."""
@@ -436,6 +444,7 @@ class OperationalSnapshotSource:
             if trace_record is not None:
                 trace_record = replace(trace_record, sequence=revision)
                 self._trace.append(trace_record)
+                self._total_trace_records += 1
                 changes.setdefault("last_decision", trace_record.decision_code)
                 changes.setdefault("last_decision_reason", trace_record.reason_code)
                 changes.setdefault("last_decision_timestamp", trace_record.timestamp)
