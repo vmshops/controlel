@@ -18,18 +18,16 @@
   --info-soft: #e7f1fb;
   --neutral-soft: #eef1f4;
   --radius: 10px;
-  font-size: 16px;
 }
 
-* { box-sizing: border-box; }
-
-body {
-  margin: 0;
-  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
-  background: var(--bg);
-  color: var(--text);
-  line-height: 1.5;
-}
+/*
+ * The shell is also embedded as a Home Assistant panel (see ha-panel.js).
+ * In that context the shell's root is the `.app` element inside the panel,
+ * not the document body. Scoping the global resets to `.app` keeps the
+ * standalone page (index.html) looking identical while preventing the
+ * shell's resets from leaking into the surrounding Home Assistant UI.
+ */
+.app, .app * { box-sizing: border-box; }
 
 /* ---------------------------------------------------------------- header */
 
@@ -356,6 +354,12 @@ body {
   display: grid;
   grid-template-columns: 230px 1fr;
   min-height: 100vh;
+  margin: 0;
+  font-size: 16px;
+  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
 }
 
 .app__sidebar {

@@ -858,6 +858,26 @@
 
   // -------------------------------------------------------------- bootstrap
 
+  // Re-entrant hash routing: the Home Assistant panel may (re)create the
+  // shell on each connection, so the hashchange listener is added once and
+  // always navigates the most recently created app. In the standalone page
+  // and the Node test harness this behaves exactly as before.
+  let _currentApp = null;
+  let _hashListenerAdded = false;
+
+  function _setupHashRouting(app) {
+    _currentApp = app;
+    if (global.location && "hash" in global.location) {
+      app.navigate(parseRoute(global.location.hash));
+    }
+    if (!_hashListenerAdded && typeof global.addEventListener === "function") {
+      _hashListenerAdded = true;
+      global.addEventListener("hashchange", () => {
+        if (_currentApp) _currentApp.navigate(parseRoute(global.location && global.location.hash));
+      });
+    }
+  }
+
   function bootstrap() {
     const CA_API = global.CA_API;
     if (!CA_API) return null;
@@ -891,20 +911,20 @@
       topbarStatusRoot: document.getElementById("topbar-status"),
     });
 
-    // Hash routing: deep links + back/forward.
-    if (global.location && "hash" in global.location) {
-      app.navigate(parseRoute(global.location.hash));
-    }
-    if (typeof global.addEventListener === "function") {
-      global.addEventListener("hashchange", () => {
-        app.navigate(parseRoute(global.location && global.location.hash));
-      });
-    }
+    // Hash routing: deep links + back/forward (re-entrant, see above).
+    _setupHashRouting(app);
     return app;
   }
 
   // Browser only: the Node test harness calls createApp() directly.
-  if (typeof window !== "undefined" && window.document && window.document.getElementById) {
+  // In the Home Assistant panel, ha-panel.js sets CA_NO_AUTO_BOOTSTRAP and
+  // calls CA.bootstrap() explicitly to match the element lifecycle.
+  if (
+    typeof window !== "undefined" &&
+    window.document &&
+    window.document.getElementById &&
+    !window.CA_NO_AUTO_BOOTSTRAP
+  ) {
     global.CONTROLEL_APP = bootstrap();
   }
 
@@ -925,5 +945,6 @@
     toModuleCard,
     toActivityEvent,
     createApp,
+    bootstrap,
   };
 })(typeof window !== "undefined" ? window : globalThis);

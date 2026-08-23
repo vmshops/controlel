@@ -44,14 +44,42 @@ EXPECTED_ARCHIVE_FILES = frozenset(
         "notifications.py",
         "observability.py",
         "operational.py",
+        "panel.py",
         "runtime_executor.py",
         "scheduler.py",
         "sensor.py",
         "setup_backend.py",
         "strings.json",
         "translations/en.json",
+        # Runtime frontend assets required by the HA panel (see panel.py).
+        "frontend/ha-panel.js",
+        "frontend/app.js",
+        "frontend/api-client.js",
+        "frontend/components.js",
+        "frontend/wizard.js",
+        "frontend/mock-data.js",
+        "frontend/mock-app-data.js",
+        "frontend/styles.css",
     }
 )
+
+# Development-only frontend files that must not ship in the HACS release.
+# The runtime panel loads only the files listed in EXPECTED_ARCHIVE_FILES;
+# the demo pages, documentation, and Node test harness are dev tooling.
+DEV_ONLY_ARCHIVE_FILES = frozenset(
+    {
+        "frontend/index.html",
+        "frontend/wizard.html",
+        "frontend/README.md",
+    }
+)
+
+
+def _is_dev_only_archive_file(name: str) -> bool:
+    """Return True for development-only files that must not ship in the release."""
+    return name in DEV_ONLY_ARCHIVE_FILES or name.startswith("frontend/tests/")
+
+
 EXPECTED_HACS_MANIFEST = {
     "name": "Controlel",
     "zip_release": True,
@@ -158,6 +186,8 @@ def _source_file_map(component: Path) -> dict[str, bytes]:
         if "__pycache__" in relative.parts or path.suffix in {".pyc", ".pyo"}:
             continue
         name = relative.as_posix()
+        if _is_dev_only_archive_file(name):
+            continue
         try:
             files[name] = path.read_bytes()
         except OSError as error:

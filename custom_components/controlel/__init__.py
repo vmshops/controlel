@@ -283,6 +283,19 @@ async def async_setup_entry(
         raise
     entry.async_on_unload(frontend_api_unregister)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
+
+    from .panel import async_register_controlel_panel
+
+    # The sidebar panel is a UI convenience. If it cannot be registered (for
+    # example in a test harness that does not load the http component), the
+    # core integration must remain fully functional, so a failure here is
+    # logged and not fatal.
+    try:
+        await async_register_controlel_panel(hass, entry.entry_id)
+    except Exception:
+        LOGGER.exception(
+            "Controlel panel registration failed; the integration remains functional"
+        )
     return True
 
 
@@ -304,6 +317,10 @@ async def async_unload_entry(
     if host is not None:
         await host.async_stop()
         runtime_data.host = None
+
+    from .panel import async_remove_controlel_panel
+
+    async_remove_controlel_panel(hass)
     return platforms_unloaded
 
 
