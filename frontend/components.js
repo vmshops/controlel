@@ -162,6 +162,13 @@
     ok: { label: "OK", tone: "positive" },
     idle: { label: "Idle", tone: "neutral" },
     unknown: { label: "Unknown", tone: "neutral" },
+    // Frontend API v1 vocabulary (real backend states).
+    inactive: { label: "Inactive", tone: "neutral" },
+    error: { label: "Error", tone: "negative" },
+    degraded: { label: "Degraded", tone: "warning" },
+    stopped: { label: "Stopped", tone: "neutral" },
+    ready: { label: "Ready", tone: "positive" },
+    invalid: { label: "Invalid", tone: "negative" },
   };
 
   /** {label, tone} for a state string; unknown states stay neutral. */

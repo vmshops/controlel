@@ -661,6 +661,33 @@ body {
 .empty-state__message { margin: 0; font-size: 0.88rem; }
 .empty-state__action { margin-top: 0.5rem; }
 
+/* ------------------------------------------------------------- state panels */
+
+.state-panel {
+  display: grid;
+  gap: 0.4rem;
+  padding: 1rem;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+}
+
+.state-panel--loading { background: var(--neutral-soft); color: var(--text-muted); }
+.state-panel--error { background: var(--warning-soft); }
+.state-panel__icon { font-size: 1.2rem; opacity: 0.6; }
+.state-panel__title { margin: 0; font-weight: 600; }
+.state-panel__message { margin: 0 0 0.25rem; font-size: 0.9rem; }
+
+/* --------------------------------------------------------------- metric group */
+
+.metric-group { display: grid; gap: 0.6rem; }
+.metric-group + .metric-group { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border); }
+.metric-group__title { margin: 0; font-size: 0.95rem; }
+.heating-current { display: grid; gap: 0.5rem; }
+
+/* -------------------------------------------------------------------- app mode */
+
+.app__mode { font-weight: 600; }
+
 /* ---------------------------------------------------------------- small buttons */
 
 .btn--sm { padding: 0.35rem 0.8rem; font-size: 0.82rem; }

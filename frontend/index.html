@@ -18,8 +18,8 @@
       </div>
       <div id="app-nav" class="app__nav"></div>
       <div class="app__sidebar-footer">
-        <p>Prototype · mock data only</p>
-        <p>No backend calls</p>
+        <p id="app-mode" class="app__mode">Frontend API v1</p>
+        <p>Read-only · no configuration writes</p>
       </div>
     </aside>
 
@@ -33,6 +33,9 @@
 
       <!-- Setup view: the existing wizard renders into these containers (wizard.js). -->
       <div id="wizard-view" class="app__content app__content--wizard" hidden>
+        <div class="note note--info" id="wizard-demo-label">
+          Prototype setup flow (demo data only) — real setup readiness is shown above. Activation is not implemented.
+        </div>
         <div id="draft-status" class="draft-status" hidden></div>
         <nav id="stepper" class="stepper" aria-label="Setup steps"></nav>
         <section id="step-panel" class="step-panel" aria-live="polite"></section>
@@ -43,6 +46,7 @@
 
   <script src="mock-data.js"></script>
   <script src="mock-app-data.js"></script>
+  <script src="api-client.js"></script>
   <script src="components.js"></script>
   <script src="wizard.js"></script>
   <script src="app.js"></script>
