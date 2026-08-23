@@ -159,3 +159,56 @@ Diagnostics over magic.
 Safe fallback over aggressive action.
 
 Simple architecture over premature intelligence.
+
+## Home Assistant test environment
+
+Home Assistant framework tests MUST run in WSL/Linux.
+
+Canonical WSL test runner:
+
+`~/bin/controlel-ha-test`
+
+Windows worktree:
+
+`C:\GitHub\Controlel\controlel-ui-local`
+
+WSL view of the worktree:
+
+`/mnt/c/GitHub/Controlel/controlel-ui-local`
+
+Use Windows/Bionic for:
+- editing files
+- git status and diff
+- git commit
+- git push
+
+Use WSL/Linux for:
+- Home Assistant framework tests
+- Linux/CI reproduction
+- Home Assistant Python integration verification
+
+Run Home Assistant tests from Bionic with:
+
+`wsl.exe -d Ubuntu -- bash -lc "~/bin/controlel-ha-test <pytest arguments>"`
+
+Never use a Windows `.venv-ha/Scripts/python.exe` environment for Home Assistant framework tests.
+
+Do not add Windows-specific compatibility hacks for Home Assistant tests, including:
+- fcntl stubs
+- resource stubs
+- asyncio/event-loop policy changes
+- pytest/conftest changes whose only purpose is native Windows compatibility
+
+For current Frontend API development, use the local editable Controlel source installed in the canonical WSL environment.
+
+Published Core `0.12.0` does not contain Frontend API v1.
+A failure of the public-composition tests for that specific reason is a known release dependency pending Core `0.13.0`.
+Do not bypass, weaken, or rewrite public-composition tests to hide that dependency.
+
+If a Home Assistant test fails:
+1. reproduce it using the canonical WSL runner;
+2. treat the WSL/Linux result as authoritative;
+3. do not attempt to repair the Windows HA test environment.
+
+Git operations for this Windows-created worktree should remain on Windows because its `.git` worktree metadata contains Windows paths.
+Do not try to repair or rewrite that metadata from WSL.
