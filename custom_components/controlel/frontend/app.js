@@ -28,19 +28,30 @@
   const CW = global.CW;
   const { el, badge, statusBadge, pageHeader, section, metricCard, moduleCard, issuePanel, activityRow, emptyState, navList, noteBox, kvRow } = CW;
 
+  // i18n (i18n.js): translated text is presentation only. Machine-facing
+  // values (module ids, reason codes, API status codes, frontend_api_version)
+  // are never translated.
+  const CI18N = global.CI18N;
+  const t = CI18N ? (key, params) => CI18N.t(key, params) : (key) => key;
+  const has = CI18N ? (key) => CI18N.has(key) : () => false;
+
   // ------------------------------------------------------------- pure logic
 
   const ROUTES = ["overview", "modules", "heating", "diagnostics", "settings", "setup"];
   const DEFAULT_ROUTE = "overview";
 
-  /** Navigation items (data-driven; hidden/order are future-customization hooks). */
+  /**
+   * Navigation items (data-driven; hidden/order are future-customization
+   * hooks). `key` is the stable translation key; `label` is the canonical
+   * English fallback.
+   */
   const NAV_ITEMS = [
-    { id: "overview", label: "Overview", order: 1, hidden: false },
-    { id: "modules", label: "Modules", order: 2, hidden: false },
-    { id: "heating", label: "Heating", order: 3, hidden: false },
-    { id: "diagnostics", label: "Diagnostics", order: 4, hidden: false },
-    { id: "settings", label: "Settings", order: 5, hidden: false },
-    { id: "setup", label: "Setup", order: 6, hidden: false },
+    { id: "overview", label: "Overview", key: "navigation.overview", order: 1, hidden: false },
+    { id: "modules", label: "Modules", key: "navigation.modules", order: 2, hidden: false },
+    { id: "heating", label: "Heating", key: "navigation.heating", order: 3, hidden: false },
+    { id: "diagnostics", label: "Diagnostics", key: "navigation.diagnostics", order: 4, hidden: false },
+    { id: "settings", label: "Settings", key: "navigation.settings", order: 5, hidden: false },
+    { id: "setup", label: "Setup", key: "navigation.setup", order: 6, hidden: false },
   ];
 
   /** Parse a location hash ("#/heating", "#/heating?x=1") into a known route. */
@@ -84,50 +95,69 @@
   // faithfully; anything not listed falls back to a neutral "Unknown"-style
   // badge rather than being guessed.
 
+  // `key` is the stable translation key for the label; the state string
+  // itself stays the machine-facing identity.
   const SYSTEM_STATUS_META = {
-    active: { label: "Active", tone: "positive" },
-    degraded: { label: "Degraded", tone: "warning" },
-    stopped: { label: "Stopped", tone: "neutral" },
+    active: { label: "Active", tone: "positive", key: "state.active" },
+    degraded: { label: "Degraded", tone: "warning", key: "state.degraded" },
+    stopped: { label: "Stopped", tone: "neutral", key: "state.stopped" },
   };
 
   const MODULE_STATUS_META = {
-    active: { label: "Active", tone: "positive" },
-    inactive: { label: "Inactive", tone: "neutral" },
-    error: { label: "Error", tone: "negative" },
+    active: { label: "Active", tone: "positive", key: "state.active" },
+    inactive: { label: "Inactive", tone: "neutral", key: "state.inactive" },
+    error: { label: "Error", tone: "negative", key: "state.error" },
   };
 
   const READINESS_META = {
-    ready: { label: "Ready", tone: "positive" },
-    incomplete: { label: "Incomplete", tone: "warning" },
-    invalid: { label: "Invalid", tone: "negative" },
-    unknown: { label: "Unknown", tone: "neutral" },
+    ready: { label: "Ready", tone: "positive", key: "state.ready" },
+    incomplete: { label: "Incomplete", tone: "warning", key: "state.incomplete" },
+    invalid: { label: "Invalid", tone: "negative", key: "state.invalid" },
+    unknown: { label: "Unknown", tone: "neutral", key: "state.unknown" },
   };
 
   const DEMAND_META = {
-    heat_required: { label: "Heating required", tone: "info" },
-    no_heat_required: { label: "No heating demand", tone: "neutral" },
-    indeterminate: { label: "Indeterminate", tone: "warning" },
+    heat_required: { label: "Heating required", tone: "info", key: "state.heat_required" },
+    no_heat_required: { label: "No heating demand", tone: "neutral", key: "state.no_heat_required" },
+    indeterminate: { label: "Indeterminate", tone: "warning", key: "state.indeterminate" },
   };
 
   const MEASUREMENT_META = {
-    fresh: { label: "Fresh", tone: "positive" },
-    expired: { label: "Expired", tone: "warning" },
-    future_dated: { label: "Future-dated", tone: "warning" },
-    missing: { label: "Missing", tone: "neutral" },
+    fresh: { label: "Fresh", tone: "positive", key: "state.fresh" },
+    expired: { label: "Expired", tone: "warning", key: "state.expired" },
+    future_dated: { label: "Future-dated", tone: "warning", key: "state.future_dated" },
+    missing: { label: "Missing", tone: "neutral", key: "state.missing" },
   };
 
+  /**
+   * {label, tone} for a state string (public contract; unknown states stay
+   * neutral). The map entries also carry a translation `key`, which the
+   * rendering helpers below resolve; `metaOf` itself stays key-free.
+   */
   function metaOf(map, key) {
     if (key === null || key === undefined) return { label: "Unknown", tone: "neutral" };
-    return map[key] || { label: String(key), tone: "neutral" };
+    const m = map[key];
+    if (!m) return { label: String(key), tone: "neutral" };
+    return { label: m.label, tone: m.tone };
+  }
+
+  /** Translated label for a state; unknown states render their raw string. */
+  function stateLabel(key, map) {
+    if (key === null || key === undefined) return t("common.unknown");
+    const m = map[key];
+    if (!m) return String(key);
+    return m.key && has(m.key) ? t(m.key) : m.label;
   }
 
   function stateBadge(map, key, labelOverride) {
-    const m = metaOf(map, key);
-    return badge(labelOverride || m.label, m.tone);
+    if (key === null || key === undefined) return badge(t("common.unknown"), "neutral");
+    const m = map[key] || { label: String(key), tone: "neutral" };
+    const label = labelOverride || (m.key && has(m.key) ? t(m.key) : m.label);
+    return badge(label, m.tone);
   }
 
   function formatTime(value) {
-    if (!value) return "Unknown";
+    if (!value) return t("common.unknown");
     const d = new Date(value);
     return Number.isNaN(d.getTime()) ? String(value) : d.toLocaleString();
   }
@@ -136,14 +166,14 @@
   function toModuleCard(m) {
     const meta = metaOf(MODULE_STATUS_META, m.status);
     let primaryAction = null;
-    if (m.status === "error") primaryAction = { label: "Review issues", route: "diagnostics" };
-    else if (m.module_id === "heating") primaryAction = { label: "Open Heating", route: "heating" };
+    if (m.status === "error") primaryAction = { label: t("action.review_issues"), route: "diagnostics" };
+    else if (m.module_id === "heating") primaryAction = { label: t("action.open_heating"), route: "heating" };
     return {
       id: m.module_id,
       label: m.module_id,
       state: m.status,
       stateLabel: meta.label,
-      summary: m.reason || "No reason reported.",
+      summary: m.reason || t("module.no_reason"),
       warningCount: 0,
       updatedAt: null,
       primaryAction,
@@ -163,8 +193,8 @@
       at: formatTime(e.timestamp),
       level: e.level || "basic",
       category: e.category,
-      title: e.summary_code || e.event_code || e.category || "event",
-      message: "Reported operational event (read-only).",
+      title: e.summary_code || e.event_code || e.category || t("common.event"),
+      message: t("activity.reported_event"),
       reasonCodes: codes,
       metadata: {
         severity: e.severity,
@@ -237,6 +267,10 @@
         state.domains[domain] = freshDomain();
         loadDomain(domain);
       },
+      setLanguage(pref) {
+        if (CI18N && typeof CI18N.setLanguage === "function") CI18N.setLanguage(pref);
+        render();
+      },
       refresh() {
         for (const k of Object.keys(state.domains)) state.domains[k] = freshDomain();
         render();
@@ -275,7 +309,7 @@
             d.data = result.data;
           } else {
             d.status = "error";
-            d.error = (result && result.error) || new Error("The request failed");
+            d.error = (result && result.error) || new Error(t("common.request_failed"));
           }
           d.inflight = null;
           render();
@@ -296,13 +330,17 @@
     function render() {
       if (navRoot) {
         navRoot.replaceChildren(navList({
-          items: visibleItems(NAV_ITEMS),
+          items: visibleItems(NAV_ITEMS).map((item) =>
+            item.key && has(item.key) ? { ...item, label: t(item.key) } : item),
           currentId: state.route,
           onNavigate: (route) => api.navigate(route),
         }));
       }
       if (topbarStatusRoot) renderTopbar(topbarStatusRoot);
       renderModeLabel();
+      // Re-translate the static shell markup (tagline, footer, labels) so a
+      // language switch updates it too. No-op in Node (no querySelectorAll).
+      if (CI18N && typeof CI18N.applyI18n === "function") CI18N.applyI18n(document);
 
       if (state.mode === "unavailable") {
         if (viewRoot) viewRoot.hidden = false;
@@ -325,9 +363,9 @@
       const modeEl = (typeof document !== "undefined" && document.getElementById) ? document.getElementById("app-mode") : null;
       if (!modeEl) return;
       modeEl.textContent =
-        state.mode === "demo" ? "Demo mode · mock data"
-        : state.mode === "real" ? "Frontend API v1 · live"
-        : "Disconnected";
+        state.mode === "demo" ? t("mode.demo")
+        : state.mode === "real" ? t("mode.real")
+        : t("mode.disconnected");
     }
 
     function renderTopbar(root) {
@@ -335,9 +373,9 @@
       if (setup.status === "loaded" && setup.data && setup.data.readiness) {
         root.replaceChildren(stateBadge(READINESS_META, setup.data.readiness.state));
       } else if (setup.status === "error") {
-        root.replaceChildren(badge("Unavailable", "warning"));
+        root.replaceChildren(badge(t("common.unavailable"), "warning"));
       } else {
-        root.replaceChildren(badge("Unknown", "neutral"));
+        root.replaceChildren(badge(t("common.unknown"), "neutral"));
       }
     }
 
@@ -359,13 +397,13 @@
       if (status === "loading" || status === "idle") {
         return el("div", { class: "state-panel state-panel--loading" },
           el("span", { class: "state-panel__icon" }, "…"),
-          el("p", { class: "state-panel__message" }, loadingLabel || "Loading…"));
+          el("p", { class: "state-panel__message" }, loadingLabel || t("common.loading")));
       }
       if (status === "error") {
         return el("div", { class: "state-panel state-panel--error" },
-          el("p", { class: "state-panel__title" }, errorTitle || "Unavailable"),
-          el("p", { class: "state-panel__message" }, (error && error.message) || "The request failed."),
-          onRetry ? el("button", { class: "btn btn--secondary", onclick: onRetry }, "Retry") : null
+          el("p", { class: "state-panel__title" }, errorTitle || t("common.unavailable")),
+          el("p", { class: "state-panel__message" }, (error && error.message) || t("common.request_failed")),
+          onRetry ? el("button", { class: "btn btn--secondary", onclick: onRetry }, t("common.retry")) : null
         );
       }
       return null;
@@ -385,7 +423,7 @@
     }
 
     function continueSetupButton() {
-      return el("button", { class: "btn btn--primary", onclick: () => api.navigate("setup") }, "Continue setup");
+      return el("button", { class: "btn btn--primary", onclick: () => api.navigate("setup") }, t("action.continue_setup"));
     }
 
     // ------------------------------------------------------------- views
@@ -393,23 +431,17 @@
     function renderUnavailable() {
       return el("div", { class: "view" },
         pageHeader({
-          title: "Overview",
-          subtitle: "Controlel is not connected to a Home Assistant Frontend API v1 source.",
+          title: t("navigation.overview"),
+          subtitle: t("unavailable.subtitle"),
         }),
         el("div", { class: "state-panel state-panel--error" },
-          el("p", { class: "state-panel__title" }, "Disconnected"),
-          el("p", { class: "state-panel__message" },
-            "No authenticated Home Assistant connection or Controlel config entry was found in this environment. " +
-            "Real data is unavailable and will not be replaced by mock values."),
+          el("p", { class: "state-panel__title" }, t("mode.disconnected")),
+          el("p", { class: "state-panel__message" }, t("unavailable.message")),
           demoFactory
-            ? el("button", { class: "btn btn--secondary", onclick: () => api.enableDemo() }, "Enable demo mode (mock data)")
+            ? el("button", { class: "btn btn--secondary", onclick: () => api.enableDemo() }, t("action.enable_demo"))
             : null
         ),
-        noteBox(
-          "In a Home Assistant panel the shell uses the existing authenticated WebSocket connection and the " +
-          "controlel/frontend_api/v1/* read-only commands. No custom authentication or transport is created here.",
-          "info"
-        )
+        noteBox(t("unavailable.note"), "info")
       );
     }
 
@@ -424,41 +456,41 @@
       if (setup.status === "loaded" && readinessNeedsAction(setup.data)) headerActions.push(continueSetupButton());
 
       const subtitle = (ov.status === "loaded" && ov.data && ov.data.generated_at)
-        ? `Frontend API v1 · generated ${formatTime(ov.data.generated_at)}`
-        : "Frontend API v1";
+        ? t("overview.subtitle_generated", { time: formatTime(ov.data.generated_at) })
+        : t("overview.subtitle_api");
 
       return el("div", { class: "view" },
-        pageHeader({ title: "Overview", subtitle, badges, actions: headerActions }),
+        pageHeader({ title: t("navigation.overview"), subtitle, badges, actions: headerActions }),
 
         domainSection({
           domain: "overview",
-          title: "Modules",
-          lead: "Configured Controlel modules and their current state.",
+          title: t("section.modules"),
+          lead: t("overview.modules_lead"),
           loaded: (data) => el("div", { class: "module-grid" },
             data.modules.length
               ? data.modules.map((m) => moduleCard({ module: toModuleCard(m), onNavigate: (route) => api.navigate(route) }))
-              : emptyState({ title: "No modules reported", message: "The backend reported no modules." })
+              : emptyState({ title: t("empty.no_modules_title"), message: t("empty.no_modules_message") })
           ),
           onRetry: () => api.retryDomain("overview"),
         }),
 
         domainSection({
           domain: "overview",
-          title: "Important warnings & issues",
+          title: t("section.issues"),
           loaded: (data) => issuePanel({
-            title: "Important warnings & issues",
+            title: t("section.issues"),
             issues: data.attention.map((a) => ({ severity: a.severity, code: a.code, message: a.summary })),
-            emptyMessage: "No important warnings or issues right now.",
+            emptyMessage: t("common.no_issues"),
           }),
           onRetry: () => api.retryDomain("overview"),
         }),
 
         section({
-          title: "Quick actions",
+          title: t("section.quick_actions"),
           children: el("div", { class: "quick-actions" },
-            el("button", { class: "btn btn--secondary", onclick: () => api.navigate("heating") }, "Open Heating"),
-            el("button", { class: "btn btn--secondary", onclick: () => api.navigate("diagnostics") }, "Open Diagnostics"),
-            el("span", { class: "hint" }, "Read-only: actions only navigate; no backend writes are made.")
+            el("button", { class: "btn btn--secondary", onclick: () => api.navigate("heating") }, t("action.open_heating")),
+            el("button", { class: "btn btn--secondary", onclick: () => api.navigate("diagnostics") }, t("action.open_diagnostics")),
+            el("span", { class: "hint" }, t("overview.readonly_hint"))
           ),
         })
       );
@@ -466,18 +498,18 @@
 
     function renderModules() {
       return el("div", { class: "view" },
-        pageHeader({ title: "Modules", subtitle: "Each module is an independent capability." }),
+        pageHeader({ title: t("navigation.modules"), subtitle: t("modules.subtitle") }),
         domainSection({
           domain: "overview",
-          title: "All modules",
+          title: t("section.all_modules"),
           loaded: (data) => el("div", { class: "module-grid" },
             data.modules.length
               ? data.modules.map((m) => moduleCard({ module: toModuleCard(m), onNavigate: (route) => api.navigate(route) }))
-              : emptyState({ title: "No modules reported", message: "The backend reported no modules." })
+              : emptyState({ title: t("empty.no_modules_title"), message: t("empty.no_modules_message") })
           ),
           onRetry: () => api.retryDomain("overview"),
         }),
-        noteBox("Only modules reported by the backend are shown. Modules that are not configured are not listed.", "info")
+        noteBox(t("modules.note"), "info")
       );
     }
 
@@ -489,44 +521,40 @@
         el("h4", { class: "metric-group__title" }, z.name),
         el("div", { class: "metric-grid" },
           metricCard({
-            label: "Current temperature",
-            value: z.current_temperature_c === null ? "Unknown" : String(z.current_temperature_c),
+            label: t("heating.current_temperature"),
+            value: z.current_temperature_c === null ? t("common.unknown") : String(z.current_temperature_c),
             unit: "°C",
-            sub: `Measurement: ${metaOf(MEASUREMENT_META, z.measurement_state).label}`,
+            sub: t("heating.measurement", { state: stateLabel(z.measurement_state, MEASUREMENT_META) }),
           }),
           metricCard({
-            label: "Target temperature",
-            value: z.target_temperature_c === null ? "Unknown" : String(z.target_temperature_c),
+            label: t("heating.target_temperature"),
+            value: z.target_temperature_c === null ? t("common.unknown") : String(z.target_temperature_c),
             unit: "°C",
-            sub: "Comfort target for the zone",
+            sub: t("heating.target_sub"),
           }),
           metricCard({
-            label: "Heating demand",
-            value: metaOf(DEMAND_META, z.demand_state).label,
-            sub: z.demand_reason_code ? `Reason: ${z.demand_reason_code}` : "Assessment from reported evidence",
+            label: t("heating.demand"),
+            value: stateLabel(z.demand_state, DEMAND_META),
+            sub: z.demand_reason_code ? t("heating.reason", { code: z.demand_reason_code }) : t("heating.demand_sub"),
             tone: "info",
           })
         )
       ));
 
       const heatSource = el("div", { class: "metric-group" },
-        el("h4", { class: "metric-group__title" }, "Heat source"),
+        el("h4", { class: "metric-group__title" }, t("heating.heat_source")),
         el("div", { class: "kv-grid" },
-          kvRow("Permission", hs ? hs.permission : "Unknown"),
-          kvRow("Requested command", hs && hs.requested_command ? hs.requested_command : "None"),
-          kvRow("Command outcome", hs && hs.command_outcome ? hs.command_outcome : "None"),
-          kvRow("Reported state", hs && hs.reported_state ? hs.reported_state : "Unknown"),
-          kvRow("Physical state", "Unknown (not reported)")
+          kvRow(t("heating.permission"), hs ? hs.permission : t("common.unknown")),
+          kvRow(t("heating.requested_command"), hs && hs.requested_command ? hs.requested_command : t("common.none")),
+          kvRow(t("heating.command_outcome"), hs && hs.command_outcome ? hs.command_outcome : t("common.none")),
+          kvRow(t("heating.reported_state"), hs && hs.reported_state ? hs.reported_state : t("common.unknown")),
+          kvRow(t("heating.physical_state"), t("heating.physical_unknown"))
         ),
-        noteBox(
-          "Permission, requested command, command outcome and reported state are distinct. None of them is physical " +
-          "confirmation that the burner is running; the physical state is reported as unknown.",
-          "neutral"
-        )
+        noteBox(t("heating.distinct_note"), "neutral")
       );
 
       return el("div", { class: "heating-current" },
-        zones.length ? zoneBlocks : emptyState({ title: "No zones reported", message: "The backend reported no zones." }),
+        zones.length ? zoneBlocks : emptyState({ title: t("empty.no_zones_title"), message: t("empty.no_zones_message") }),
         heatSource
       );
     }
@@ -542,23 +570,23 @@
 
       return el("div", { class: "view" },
         pageHeader({
-          title: "Heating",
-          subtitle: "Zone demand, heat source permission and reported state.",
+          title: t("navigation.heating"),
+          subtitle: t("heating.subtitle"),
           badges,
           actions: headerActions,
         }),
 
         domainSection({
           domain: "heating",
-          title: "Current state",
-          lead: "Values are reports and assessments from the backend — not physical confirmation.",
+          title: t("heating.current_state"),
+          lead: t("heating.current_lead"),
           loaded: renderHeatingCurrent,
           onRetry: () => api.retryDomain("heating"),
         }),
 
         domainSection({
           domain: "setup",
-          title: "Status & reason",
+          title: t("heating.status_reason"),
           loaded: (data) => {
             const r = data.readiness;
             return el("div", {},
@@ -567,7 +595,7 @@
                 r.reason_code ? badge(r.reason_code, "warning") : null
               ),
               noteBox(
-                r.reason_code ? `Readiness reason: ${r.reason_code}` : "No readiness reason reported.",
+                r.reason_code ? t("heating.readiness_reason", { code: r.reason_code }) : t("heating.no_readiness_reason"),
                 r.state === "ready" ? "positive" : "warning"
               )
             );
@@ -577,11 +605,11 @@
 
         domainSection({
           domain: "setup",
-          title: "Configuration completeness",
+          title: t("heating.completeness"),
           loaded: (data) => {
             const missing = data.missing_configuration || [];
             if (missing.length === 0) {
-              return noteBox("No missing configuration reported.", "positive");
+              return noteBox(t("setup.no_missing"), "positive");
             }
             return el("ul", { class: "completeness-list" },
               missing.map((m) => el("li", { class: "completeness-item" },
@@ -595,8 +623,8 @@
 
         domainSection({
           domain: "diagnostics",
-          title: "Recent operational events",
-          actions: [el("button", { class: "btn btn--link", onclick: () => api.navigate("diagnostics") }, "Open Diagnostics")],
+          title: t("heating.recent_events"),
+          actions: [el("button", { class: "btn btn--link", onclick: () => api.navigate("diagnostics") }, t("action.open_diagnostics"))],
           loaded: (data) => {
             const events = (data.recent_events || []).slice(0, 5).map(toActivityEvent);
             return events.length
@@ -607,16 +635,12 @@
                     onToggle: () => api.toggleEvent(e.id),
                   }))
                 )
-              : emptyState({ title: "No recent events", message: "Operational events will appear here." });
+              : emptyState({ title: t("empty.no_events_title"), message: t("empty.no_events_message") });
           },
           onRetry: () => api.retryDomain("diagnostics"),
         }),
 
-        noteBox(
-          "A successful command is not physical confirmation, and a heat source permission is not burner state. " +
-          "This view is read-only and performs no control logic.",
-          "neutral"
-        )
+        noteBox(t("heating.readonly_note"), "neutral")
       );
     }
 
@@ -627,36 +651,36 @@
         class: `btn btn--sm ${l === level ? "btn--primary" : "btn--secondary"}`,
         "aria-pressed": l === level ? "true" : "false",
         onclick: () => api.setDiagnosticsLevel(l),
-      }, l.charAt(0).toUpperCase() + l.slice(1)));
+      }, t(`diagnostics.level_${l}`)));
 
       return el("div", { class: "view" },
         pageHeader({
-          title: "Diagnostics / Activity",
-          subtitle: "Health, a readable activity list, and the latest decision trace.",
+          title: t("diagnostics.title"),
+          subtitle: t("diagnostics.subtitle"),
         }),
 
         domainSection({
           domain: "diagnostics",
-          title: "Health",
+          title: t("diagnostics.health"),
           loaded: (data) => el("div", { class: "kv-grid" },
-            kvRow("Runtime status", data.health.runtime_status),
-            kvRow("Operating mode", data.health.operating_mode),
-            kvRow("Events emitted", String(data.health.event_stream.total_emitted)),
-            kvRow("Events retained", String(data.health.event_stream.retained)),
-            kvRow("Events dropped", String(data.health.event_stream.dropped))
+            kvRow(t("diagnostics.runtime_status"), data.health.runtime_status),
+            kvRow(t("diagnostics.operating_mode"), data.health.operating_mode),
+            kvRow(t("diagnostics.events_emitted"), String(data.health.event_stream.total_emitted)),
+            kvRow(t("diagnostics.events_retained"), String(data.health.event_stream.retained)),
+            kvRow(t("diagnostics.events_dropped"), String(data.health.event_stream.dropped))
           ),
           onRetry: () => api.retryDomain("diagnostics"),
         }),
 
         section({
-          title: "Display level",
-          lead: "Basic shows essential events; Detailed adds warnings; Debug adds critical detail.",
+          title: t("diagnostics.display_level"),
+          lead: t("diagnostics.display_level_lead"),
           children: el("div", { class: "level-filter" }, levelButtons),
         }),
 
         domainSection({
           domain: "diagnostics",
-          title: "Activity",
+          title: t("diagnostics.activity"),
           loaded: (data) => {
             const events = filterEvents((data.recent_events || []).map(toActivityEvent), level);
             return events.length
@@ -668,9 +692,9 @@
                   }))
                 )
               : emptyState({
-                  title: "No events at this level",
-                  message: "Try a higher display level to see more detail.",
-                  action: el("button", { class: "btn btn--secondary", onclick: () => api.setDiagnosticsLevel("debug") }, "Show Debug"),
+                  title: t("empty.no_events_level_title"),
+                  message: t("empty.no_events_level_message"),
+                  action: el("button", { class: "btn btn--secondary", onclick: () => api.setDiagnosticsLevel("debug") }, t("action.show_debug")),
                 });
           },
           onRetry: () => api.retryDomain("diagnostics"),
@@ -678,18 +702,18 @@
 
         domainSection({
           domain: "diagnostics",
-          title: "Latest decision trace",
+          title: t("diagnostics.decision_trace"),
           loaded: (data) => {
-            const t = data.decision_trace;
-            if (!t) return noteBox("No decision trace reported.", "neutral");
+            const trace = data.decision_trace;
+            if (!trace) return noteBox(t("diagnostics.no_trace"), "neutral");
             return el("div", { class: "kv-grid" },
-              kvRow("Decision", t.decision_id),
-              kvRow("Zone", t.zone_id),
-              kvRow("Sensor", t.sensor_id),
-              kvRow("Action", t.action),
-              kvRow("Observed at", formatTime(t.observed_at)),
-              kvRow("Reason", t.reason_code || "—"),
-              kvRow("Retained / total", `${t.retained_count} / ${t.total_decisions}`)
+              kvRow(t("diagnostics.decision"), trace.decision_id),
+              kvRow(t("diagnostics.zone"), trace.zone_id),
+              kvRow(t("diagnostics.sensor"), trace.sensor_id),
+              kvRow(t("diagnostics.action"), trace.action),
+              kvRow(t("diagnostics.observed_at"), formatTime(trace.observed_at)),
+              kvRow(t("diagnostics.reason"), trace.reason_code || "—"),
+              kvRow(t("diagnostics.retained_total"), `${trace.retained_count} / ${trace.total_decisions}`)
             );
           },
           onRetry: () => api.retryDomain("diagnostics"),
@@ -704,72 +728,91 @@
       const rows = [
         {
           id: "heating-config",
-          label: "Heating configuration",
-          description: "Zone, sensor and heat source bindings for the heating module.",
+          label: t("settings.heating_config"),
+          description: t("settings.heating_config_desc"),
           state: readiness ? readiness.state : "unknown",
-          action: { label: "Continue setup", route: "setup" },
+          action: { label: t("action.continue_setup"), route: "setup" },
           order: 1,
           hidden: false,
         },
         {
           id: "diagnostics",
-          label: "Diagnostics level",
-          description: "Basic, Detailed or Debug display level for the activity view.",
+          label: t("settings.diagnostics_level"),
+          description: t("settings.diagnostics_level_desc"),
           state: "ok",
-          action: { label: "Open Diagnostics", route: "diagnostics" },
+          action: { label: t("action.open_diagnostics"), route: "diagnostics" },
           order: 2,
           hidden: false,
         },
         {
           id: "notifications",
-          label: "Notifications",
-          description: "Choose which Controlel events are surfaced (placeholder).",
+          label: t("settings.notifications"),
+          description: t("settings.notifications_desc"),
           state: "not_configured",
           order: 3,
           hidden: false,
         },
         {
           id: "language",
-          label: "Language",
-          description: "Interface language (placeholder — English only in this prototype).",
-          state: "not_configured",
+          label: t("settings.language"),
+          description: t("settings.language_desc"),
+          state: "ok",
           order: 4,
           hidden: false,
         },
         {
           id: "advanced",
-          label: "Advanced",
-          description: "Advanced options and prototype diagnostics (placeholder).",
+          label: t("settings.advanced"),
+          description: t("settings.advanced_desc"),
           state: "not_configured",
           order: 5,
           hidden: false,
         },
       ];
 
+      /**
+       * Language preference control (frontend-local; persisted in
+       * localStorage by the i18n layer, no backend involved).
+       */
+      function languageControl() {
+        const i18n = CI18N ? CI18N.defaultI18n() : null;
+        const select = el("select", {
+          class: "select select--language",
+          "aria-label": t("settings.language"),
+          onchange: (e) => api.setLanguage((e.target && e.target.value) || "auto"),
+        },
+          el("option", { value: "auto" }, t("language.auto")),
+          el("option", { value: "en" }, t("language.en")),
+          el("option", { value: "cs" }, t("language.cs"))
+        );
+        if (i18n) select.value = i18n.preference;
+        return select;
+      }
+
       const rendered = visibleItems(rows).map((s) => el("div", { class: "settings-row", "data-setting": s.id },
         el("div", { class: "settings-row__main" },
           el("div", { class: "settings-row__head" },
             el("span", { class: "settings-row__label" }, s.label),
-            statusBadge(s.state)
+            s.id === "language"
+              ? badge(CI18N ? t(`language.${CI18N.language}`) : "English", "info")
+              : statusBadge(s.state)
           ),
           el("p", { class: "settings-row__description" }, s.description)
         ),
-        s.action
-          ? el("button", { class: "btn btn--secondary btn--sm", onclick: () => api.navigate(s.action.route) }, s.action.label)
-          : el("span", { class: "hint" }, "Placeholder")
+        s.id === "language"
+          ? languageControl()
+          : s.action
+            ? el("button", { class: "btn btn--secondary btn--sm", onclick: () => api.navigate(s.action.route) }, s.action.label)
+            : el("span", { class: "hint" }, t("settings.placeholder"))
       ));
 
       return el("div", { class: "view" },
         pageHeader({
-          title: "Settings",
-          subtitle: "Navigation and structure only — this shell does not implement settings writes.",
+          title: t("navigation.settings"),
+          subtitle: t("settings.subtitle"),
         }),
-        section({ title: "Settings overview", children: el("div", { class: "settings-list" }, rendered) }),
-        noteBox(
-          "The Heating configuration row reflects the real setup readiness state. Other rows are placeholders; " +
-          "no configuration is written by this shell.",
-          "info"
-        )
+        section({ title: t("settings.overview"), children: el("div", { class: "settings-list" }, rendered) }),
+        noteBox(t("settings.note"), "info")
       );
     }
 
@@ -781,14 +824,14 @@
 
       return el("div", { class: "view" },
         pageHeader({
-          title: "Setup / Readiness",
-          subtitle: "Real setup readiness, missing configuration and validation from Frontend API v1.",
+          title: t("setup.title"),
+          subtitle: t("setup.subtitle"),
           badges,
         }),
 
         domainSection({
           domain: "setup",
-          title: "Readiness",
+          title: t("setup.readiness"),
           loaded: (data) => {
             const r = data.readiness;
             return el("div", {},
@@ -798,12 +841,12 @@
               ),
               noteBox(
                 r.state === "ready"
-                  ? "Setup is reported as ready."
+                  ? t("setup.ready")
                   : r.state === "incomplete"
-                    ? "Setup is reported as incomplete. Resolve the items below before it can become active."
+                    ? t("setup.incomplete")
                     : r.state === "invalid"
-                      ? "Setup is reported as invalid. Review the validation messages below."
-                      : "Setup readiness is unknown.",
+                      ? t("setup.invalid")
+                      : t("setup.unknown"),
                 r.state === "ready" ? "positive" : r.state === "unknown" ? "neutral" : "warning"
               )
             );
@@ -813,10 +856,10 @@
 
         domainSection({
           domain: "setup",
-          title: "Missing configuration",
+          title: t("setup.missing_config"),
           loaded: (data) => {
             const missing = data.missing_configuration || [];
-            if (missing.length === 0) return noteBox("No missing configuration reported.", "positive");
+            if (missing.length === 0) return noteBox(t("setup.no_missing"), "positive");
             return el("ul", { class: "completeness-list" },
               missing.map((m) => el("li", { class: "completeness-item" },
                 el("span", { class: "completeness-item__label" }, m.code),
@@ -829,10 +872,10 @@
 
         domainSection({
           domain: "setup",
-          title: "Validation messages",
+          title: t("setup.validation"),
           loaded: (data) => {
             const messages = data.validation_messages || [];
-            if (messages.length === 0) return noteBox("No validation messages reported.", "positive");
+            if (messages.length === 0) return noteBox(t("setup.no_validation"), "positive");
             return el("ul", { class: "issue-list" },
               messages.map((v) => el("li", { class: `issue issue--${v.severity === "error" ? "negative" : "warning"}` },
                 badge(String(v.severity).toUpperCase(), v.severity === "error" ? "negative" : "warning"),
@@ -844,11 +887,7 @@
           onRetry: () => api.retryDomain("setup"),
         }),
 
-        noteBox(
-          "Setup is read-only here: this shell shows readiness and validation but does not mutate configuration or " +
-          "activate. The prototype setup flow below uses demo data only.",
-          "info"
-        )
+        noteBox(t("setup.readonly_note"), "info")
       );
     }
 

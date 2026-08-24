@@ -16,11 +16,17 @@
   const { el, badge, candidateCard, stepper, validationItem, kvRow, noteBox } = window.CW;
   const data = window.MOCK_SETUP_DATA;
 
+  // i18n (i18n.js): translated text is presentation only. Reason codes, ids
+  // and revision identifiers stay untranslated.
+  const CI18N = window.CI18N;
+  const t = CI18N ? (key, params) => CI18N.t(key, params) : (key) => key;
+
+  // Step labels are resolved at render time so a language switch applies.
   const STEPS = [
-    { id: 1, label: "Discovery" },
-    { id: 2, label: "Zone" },
-    { id: 3, label: "Sensor & Heat Source" },
-    { id: 4, label: "Review & Validation" },
+    { id: 1, key: "wizard.step_discovery" },
+    { id: 2, key: "wizard.step_zone" },
+    { id: 3, key: "wizard.step_sensor" },
+    { id: 4, key: "wizard.step_review" },
   ];
 
   const state = {
@@ -110,24 +116,24 @@
     const d = state.draft;
 
     if (!d.zone) {
-      issues.push({ severity: "blocking", code: "ZONE_REQUIRED", message: "Select a room/zone for this heating setup." });
+      issues.push({ severity: "blocking", code: "ZONE_REQUIRED", message: t("wizard.issue_zone_required") });
     }
     if (!d.sensor) {
-      issues.push({ severity: "blocking", code: "SENSOR_REQUIRED", message: "Select a primary temperature sensor." });
+      issues.push({ severity: "blocking", code: "SENSOR_REQUIRED", message: t("wizard.issue_sensor_required") });
     } else if (!d.sensorConfirmed) {
       issues.push({
         severity: "blocking",
         code: "SENSOR_CONFIRMATION_REQUIRED",
-        message: "The primary temperature sensor is an important binding and requires explicit confirmation.",
+        message: t("wizard.issue_sensor_confirmation"),
       });
     }
     if (!d.heatSource) {
-      issues.push({ severity: "blocking", code: "HEAT_SOURCE_REQUIRED", message: "Select a heat source (enable/disable)." });
+      issues.push({ severity: "blocking", code: "HEAT_SOURCE_REQUIRED", message: t("wizard.issue_heat_source_required") });
     } else if (!d.heatSourceConfirmed) {
       issues.push({
         severity: "blocking",
         code: "HEAT_SOURCE_CONFIRMATION_REQUIRED",
-        message: "The heat source is an important binding and requires explicit confirmation.",
+        message: t("wizard.issue_heat_source_confirmation"),
       });
     }
 
@@ -138,7 +144,7 @@
         issues.push({
           severity: "warning",
           code: "SENSOR_AREA_MISMATCH",
-          message: `Sensor area “${sensor.area}” differs from zone area “${zone.area}”. Verify this is intentional.`,
+          message: t("wizard.issue_area_mismatch", { sensor: sensor.area, zone: zone.area }),
         });
       }
     }
@@ -147,7 +153,7 @@
       issues.push({
         severity: "warning",
         code: "HEAT_SOURCE_EPHEMERAL",
-        message: "This heat source has no stable registry identity; rename recovery is not guaranteed.",
+        message: t("wizard.issue_ephemeral"),
       });
     }
 
@@ -195,7 +201,7 @@
 
   function stepLabel(id) {
     const s = STEPS.find((x) => x.id === id);
-    return s ? s.label : "";
+    return s ? t(s.key) : "";
   }
 
   function goToStep(id) {
@@ -227,7 +233,8 @@
   }
 
   function renderStepper() {
-    stepperNav.replaceChildren(stepper(STEPS, state.step, (id) => {
+    stepperNav.setAttribute("aria-label", t("panel.setup_steps"));
+    stepperNav.replaceChildren(stepper(STEPS.map((s) => ({ id: s.id, label: t(s.key) })), state.step, (id) => {
       state.step = id;
       render();
     }));
@@ -244,12 +251,12 @@
   function renderDraftStatus() {
     const report = validateDraft();
     draftStatus.hidden = false;
-    const saved = state.draftSavedAt ? `Saved ${formatTime(state.draftSavedAt)}` : "Not saved yet";
+    const saved = state.draftSavedAt ? t("wizard.saved", { time: formatTime(state.draftSavedAt) }) : t("wizard.not_saved");
     draftStatus.replaceChildren(
       report.blocking.length === 0
-        ? badge("Complete", "positive")
-        : badge(`Incomplete · ${report.blocking.length} blocking`, "warning"),
-      el("span", { class: "draft-status__text" }, `${saved} · in-memory prototype`)
+        ? badge(t("wizard.complete"), "positive")
+        : badge(t("wizard.incomplete", { count: report.blocking.length }), "warning"),
+      el("span", { class: "draft-status__text" }, `${saved} · ${t("wizard.in_memory")}`)
     );
   }
 
@@ -258,27 +265,25 @@
   function renderDiscovery() {
     const s = state.snapshot;
     const counts = [
-      ["Floors", s.counts.floors],
-      ["Areas", s.counts.areas],
-      ["Devices", s.counts.devices],
-      ["Entities", s.counts.entities],
+      [t("wizard.count_floors"), s.counts.floors],
+      [t("wizard.count_areas"), s.counts.areas],
+      [t("wizard.count_devices"), s.counts.devices],
+      [t("wizard.count_entities"), s.counts.entities],
     ];
 
     return el("div", { class: "step" },
-      el("h2", { class: "step__title" }, "Home Assistant discovery summary"),
-      el("p", { class: "step__lead" },
-        "A read-only snapshot of the Home Assistant installation. Discovery describes structure and advertised capability only."
-      ),
+      el("h2", { class: "step__title" }, t("wizard.discovery_title")),
+      el("p", { class: "step__lead" }, t("wizard.discovery_lead")),
 
       el("div", { class: "panel" },
-        el("h3", { class: "panel__title" }, "Snapshot"),
+        el("h3", { class: "panel__title" }, t("wizard.snapshot")),
         el("div", { class: "kv-grid" },
-          kvRow("Provider", s.provider),
-          kvRow("Instance", s.providerInstanceId),
-          kvRow("Snapshot ID", s.snapshotId),
-          kvRow("Captured at", formatTime(s.capturedAt)),
-          kvRow("Adapter version", s.adapterVersion),
-          kvRow("Fingerprint", s.fingerprint),
+          kvRow(t("wizard.provider"), s.provider),
+          kvRow(t("wizard.instance"), s.providerInstanceId),
+          kvRow(t("wizard.snapshot_id"), s.snapshotId),
+          kvRow(t("wizard.captured_at"), formatTime(s.capturedAt)),
+          kvRow(t("wizard.adapter_version"), s.adapterVersion),
+          kvRow(t("wizard.fingerprint"), s.fingerprint),
         ),
         el("div", { class: "count-grid" },
           counts.map(([label, value]) =>
@@ -289,15 +294,11 @@
           )
         ),
         el("div", { class: "panel__actions" },
-          el("button", { class: "btn btn--secondary", onclick: refreshSnapshot }, "Refresh snapshot (mock)")
+          el("button", { class: "btn btn--secondary", onclick: refreshSnapshot }, t("wizard.refresh_snapshot"))
         )
       ),
 
-      noteBox(
-        "Discovery is read-only and does not prove physical presence, measurement accuracy, or that a command will succeed. " +
-        "No Controlel configuration was changed by this snapshot.",
-        "info"
-      )
+      noteBox(t("wizard.discovery_note"), "info")
     );
   }
 
@@ -306,10 +307,9 @@
   function renderZone() {
     const role = roleData("zone");
     return el("div", { class: "step" },
-      el("h2", { class: "step__title" }, "Select room / zone"),
-      el("p", { class: "step__lead" },
-        "Choose the zone this heating setup controls. A Home Assistant area is not automatically a Controlel zone — this selection creates that mapping."
-      ),
+      el("h2", { class: "step__title" }, t("wizard.zone_title")),
+      el("p", { class: "step__lead" }, t("wizard.zone_lead")),
+
       el("div", { class: "candidate-list" },
         role.candidates.map((c) =>
           candidateCard({
@@ -344,26 +344,22 @@
             onSelect,
             confirmed,
             onConfirm: role.important ? onConfirm : null,
-            roleLabel: role.label,
+            roleLabel: heading,
           })
         )
       ),
       role.important && selectedId && !confirmed
-        ? noteBox("This is an important binding. Selecting a candidate is not confirmation — confirm it explicitly below the candidate.", "warning")
+        ? noteBox(t("wizard.important_binding_note"), "warning")
         : null
     );
   }
 
   function renderBindings() {
     return el("div", { class: "step" },
-      el("h2", { class: "step__title" }, "Select temperature sensor and heat source"),
-      el("p", { class: "step__lead" },
-        "Both are important bindings. Each selection requires explicit confirmation; switching to a different candidate resets its confirmation."
-      ),
-      renderRoleSection("sensor", "Primary temperature sensor",
-        "The measurement the zone demand is based on. Command success is never treated as a physical reading."),
-      renderRoleSection("heatSource", "Heat source (enable/disable)",
-        "The source-control permission target. Enabling it grants heat source permission; it does not mean the burner is running.")
+      el("h2", { class: "step__title" }, t("wizard.bindings_title")),
+      el("p", { class: "step__lead" }, t("wizard.bindings_lead")),
+      renderRoleSection("sensor", t("wizard.role_sensor"), t("wizard.sensor_lead")),
+      renderRoleSection("heatSource", t("wizard.role_heat_source"), t("wizard.heat_source_lead"))
     );
   }
 
@@ -374,7 +370,7 @@
     if (!id) {
       return el("div", { class: "review-row review-row--missing" },
         el("span", { class: "review-row__label" }, label),
-        badge("Not selected", "warning"),
+        badge(t("wizard.not_selected"), "warning"),
         el("span", { class: "review-row__value" }, "—")
       );
     }
@@ -391,7 +387,7 @@
       el("span", { class: "review-row__badges" },
         badge(origin, origin === "RECOMMENDATION_ACCEPTED" ? "info" : "neutral"),
         badge(c.identityQuality, c.identityQuality === "STABLE" ? "info" : "warning"),
-        confirmed === true ? badge("Confirmed", "positive") : confirmed === false ? badge("Not confirmed", "negative") : null
+        confirmed === true ? badge(t("wizard.confirmed"), "positive") : confirmed === false ? badge(t("wizard.not_confirmed"), "negative") : null
       )
     );
   }
@@ -399,27 +395,23 @@
   function readinessPanel(report) {
     if (state.activation) {
       return el("div", { class: "panel readiness readiness--active" },
-        el("h3", { class: "panel__title" }, "Activation"),
-        badge("Activation recorded", "positive"),
+        el("h3", { class: "panel__title" }, t("wizard.activation")),
+        badge(t("wizard.activation_recorded"), "positive"),
         el("div", { class: "kv-grid" },
-          kvRow("Revision", state.activation.revisionId),
-          kvRow("At", formatTime(state.activation.at))
+          kvRow(t("wizard.revision"), state.activation.revisionId),
+          kvRow(t("wizard.at"), formatTime(state.activation.at))
         ),
-        noteBox(
-          "Prototype only: no backend call was made and no active configuration was changed. " +
-          "In the real lifecycle, activation applies one immutable canonical revision and keeps the previous revision for rollback.",
-          "info"
-        )
+        noteBox(t("wizard.activation_note"), "info")
       );
     }
 
     if (report.activationReady) {
       return el("div", { class: "panel readiness readiness--ready" },
-        el("h3", { class: "panel__title" }, "Readiness"),
-        noteBox("All blocking items are resolved. This draft is ready to activate.", "positive"),
+        el("h3", { class: "panel__title" }, t("wizard.readiness")),
+        noteBox(t("wizard.ready_note"), "positive"),
         el("div", { class: "panel__actions" },
-          el("button", { class: "btn btn--primary", onclick: checkReadiness }, "Activate"),
-          el("span", { class: "hint" }, "Activating applies this draft as an immutable revision (mock).")
+          el("button", { class: "btn btn--primary", onclick: checkReadiness }, t("wizard.activate")),
+          el("span", { class: "hint" }, t("wizard.activate_hint"))
         )
       );
     }
@@ -431,20 +423,17 @@
           badge(issue.code, "negative"),
           el("span", { class: "readiness-item__message" }, issue.message)
         ),
-        el("button", { class: "btn btn--link", onclick: () => goToStep(step) }, `Fix in step ${step} · ${stepLabel(step)}`)
+        el("button", { class: "btn btn--link", onclick: () => goToStep(step) }, t("wizard.fix_in_step", { step, label: stepLabel(step) }))
       );
     });
 
     return el("div", { class: "panel readiness readiness--blocked" },
-      el("h3", { class: "panel__title" }, "Readiness"),
-      noteBox(
-        `Setup is incomplete — ${report.blocking.length} blocking item${report.blocking.length === 1 ? "" : "s"} must be resolved before this can become active. You can still save and finish later.`,
-        "warning"
-      ),
+      el("h3", { class: "panel__title" }, t("wizard.readiness")),
+      noteBox(t("wizard.incomplete_note", { count: report.blocking.length }), "warning"),
       el("ul", { class: "readiness-list" }, items),
       el("div", { class: "panel__actions" },
-        el("button", { class: "btn btn--primary", onclick: checkReadiness }, "Check readiness"),
-        el("span", { class: "hint" }, "An incomplete setup cannot become active.")
+        el("button", { class: "btn btn--primary", onclick: checkReadiness }, t("wizard.check_readiness")),
+        el("span", { class: "hint" }, t("wizard.cannot_activate"))
       )
     );
   }
@@ -453,31 +442,28 @@
     const report = validateDraft();
 
     const review = el("div", { class: "panel" },
-      el("h3", { class: "panel__title" }, "Draft review"),
-      renderReviewRow("zone", "Zone"),
-      renderReviewRow("sensor", "Primary temperature sensor"),
-      renderReviewRow("heatSource", "Heat source"),
-      noteBox(
-        "Validation is evidence for this exact draft revision. Editing the draft creates a new revision and makes this report inapplicable.",
-        "neutral"
-      )
+      el("h3", { class: "panel__title" }, t("wizard.draft_review")),
+      renderReviewRow("zone", t("wizard.zone")),
+      renderReviewRow("sensor", t("wizard.role_sensor")),
+      renderReviewRow("heatSource", t("wizard.role_heat_source")),
+      noteBox(t("wizard.validation_note"), "neutral")
     );
 
     const validation = el("div", { class: "panel" },
-      el("h3", { class: "panel__title" }, "Validation report"),
+      el("h3", { class: "panel__title" }, t("wizard.validation_report")),
       report.issues.length === 0
-        ? noteBox("Validation passed — this draft is activation-ready.", "positive")
+        ? noteBox(t("wizard.validation_passed"), "positive")
         : el("ul", { class: "validation-list" }, report.issues.map(validationItem)),
       report.warnings.length > 0 && report.blocking.length === 0
-        ? noteBox(`${report.warnings.length} warning(s) recorded. Warnings do not block activation but should be reviewed.`, "warning")
+        ? noteBox(t("wizard.warnings_recorded", { count: report.warnings.length }), "warning")
         : null
     );
 
     const readiness = readinessPanel(report);
 
     return el("div", { class: "step" },
-      el("h2", { class: "step__title" }, "Review and validation"),
-      el("p", { class: "step__lead" }, "Check the draft, review the validation report, then save and finish later or activate."),
+      el("h2", { class: "step__title" }, t("wizard.review_title")),
+      el("p", { class: "step__lead" }, t("wizard.review_lead")),
       review,
       validation,
       readiness
@@ -492,19 +478,19 @@
       class: "btn btn--ghost",
       disabled: state.step === 1,
       onclick: () => { state.step -= 1; render(); },
-    }, "Back");
+    }, t("wizard.back"));
 
-    const save = el("button", { class: "btn btn--secondary", onclick: saveDraft }, "Save and finish later");
+    const save = el("button", { class: "btn btn--secondary", onclick: saveDraft }, t("wizard.save_later"));
 
     let primary;
     if (state.step < 4) {
-      primary = el("button", { class: "btn btn--primary", onclick: () => { state.step += 1; render(); } }, "Continue");
+      primary = el("button", { class: "btn btn--primary", onclick: () => { state.step += 1; render(); } }, t("wizard.continue"));
     } else {
       // Always pressable: "Activate" when ready, "Check readiness" when not.
       primary = el("button", {
         class: "btn btn--primary",
         onclick: checkReadiness,
-      }, report.activationReady ? "Activate" : "Check readiness");
+      }, report.activationReady ? t("wizard.activate") : t("wizard.check_readiness"));
     }
 
     footer.replaceChildren(back, save, primary);

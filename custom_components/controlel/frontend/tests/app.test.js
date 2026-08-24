@@ -23,6 +23,11 @@ const { Element, documentStub } = require("./dom-stub");
 // The frontend scripts expect a `document` global; provide the stub first.
 global.document = documentStub;
 
+// i18n.js first: components.js / app.js / wizard.js resolve UI strings
+// through the shared CI18N instance. In Node (no window/localStorage) the
+// default instance resolves to English, so the canonical English assertions
+// below exercise the real translation path.
+require("../i18n.js");
 require("../mock-data.js");
 require("../mock-app-data.js");
 require("../api-client.js");

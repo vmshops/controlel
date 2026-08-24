@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Controlel — Setup Wizard (Prototype)</title>
+  <title data-i18n="page.title_wizard">Controlel — Setup Wizard (Prototype)</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -11,8 +11,8 @@
     <div class="app-title">
       <span class="app-logo" aria-hidden="true">C</span>
       <div>
-        <h1>Controlel Setup</h1>
-        <p class="app-subtitle">Heating module · Setup wizard prototype · Mock data only · No backend calls</p>
+        <h1 data-i18n="page.wizard_header">Controlel Setup</h1>
+        <p class="app-subtitle" data-i18n="page.wizard_header_sub">Heating module · Setup wizard prototype · Mock data only · No backend calls</p>
       </div>
     </div>
     <div id="draft-status" class="draft-status" hidden></div>
@@ -24,8 +24,16 @@
     <footer id="wizard-footer" class="wizard-footer"></footer>
   </main>
 
+  <script src="i18n.js"></script>
   <script src="mock-data.js"></script>
   <script src="components.js"></script>
   <script src="wizard.js"></script>
+  <script>
+    // Translate the static page chrome (wizard.js renders its own strings
+    // through the i18n layer at render time).
+    if (window.CI18N && typeof window.CI18N.applyI18n === "function") {
+      window.CI18N.applyI18n(document);
+    }
+  </script>
 </body>
 </html>

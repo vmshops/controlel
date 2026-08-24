@@ -11,6 +11,12 @@
 (function (global) {
   "use strict";
 
+  // i18n (i18n.js): translated text is presentation only. Machine-facing
+  // values (state strings, codes, ids) are never translated.
+  const CI18N = global.CI18N;
+  const t = CI18N ? (key, params) => CI18N.t(key, params) : (key) => key;
+  const has = CI18N ? (key) => CI18N.has(key) : () => false;
+
   /** Create a DOM element with attributes, event handlers and children. */
   function el(tag, attrs, ...children) {
     const node = document.createElement(tag);
@@ -45,7 +51,7 @@
 
   function confidenceBadge(confidence) {
     const tone = { HIGH: "positive", MEDIUM: "info", LOW: "warning" }[confidence] || "neutral";
-    return badge(`Confidence: ${confidence}`, tone);
+    return badge(t("wizard.confidence", { level: confidence }), tone);
   }
 
   /**
@@ -71,7 +77,7 @@
         onchange: () => onSelect(candidate.id),
       }),
       el("span", { class: "candidate__name" }, candidate.name),
-      isRecommended ? badge("Recommended", "positive") : badge("Alternative", "neutral"),
+      isRecommended ? badge(t("wizard.recommended"), "positive") : badge(t("wizard.alternative"), "neutral"),
     );
 
     const meta = el("div", { class: "candidate__meta" },
@@ -81,7 +87,7 @@
     );
 
     const reasons = el("div", { class: "candidate__reasons" },
-      el("span", { class: "candidate__reasons-label" }, "Reasons: "),
+      el("span", { class: "candidate__reasons-label" }, t("wizard.reasons")),
       candidate.reasons.map((r) => badge(r, "neutral")),
     );
 
@@ -96,8 +102,7 @@
         el("label", { class: "candidate__confirm" },
           el("input", { type: "checkbox", checked: confirmed, onchange: (e) => onConfirm(e.target.checked) }),
           el("span", {},
-            `I confirm using “${candidate.name}” as the ${roleLabel}. ` +
-            "This is an important binding; a successful command is not physical confirmation."
+            t("wizard.confirm_binding", { name: candidate.name, role: roleLabel })
           )
         )
       );
@@ -152,34 +157,43 @@
    * the (mock) data layer; unknown states render neutrally rather than being
    * guessed.
    */
+  // `key` is the stable translation key for the label; the state string
+  // itself stays the machine-facing identity.
   const STATE_META = {
-    active: { label: "Active", tone: "positive" },
-    configured: { label: "Configured", tone: "positive" },
-    incomplete: { label: "Incomplete setup", tone: "warning" },
-    attention: { label: "Needs attention", tone: "negative" },
-    disabled: { label: "Disabled", tone: "neutral" },
-    not_configured: { label: "Not configured", tone: "neutral" },
-    ok: { label: "OK", tone: "positive" },
-    idle: { label: "Idle", tone: "neutral" },
-    unknown: { label: "Unknown", tone: "neutral" },
+    active: { label: "Active", tone: "positive", key: "state.active" },
+    configured: { label: "Configured", tone: "positive", key: "state.configured" },
+    incomplete: { label: "Incomplete setup", tone: "warning", key: "state.incomplete_setup" },
+    attention: { label: "Needs attention", tone: "negative", key: "state.attention" },
+    disabled: { label: "Disabled", tone: "neutral", key: "state.disabled" },
+    not_configured: { label: "Not configured", tone: "neutral", key: "state.not_configured" },
+    ok: { label: "OK", tone: "positive", key: "state.ok" },
+    idle: { label: "Idle", tone: "neutral", key: "state.idle" },
+    unknown: { label: "Unknown", tone: "neutral", key: "state.unknown" },
     // Frontend API v1 vocabulary (real backend states).
-    inactive: { label: "Inactive", tone: "neutral" },
-    error: { label: "Error", tone: "negative" },
-    degraded: { label: "Degraded", tone: "warning" },
-    stopped: { label: "Stopped", tone: "neutral" },
-    ready: { label: "Ready", tone: "positive" },
-    invalid: { label: "Invalid", tone: "negative" },
+    inactive: { label: "Inactive", tone: "neutral", key: "state.inactive" },
+    error: { label: "Error", tone: "negative", key: "state.error" },
+    degraded: { label: "Degraded", tone: "warning", key: "state.degraded" },
+    stopped: { label: "Stopped", tone: "neutral", key: "state.stopped" },
+    ready: { label: "Ready", tone: "positive", key: "state.ready" },
+    invalid: { label: "Invalid", tone: "negative", key: "state.invalid" },
   };
 
-  /** {label, tone} for a state string; unknown states stay neutral. */
+  /**
+   * {label, tone} for a state string (public contract; unknown states stay
+   * neutral). The map entries also carry a translation `key`, which
+   * statusBadge() resolves; stateMeta() itself stays key-free.
+   */
   function stateMeta(state) {
-    return STATE_META[state] || { label: String(state), tone: "neutral" };
+    const meta = STATE_META[state];
+    if (!meta) return { label: String(state), tone: "neutral" };
+    return { label: meta.label, tone: meta.tone };
   }
 
   /** Status badge for a Controlel state. label overrides the default text. */
   function statusBadge(state, label) {
-    const meta = stateMeta(state);
-    return badge(label || meta.label, meta.tone);
+    const meta = STATE_META[state] || { label: String(state), tone: "neutral" };
+    const text = label || (meta.key && has(meta.key) ? t(meta.key) : meta.label);
+    return badge(text, meta.tone);
   }
 
   /**
@@ -263,9 +277,9 @@
       el("p", { class: "module-card__summary" }, module.summary),
       el("div", { class: "module-card__meta" },
         module.warningCount > 0
-          ? badge(`${module.warningCount} warning${module.warningCount === 1 ? "" : "s"}`, "warning")
-          : badge("No warnings", "neutral"),
-        module.updatedAt ? el("span", { class: "module-card__updated" }, `Updated ${module.updatedAt}`) : null
+          ? badge(t("module.warnings", { count: module.warningCount }), "warning")
+          : badge(t("module.no_warnings"), "neutral"),
+        module.updatedAt ? el("span", { class: "module-card__updated" }, t("module.updated", { time: module.updatedAt })) : null
       ),
       actions.length ? el("div", { class: "module-card__actions" }, actions) : null
     );
@@ -279,14 +293,14 @@
     const list = issues || [];
     if (list.length === 0) {
       return el("div", { class: "section issue-panel issue-panel--empty" },
-        el("h3", { class: "section__title" }, title || "Issues"),
-        el("p", { class: "section__lead" }, emptyMessage || "No issues reported.")
+        el("h3", { class: "section__title" }, title || t("common.issues")),
+        el("p", { class: "section__lead" }, emptyMessage || t("common.no_issues"))
       );
     }
     const tone = { warning: "warning", negative: "negative", info: "info" };
     return el("div", { class: "section issue-panel" },
       el("div", { class: "section__head" },
-        el("h3", { class: "section__title" }, title || "Issues"),
+        el("h3", { class: "section__title" }, title || t("common.issues")),
         badge(`${list.length}`, list.some((i) => i.severity === "negative") ? "negative" : "warning")
       ),
       el("ul", { class: "issue-list" },
@@ -315,7 +329,7 @@
     const details = [];
     if (event.reasonCodes && event.reasonCodes.length > 0) {
       details.push(el("div", { class: "activity-details__block" },
-        el("span", { class: "activity-details__label" }, "Reason codes"),
+        el("span", { class: "activity-details__label" }, t("activity.reason_codes")),
         el("div", { class: "activity-details__codes" },
           event.reasonCodes.map((code) => badge(code, "neutral"))
         )
@@ -323,7 +337,7 @@
     }
     if (event.metadata && Object.keys(event.metadata).length > 0) {
       details.push(el("div", { class: "activity-details__block" },
-        el("span", { class: "activity-details__label" }, "Raw metadata"),
+        el("span", { class: "activity-details__label" }, t("activity.raw_metadata")),
         el("pre", { class: "activity-details__meta" }, JSON.stringify(event.metadata, null, 2))
       ));
     }
@@ -342,7 +356,7 @@
           class: "btn btn--link btn--sm",
           "aria-expanded": expanded ? "true" : "false",
           onclick: onToggle,
-        }, expanded ? "Hide details" : "Details") : null
+        }, expanded ? t("common.hide_details") : t("common.details")) : null
       ),
       hasDetails ? el("div", { class: "activity-row__details", hidden: !expanded }, details) : null
     );
@@ -366,7 +380,7 @@
    * items: [{id, label, order, hidden}] (already filtered/sorted by the view).
    */
   function navList({ items, currentId, onNavigate }) {
-    return el("nav", { class: "app-nav", "aria-label": "Main navigation" },
+    return el("nav", { class: "app-nav", "aria-label": t("navigation.aria_label") },
       el("ul", { class: "app-nav__list" },
         items.map((item) => el("li", { class: "app-nav__item-wrap" },
           el("button", {

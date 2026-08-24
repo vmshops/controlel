@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Controlel (Prototype)</title>
+  <title data-i18n="page.title_app">Controlel (Prototype)</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -13,19 +13,19 @@
         <span class="app-logo" aria-hidden="true">C</span>
         <div>
           <h1 class="app__name">Controlel</h1>
-          <p class="app__tagline">Heating control platform</p>
+          <p class="app__tagline" data-i18n="panel.tagline">Heating control platform</p>
         </div>
       </div>
       <div id="app-nav" class="app__nav"></div>
       <div class="app__sidebar-footer">
         <p id="app-mode" class="app__mode">Frontend API v1</p>
-        <p>Read-only · no configuration writes</p>
+        <p data-i18n="panel.readonly_footer">Read-only · no configuration writes</p>
       </div>
     </aside>
 
     <div class="app__main">
       <header class="app__topbar">
-        <span class="app__topbar-label">Overall status</span>
+        <span class="app__topbar-label" data-i18n="panel.overall_status">Overall status</span>
         <span id="topbar-status" class="app__topbar-status"></span>
       </header>
 
@@ -33,7 +33,7 @@
 
       <!-- Setup view: the existing wizard renders into these containers (wizard.js). -->
       <div id="wizard-view" class="app__content app__content--wizard" hidden>
-        <div class="note note--info" id="wizard-demo-label">
+        <div class="note note--info" id="wizard-demo-label" data-i18n="panel.wizard_demo_label">
           Prototype setup flow (demo data only) — real setup readiness is shown above. Activation is not implemented.
         </div>
         <div id="draft-status" class="draft-status" hidden></div>
@@ -44,6 +44,7 @@
     </div>
   </div>
 
+  <script src="i18n.js"></script>
   <script src="mock-data.js"></script>
   <script src="mock-app-data.js"></script>
   <script src="api-client.js"></script>

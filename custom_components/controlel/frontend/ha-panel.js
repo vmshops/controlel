@@ -22,6 +22,9 @@
 
 const SCRIPT_BASE = "/controlel_static/";
 const SCRIPTS = [
+  // i18n.js first: components.js, wizard.js and app.js resolve their UI
+  // strings through the shared CI18N instance it provides.
+  "i18n.js",
   "mock-data.js",
   "mock-app-data.js",
   "api-client.js",
@@ -76,25 +79,27 @@ function _buildShellDOM() {
   const app = document.createElement("div");
   app.id = "app";
   app.className = "app";
+  // Static shell strings carry data-i18n keys; app.js re-translates them on
+  // every render (CI18N.applyI18n), so a language switch updates the shell.
   app.innerHTML = `
     <aside class="app__sidebar">
       <div class="app__brand">
         <span class="app-logo" aria-hidden="true">C</span>
         <div>
           <h1 class="app__name">Controlel</h1>
-          <p class="app__tagline">Heating control platform</p>
+          <p class="app__tagline" data-i18n="panel.tagline">Heating control platform</p>
         </div>
       </div>
       <div id="app-nav" class="app__nav"></div>
       <div class="app__sidebar-footer">
         <p id="app-mode" class="app__mode">Frontend API v1</p>
-        <p>Read-only · no configuration writes</p>
+        <p data-i18n="panel.readonly_footer">Read-only · no configuration writes</p>
       </div>
     </aside>
 
     <div class="app__main">
       <header class="app__topbar">
-        <span class="app__topbar-label">Overall status</span>
+        <span class="app__topbar-label" data-i18n="panel.overall_status">Overall status</span>
         <span id="topbar-status" class="app__topbar-status"></span>
       </header>
 
@@ -102,7 +107,7 @@ function _buildShellDOM() {
 
       <!-- Setup view: the existing wizard renders into these containers (wizard.js). -->
       <div id="wizard-view" class="app__content app__content--wizard" hidden>
-        <div class="note note--info" id="wizard-demo-label">
+        <div class="note note--info" id="wizard-demo-label" data-i18n="panel.wizard_demo_label">
           Prototype setup flow (demo data only) — real setup readiness is shown above. Activation is not implemented.
         </div>
         <div id="draft-status" class="draft-status" hidden></div>
@@ -162,12 +167,18 @@ class ControlelPanel extends HTMLElement {
     const app = document.createElement("div");
     app.className = "app";
     const message = (err && err.message) ? err.message : String(err);
+    // Assets may have failed to load, so CI18N might be unavailable; the
+    // English title is the canonical fallback.
+    const title = (window.CI18N && typeof window.CI18N.t === "function")
+      ? window.CI18N.t("panel.load_error")
+      : "Controlel panel failed to load";
     app.innerHTML =
       '<div class="app__main"><main class="app__content">' +
       '<div class="state-panel state-panel--error">' +
-      '<p class="state-panel__title">Controlel panel failed to load</p>' +
+      '<p class="state-panel__title"></p>' +
       '<p class="state-panel__message"></p>' +
       "</div></main></div>";
+    app.querySelector(".state-panel__title").textContent = title;
     app.querySelector(".state-panel__message").textContent = message;
     this.appendChild(app);
   }

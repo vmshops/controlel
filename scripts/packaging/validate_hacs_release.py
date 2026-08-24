@@ -57,6 +57,7 @@ EXPECTED_ARCHIVE_FILES = frozenset(
         "frontend/api-client.js",
         "frontend/components.js",
         "frontend/wizard.js",
+        "frontend/i18n.js",
         "frontend/mock-data.js",
         "frontend/mock-app-data.js",
         "frontend/styles.css",
