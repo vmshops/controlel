@@ -58,7 +58,7 @@
    * Candidate card for one role option.
    *
    * @param {object}  opts
-   * @param {object}  opts.candidate    candidate from mock data
+   * @param {object}  opts.candidate    normalized backend setup candidate
    * @param {boolean} opts.isRecommended true when this is the recommended option
    * @param {boolean} opts.selected     true when currently selected
    * @param {Function} opts.onSelect    called with the candidate id

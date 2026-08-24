@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title data-i18n="page.title_wizard">Controlel — Setup Wizard (Prototype)</title>
+  <title>Controlel — Setup Wizard</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -12,7 +12,7 @@
       <span class="app-logo" aria-hidden="true">C</span>
       <div>
         <h1 data-i18n="page.wizard_header">Controlel Setup</h1>
-        <p class="app-subtitle" data-i18n="page.wizard_header_sub">Heating module · Setup wizard prototype · Mock data only · No backend calls</p>
+        <p class="app-subtitle">Heating module · Real backend setup drafts · No activation</p>
       </div>
     </div>
     <div id="draft-status" class="draft-status" hidden></div>
@@ -25,10 +25,34 @@
   </main>
 
   <script src="i18n.js"></script>
-  <script src="mock-data.js"></script>
+  <script src="api-client.js"></script>
   <script src="components.js"></script>
   <script src="wizard.js"></script>
   <script>
+    const setupEnvironment = window.CA_API.detectHaEnvironment(window);
+    const unavailable = () => Promise.reject(
+      new window.CA_API.ApiError("disconnected", "No authenticated Home Assistant setup connection is available")
+    );
+    const setupClient = setupEnvironment.available
+      ? window.CA_API.createSetupWriteClient({
+          connection: setupEnvironment.connection,
+          configEntryId: setupEnvironment.configEntryId,
+        })
+      : {
+          discover: unavailable,
+          recommendations: unavailable,
+          startDraft: unavailable,
+          reopenDraft: unavailable,
+          updateDraft: unavailable,
+          validateDraft: unavailable,
+        };
+    window.CONTROLEL_SETUP_WIZARD = window.CA_WIZARD.createSetupWizard({
+      client: setupClient,
+      configEntryId: setupEnvironment.configEntryId || "unavailable",
+      root: document,
+      storage: window.localStorage,
+    });
+
     // Translate the static page chrome (wizard.js renders its own strings
     // through the i18n layer at render time).
     if (window.CI18N && typeof window.CI18N.applyI18n === "function") {

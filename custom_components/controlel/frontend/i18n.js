@@ -186,7 +186,7 @@
         retained_total: "Retained / total",
       },
       settings: {
-        subtitle: "Navigation and structure only — this shell does not implement settings writes.",
+        subtitle: "Setup drafts and validation only — activation and runtime control are not available.",
         overview: "Settings overview",
         heating_config: "Heating configuration",
         heating_config_desc: "Zone, sensor and heat source bindings for the heating module.",
@@ -200,8 +200,8 @@
         advanced_desc: "Advanced options and prototype diagnostics (placeholder).",
         placeholder: "Placeholder",
         note:
-          "The Heating configuration row reflects the real setup readiness state. Other rows are placeholders; " +
-          "no configuration is written by this shell.",
+          "The Heating configuration row reflects the real setup readiness state. The setup wizard writes drafts " +
+          "and validation evidence only; other rows are placeholders.",
       },
       language: {
         auto: "Auto",
@@ -221,8 +221,7 @@
         validation: "Validation messages",
         no_validation: "No validation messages reported.",
         readonly_note:
-          "Setup is read-only here: this shell shows readiness and validation but does not mutate configuration or " +
-          "activate. The prototype setup flow below uses demo data only.",
+          "The wizard writes setup drafts and validation evidence only. It does not activate configuration or control devices.",
       },
       unavailable: {
         subtitle: "Controlel is not connected to a Home Assistant Frontend API v1 source.",
@@ -235,7 +234,7 @@
       },
       panel: {
         tagline: "Heating control platform",
-        readonly_footer: "Read-only · no configuration writes",
+        readonly_footer: "Setup drafts only · no activation or runtime control",
         overall_status: "Overall status",
         load_error: "Controlel panel failed to load",
         wizard_demo_label:
@@ -341,6 +340,33 @@
         back: "Back",
         save_later: "Save and finish later",
         continue: "Continue",
+        not_discovered: "No discovery snapshot has been requested yet.",
+        start_discovery: "Start discovery",
+        discovering: "Discovering Home Assistant registry data…",
+        discovery_unavailable: "Setup discovery unavailable",
+        draft_unavailable: "Setup draft unavailable",
+        start_new_draft: "Start a new draft",
+        draft: "Draft",
+        refresh_discovery: "Refresh discovery",
+        no_areas: "No Home Assistant areas were discovered. The draft remains incomplete.",
+        no_candidates: "No backend recommendation or candidate is available for this role.",
+        source_enable_target: "Heat source enable target",
+        source_disable_target: "Heat source disable target",
+        review_persisted_lead:
+          "Review the persisted draft and request backend validation. This flow does not activate configuration.",
+        unsaved_report: "Unsaved edits are not part of the backend validation report shown below.",
+        blocking_count: "{count} blocking",
+        warning_count: "{count} warnings",
+        validation_preparation:
+          "Validation prepares this draft only. No active configuration or runtime state is changed.",
+        incomplete_draft: "Incomplete draft",
+        draft_complete: "Draft complete",
+        unsaved_edits: "unsaved edits",
+        persisted: "persisted",
+        saved_revision: "saved {time}",
+        revision_status: "Revision {revision} · {status}",
+        saving: "Saving…",
+        validate_draft: "Validate draft",
       },
     },
 
@@ -498,7 +524,7 @@
         retained_total: "Uloženo / celkem",
       },
       settings: {
-        subtitle: "Pouze navigace a struktura — tento shell nezapisuje nastavení.",
+        subtitle: "Pouze koncepty nastavení a validace — aktivace ani řízení běhu nejsou dostupné.",
         overview: "Přehled nastavení",
         heating_config: "Konfigurace topení",
         heating_config_desc: "Propojení zóny, senzoru a zdroje tepla pro modul topení.",
@@ -512,8 +538,8 @@
         advanced_desc: "Pokročilé možnosti a diagnostika prototypu (rezervováno).",
         placeholder: "Rezervováno",
         note:
-          "Řádek Konfigurace topení odráží skutečný stav připravenosti. Ostatní řádky jsou rezervované; " +
-          "tento shell žádnou konfiguraci nezapisuje.",
+          "Řádek Konfigurace topení odráží skutečný stav připravenosti. Průvodce zapisuje pouze koncepty " +
+          "a validační podklady; ostatní řádky jsou rezervované.",
       },
       language: {
         auto: "Automaticky",
@@ -533,8 +559,7 @@
         validation: "Zprávy validace",
         no_validation: "Nebyly hlášeny žádné zprávy validace.",
         readonly_note:
-          "Nastavení je zde pouze pro čtení: tento shell zobrazuje připravenost a validaci, ale nemění konfiguraci ani neaktivuje. " +
-          "Prototypový průvodce níže používá pouze ukázková data.",
+          "Průvodce zapisuje pouze koncepty nastavení a validační podklady. Neaktivuje konfiguraci ani neovládá zařízení.",
       },
       unavailable: {
         subtitle: "Controlel není připojen ke zdroji Home Assistant Frontend API v1.",
@@ -547,7 +572,7 @@
       },
       panel: {
         tagline: "Platforma pro řízení topení",
-        readonly_footer: "Pouze pro čtení · bez zápisu konfigurace",
+        readonly_footer: "Pouze koncepty nastavení · bez aktivace a řízení běhu",
         overall_status: "Celkový stav",
         load_error: "Panel Controlel se nepodařilo načíst",
         wizard_demo_label:
@@ -653,6 +678,33 @@
         back: "Zpět",
         save_later: "Uložit a dokončit později",
         continue: "Pokračovat",
+        not_discovered: "Zatím nebyl vyžádán žádný snímek objevu.",
+        start_discovery: "Spustit objev",
+        discovering: "Zjišťuji data registrů Home Assistant…",
+        discovery_unavailable: "Objev nastavení není dostupný",
+        draft_unavailable: "Koncept nastavení není dostupný",
+        start_new_draft: "Založit nový koncept",
+        draft: "Koncept",
+        refresh_discovery: "Obnovit objev",
+        no_areas: "Nebyly objeveny žádné oblasti Home Assistant. Koncept zůstává nekompletní.",
+        no_candidates: "Pro tuto roli není dostupné doporučení ani kandidát z backendu.",
+        source_enable_target: "Cíl povolení zdroje tepla",
+        source_disable_target: "Cíl zakázání zdroje tepla",
+        review_persisted_lead:
+          "Zkontrolujte uložený koncept a vyžádejte validaci backendu. Tento postup konfiguraci neaktivuje.",
+        unsaved_report: "Neuložené úpravy nejsou součástí níže zobrazeného validačního protokolu backendu.",
+        blocking_count: "Blokující: {count}",
+        warning_count: "Varování: {count}",
+        validation_preparation:
+          "Validace připravuje pouze tento koncept. Aktivní konfigurace ani stav běhu se nemění.",
+        incomplete_draft: "Nekompletní koncept",
+        draft_complete: "Koncept je kompletní",
+        unsaved_edits: "neuložené úpravy",
+        persisted: "uloženo",
+        saved_revision: "uloženo {time}",
+        revision_status: "Revize {revision} · {status}",
+        saving: "Ukládání…",
+        validate_draft: "Validovat koncept",
       },
     },
   };

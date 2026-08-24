@@ -422,3 +422,136 @@ test("mockToModels keeps unknown heat source physical state unknown", () => {
   assert.equal(models.heating.building.heat_source.physical_state, "unknown");
   assert.equal(models.heating.building.heat_source.permission, "disabled");
 });
+
+// ------------------------------------------------------ setup write client
+
+function discoveryRaw() {
+  return {
+    snapshot_id: "snapshot-real",
+    provider: "home_assistant",
+    provider_instance_id: "ha-instance-real",
+    captured_at: "2026-08-24T12:00:00Z",
+    content_fingerprint: "f".repeat(64),
+    object_counts: { "home_assistant.area": 1, "home_assistant.entity": 2 },
+    objects: [{
+      object_kind: "home_assistant.area",
+      native_id: "living",
+      current_locator: null,
+      identity_quality: "STABLE",
+      device_registry_id: null,
+      area_id: null,
+      floor_id: null,
+    }],
+  };
+}
+
+function setupWriteConnection(handler) {
+  const sent = [];
+  return {
+    sent,
+    sendMessagePromise(message) {
+      sent.push(message);
+      return handler(message);
+    },
+  };
+}
+
+function setupSessionRaw(revision) {
+  return {
+    draft_id: "draft-real",
+    draft_revision: revision,
+    module_instance_id: "main-heating",
+    incomplete: true,
+    activation_ready: false,
+    validation_status: "CURRENT",
+    validation_report_id: "report-real",
+    blocking_issue_count: 1,
+    warning_count: 0,
+    settings: {},
+    selections: [],
+    recommendations: [],
+    validation_issues: [],
+    discovery: discoveryRaw(),
+    canonical_revision_id: null,
+    active_revision_id: null,
+    legacy_configuration: { present: false, conversion_available: false, silently_merged: false, reason_code: null },
+  };
+}
+
+test("setup write client sends the real discovery request and normalizes its response", async () => {
+  const connection = setupWriteConnection((message) => Promise.resolve({
+    setup_write_api_version: 1,
+    operation: "discovery",
+    result: discoveryRaw(),
+  }));
+  const client = CA_API.createSetupWriteClient({ connection, configEntryId: "entry-setup" });
+
+  const snapshot = await client.discover({ snapshot_id: "snapshot-real", captured_at: "2026-08-24T12:00:00Z" });
+
+  assert.equal(snapshot.provider_instance_id, "ha-instance-real");
+  assert.equal(snapshot.object_counts["home_assistant.area"], 1);
+  assert.deepEqual(connection.sent, [{
+    type: "controlel/setup/write/v1/discovery",
+    config_entry_id: "entry-setup",
+    snapshot_id: "snapshot-real",
+    captured_at: "2026-08-24T12:00:00Z",
+  }]);
+});
+
+test("setup write client exposes draft lifecycle only and preserves backend errors", async () => {
+  const connection = setupWriteConnection(() => Promise.reject({
+    code: "setup_conflict",
+    message: "draft revision conflict",
+  }));
+  const client = CA_API.createSetupWriteClient({ connection, configEntryId: "entry-setup" });
+
+  assert.deepEqual(Object.keys(client).sort(), [
+    "discover", "recommendations", "reopenDraft", "startDraft", "updateDraft", "validateDraft",
+  ]);
+  assert.equal(client.activate, undefined);
+  assert.equal(client.canonicalize, undefined);
+  await assert.rejects(
+    client.updateDraft({ draft_id: "draft-1" }),
+    (error) => error instanceof CA_API.ApiError && error.code === "setup_conflict" && error.message === "draft revision conflict"
+  );
+  assert.equal(connection.sent.length, 1, "no fallback or retry request is sent");
+});
+
+test("setup write client sends draft creation and optimistic update requests", async () => {
+  const connection = setupWriteConnection((message) => {
+    const operation = message.type.endsWith("/start") ? "start" : "update";
+    return Promise.resolve({
+      setup_write_api_version: 1,
+      operation,
+      result: setupSessionRaw(operation === "start" ? 1 : 2),
+    });
+  });
+  const client = CA_API.createSetupWriteClient({ connection, configEntryId: "entry-setup" });
+
+  const created = await client.startDraft({
+    draft_id: "draft-real",
+    module_instance_id: "main-heating",
+    created_at: "2026-08-24T12:00:00Z",
+    snapshot_id: "snapshot-real",
+    report_id: "report-1",
+    settings: {},
+    selections: [],
+  });
+  const updated = await client.updateDraft({
+    draft_id: "draft-real",
+    expected_revision: 1,
+    updated_at: "2026-08-24T12:01:00Z",
+    snapshot_id: "snapshot-real",
+    report_id: "report-2",
+    settings: { zone_id: "living" },
+    selections: [],
+  });
+
+  assert.equal(created.draft_revision, 1);
+  assert.equal(updated.draft_revision, 2);
+  assert.equal(connection.sent[0].type, "controlel/setup/write/v1/start");
+  assert.equal(connection.sent[1].type, "controlel/setup/write/v1/update");
+  assert.equal(connection.sent[1].expected_revision, 1);
+  assert.deepEqual(connection.sent[1].settings, { zone_id: "living" });
+  assert.ok(connection.sent.every((message) => message.config_entry_id === "entry-setup"));
+});

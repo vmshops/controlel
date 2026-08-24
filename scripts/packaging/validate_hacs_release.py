@@ -59,6 +59,7 @@ EXPECTED_ARCHIVE_FILES = frozenset(
         "frontend/components.js",
         "frontend/i18n.js",
         "frontend/styles.css",
+        "frontend/wizard.js",
     }
 )
 
@@ -70,7 +71,6 @@ DEV_ONLY_ARCHIVE_FILES = frozenset(
         "frontend/index.html",
         "frontend/wizard.html",
         "frontend/README.md",
-        "frontend/wizard.js",
         "frontend/mock-data.js",
         "frontend/mock-app-data.js",
     }

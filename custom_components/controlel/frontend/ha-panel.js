@@ -8,8 +8,8 @@
  * existing scripts in their original order.
  *
  * Truthfulness / safety (see AGENTS.md):
- *   - The shell stays read-only and uses the existing authenticated Home
- *     Assistant WebSocket connection (`this.hass.connection`).
+ *   - Setup writes are limited to drafts and validation and use the existing
+ *     authenticated Home Assistant WebSocket connection (`this.hass.connection`).
  *   - No custom authentication, transport, or control actions are created.
  *   - If no config entry id is available, the shell renders its truthful
  *     "unavailable" state; it never falls back to mock data silently.
@@ -27,6 +27,7 @@ const SCRIPTS = [
   "i18n.js",
   "api-client.js",
   "components.js",
+  "wizard.js",
   "app.js",
 ];
 const CSS_URL = SCRIPT_BASE + "styles.css";
@@ -82,7 +83,7 @@ function _buildShellDOM() {
       <div id="app-nav" class="app__nav"></div>
       <div class="app__sidebar-footer">
         <p id="app-mode" class="app__mode">Frontend API v1</p>
-        <p data-i18n="panel.readonly_footer">Read-only · no configuration writes</p>
+        <p data-i18n="panel.readonly_footer">Setup drafts only · no activation or runtime control</p>
       </div>
     </aside>
 
@@ -93,6 +94,13 @@ function _buildShellDOM() {
       </header>
 
       <main id="view-root" class="app__content"></main>
+
+      <div id="wizard-view" class="app__content app__content--wizard" hidden>
+        <div id="draft-status" class="draft-status" hidden></div>
+        <nav id="stepper" class="stepper" aria-label="Setup steps"></nav>
+        <section id="step-panel" class="step-panel" aria-live="polite"></section>
+        <footer id="wizard-footer" class="wizard-footer"></footer>
+      </div>
 
     </div>
   `;

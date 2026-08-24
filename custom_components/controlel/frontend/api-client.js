@@ -10,6 +10,8 @@
  * Responsibilities:
  *   - send the four read-only Frontend API v1 commands
  *     (controlel/frontend_api/v1/{overview,heating,diagnostics,setup});
+ *   - send the non-activating Setup Write API v1 discovery, recommendation,
+ *     draft, reopen, update, and validation commands;
  *   - normalize + validate each response into a stable model shape
  *     (unknown/null backend values stay null — nothing is invented);
  *   - expose a data source with explicit per-domain states:
@@ -29,6 +31,15 @@
     heating: "controlel/frontend_api/v1/heating",
     diagnostics: "controlel/frontend_api/v1/diagnostics",
     setup: "controlel/frontend_api/v1/setup",
+  };
+
+  const SETUP_WRITE_COMMANDS = {
+    discovery: "controlel/setup/write/v1/discovery",
+    recommendations: "controlel/setup/write/v1/recommendations",
+    start: "controlel/setup/write/v1/start",
+    reopen: "controlel/setup/write/v1/reopen",
+    update: "controlel/setup/write/v1/update",
+    validate: "controlel/setup/write/v1/validate",
   };
 
   const DOMAINS = Object.keys(COMMANDS);
@@ -328,6 +339,160 @@
     };
   }
 
+  // ------------------------------------------------------ setup write client
+
+  function normalizeDiscoverySnapshot(raw) {
+    const r = _obj(raw, "setup discovery");
+    const counts = _obj(r.object_counts, "setup discovery.object_counts");
+    return {
+      snapshot_id: r.snapshot_id,
+      provider: r.provider,
+      provider_instance_id: r.provider_instance_id,
+      captured_at: _strOrNull(r.captured_at),
+      content_fingerprint: r.content_fingerprint,
+      object_counts: { ...counts },
+      objects: _arr(r.objects, "setup discovery.objects").map((item) => ({
+        ..._obj(item, "setup discovery object"),
+      })),
+    };
+  }
+
+  function normalizeCandidate(raw) {
+    const r = _obj(raw, "setup candidate");
+    return {
+      candidate_id: r.candidate_id,
+      role: r.role,
+      native_id: _strOrNull(r.native_id),
+      current_locator: _strOrNull(r.current_locator),
+      identity_quality: r.identity_quality,
+      area_id: _strOrNull(r.area_id),
+      floor_id: _strOrNull(r.floor_id),
+      capabilities: _arr(r.capabilities, "setup candidate.capabilities").slice(),
+      confidence: r.confidence,
+      reason_codes: _arr(r.reason_codes, "setup candidate.reason_codes").slice(),
+      evidence: { ..._obj(r.evidence, "setup candidate.evidence") },
+    };
+  }
+
+  function normalizeRecommendations(raw) {
+    return _arr(raw, "setup recommendations").map((item) => {
+      const r = _obj(item, "setup recommendation");
+      return {
+        role: r.role,
+        recommended: r.recommended === null ? null : normalizeCandidate(r.recommended),
+        alternatives: _arr(r.alternatives, "setup recommendation.alternatives").map(normalizeCandidate),
+        explicit_confirmation_required: Boolean(r.explicit_confirmation_required),
+      };
+    });
+  }
+
+  function normalizeSetupSession(raw) {
+    const r = _obj(raw, "setup session");
+    return {
+      ...r,
+      draft_id: r.draft_id,
+      draft_revision: r.draft_revision,
+      settings: { ..._obj(r.settings, "setup session.settings") },
+      selections: _arr(r.selections, "setup session.selections").map((item) => ({
+        ..._obj(item, "setup session selection"),
+      })),
+      recommendations: normalizeRecommendations(r.recommendations),
+      validation_issues: _arr(r.validation_issues, "setup session.validation_issues").map((item) => ({
+        ..._obj(item, "setup validation issue"),
+      })),
+      discovery: normalizeDiscoverySnapshot(r.discovery),
+      canonical_revision_id: _strOrNull(r.canonical_revision_id),
+      active_revision_id: _strOrNull(r.active_revision_id),
+    };
+  }
+
+  const SETUP_RESULT_NORMALIZERS = {
+    discovery: normalizeDiscoverySnapshot,
+    recommendations: normalizeRecommendations,
+    start: normalizeSetupSession,
+    reopen: normalizeSetupSession,
+    update: normalizeSetupSession,
+    validate: normalizeSetupSession,
+  };
+
+  /**
+   * Create the authenticated, setup-only write client. It exposes draft and
+   * validation operations only: there is deliberately no canonicalize,
+   * activate, runtime, or Home Assistant service-call method.
+   */
+  function createSetupWriteClient({ connection, configEntryId, timeoutMs = 15000 }) {
+    if (!connection || typeof connection.sendMessagePromise !== "function") {
+      throw new ApiError("disconnected", "No Home Assistant connection is available");
+    }
+    if (typeof configEntryId !== "string" || configEntryId.length === 0) {
+      throw new ApiError("disconnected", "A Controlel config_entry_id is required");
+    }
+
+    function call(operation, payload) {
+      return new Promise((resolve, reject) => {
+        let settled = false;
+        const timer = setTimeout(() => {
+          fail(new ApiError("timeout", "The setup request timed out before a response arrived", "setup"));
+        }, timeoutMs);
+
+        function fail(error) {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          reject(error);
+        }
+
+        function succeed(value) {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          resolve(value);
+        }
+
+        const message = {
+          ...(payload && typeof payload === "object" ? payload : {}),
+          type: SETUP_WRITE_COMMANDS[operation],
+          config_entry_id: configEntryId,
+        };
+        try {
+          connection.sendMessagePromise(message).then(
+            (raw) => {
+              try {
+                const envelope = _obj(raw, `setup ${operation} response`);
+                if (envelope.setup_write_api_version !== 1 || envelope.operation !== operation) {
+                  throw new ApiError("invalid_response", `Unsupported setup ${operation} response`, "setup");
+                }
+                succeed(SETUP_RESULT_NORMALIZERS[operation](envelope.result));
+              } catch (error) {
+                fail(error instanceof ApiError ? error : new ApiError("invalid_response", "Unexpected setup response shape", "setup"));
+              }
+            },
+            (error) => {
+              const messageText =
+                (error && error.error && error.error.message) ||
+                (error && error.message) ||
+                "The setup request failed";
+              const apiError = new ApiError("error", messageText, "setup");
+              apiError.code = (error && error.code) || (error && error.error && error.error.code) || null;
+              fail(apiError);
+            }
+          );
+        } catch (error) {
+          fail(new ApiError("disconnected", (error && error.message) || String(error), "setup"));
+        }
+      });
+    }
+
+    return {
+      discover: (request) => call("discovery", request),
+      recommendations: (request) => call("recommendations", request),
+      startDraft: (request) => call("start", request),
+      reopenDraft: (request) => call("reopen", request),
+      updateDraft: (request) => call("update", request),
+      validateDraft: (request) => call("validate", request),
+    };
+  }
+
   // ------------------------------------------------- environment detect
 
   /**
@@ -533,6 +698,7 @@
 
   global.CA_API = {
     COMMANDS,
+    SETUP_WRITE_COMMANDS,
     DOMAINS,
     SEVERITY_LEVEL,
     ApiError,
@@ -540,7 +706,11 @@
     normalizeHeating,
     normalizeDiagnostics,
     normalizeSetup,
+    normalizeDiscoverySnapshot,
+    normalizeRecommendations,
+    normalizeSetupSession,
     createFrontendApiClient,
+    createSetupWriteClient,
     detectHaEnvironment,
     createRealDataSource,
     mockToModels,

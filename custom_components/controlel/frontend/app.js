@@ -7,8 +7,8 @@
  *   - rendering the Overview / Modules / Heating / Diagnostics / Settings /
  *     Setup views from the Frontend API v1 adapter (api-client.js) using the
  *     reusable CW components;
- *   - hosting the existing setup wizard (wizard.js) as part of the "Setup"
- *     view, clearly labeled as a prototype/demo flow.
+ *   - hosting the real setup-only wizard (wizard.js) as part of the "Setup"
+ *     view without exposing activation or runtime control.
  *
  * Truthfulness (see AGENTS.md):
  *   - every view section shows an explicit state: loading / loaded / error;
@@ -956,12 +956,14 @@
     );
     let mode;
     let dataSource = null;
+    let setupWriteClient = null;
 
     if (env.available) {
       mode = "real";
       try {
         const client = CA_API.createFrontendApiClient({ connection: env.connection, configEntryId: env.configEntryId });
         dataSource = CA_API.createRealDataSource(client);
+        setupWriteClient = CA_API.createSetupWriteClient({ connection: env.connection, configEntryId: env.configEntryId });
       } catch (_err) {
         mode = "unavailable";
         dataSource = null;
@@ -983,6 +985,15 @@
       modeRoot: _findById(root, "app-mode"),
       renderRoot: root,
     });
+
+    if (setupWriteClient && global.CA_WIZARD && typeof global.CA_WIZARD.createSetupWizard === "function") {
+      app.setupWizard = global.CA_WIZARD.createSetupWizard({
+        client: setupWriteClient,
+        configEntryId: env.configEntryId,
+        root,
+        storage: global.localStorage || null,
+      });
+    }
 
     // Hash routing: deep links + back/forward (re-entrant, see above).
     _setupHashRouting(app);

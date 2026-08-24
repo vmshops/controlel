@@ -27,7 +27,6 @@ const { Element, documentStub } = require("./dom-stub");
 global.document = documentStub;
 
 require("../i18n.js");
-require("../mock-data.js");
 require("../mock-app-data.js");
 require("../api-client.js");
 require("../components.js");
@@ -474,11 +473,16 @@ test("wizard renders in Czech with truthful binding semantics", async () => {
 
     globalThis.window = globalThis;
     require("../wizard.js");
+    globalThis.CA_WIZARD.createSetupWizard({
+      client: {},
+      root,
+      configEntryId: "entry-cs",
+    });
 
     assert.ok(panel.textContent.includes("Souhrn objevu v Home Assistant"), "Czech discovery title");
     assert.ok(footer.findButton("Uložit a dokončit později"), "Czech save-later action");
     assert.ok(footer.findButton("Pokračovat"), "Czech continue action");
-    assert.ok(draftStatus.textContent.includes("Nekompletní"), "Czech incomplete status");
-    assert.ok(draftStatus.textContent.includes("3 blokujících"), "Czech blocking count");
+    assert.ok(panel.textContent.includes("Spustit objev"), "real discovery action is explicit and translated");
+    assert.equal(panel.textContent.includes("Living Room"), false, "mock discovery data is not rendered");
   });
 });

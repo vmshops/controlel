@@ -11,7 +11,7 @@
  *   - command / reported / physical states remain distinct
  *   - no silent mock fallback on a failed real request
  *   - explicit demo mode and unavailable mode
- *   - preserved wizard behavior (wizard.js unchanged)
+ *   - setup navigation remains separate from runtime views
  */
 "use strict";
 
@@ -28,7 +28,6 @@ global.document = documentStub;
 // default instance resolves to English, so the canonical English assertions
 // below exercise the real translation path.
 require("../i18n.js");
-require("../mock-data.js");
 require("../mock-app-data.js");
 require("../api-client.js");
 require("../components.js");
@@ -595,49 +594,4 @@ test("bootstrap resolves shell nodes inside the supplied shadow root", async () 
   assert.equal(decoyNav.children.length, 0, "outer document navigation was untouched");
   assert.equal(decoyView.children.length, 0, "outer document view was untouched");
   assert.equal(decoyMode.textContent, "", "outer document mode label was untouched");
-});
-
-// ------------------------------------------------------- preserved wizard
-
-test("wizard (preserved) renders steps, footer actions and incomplete status", () => {
-  const root = new Element("div");
-  const draftStatus = new Element("div"); draftStatus.id = "draft-status";
-  const stepper = new Element("nav"); stepper.id = "stepper";
-  const panel = new Element("section"); panel.id = "step-panel";
-  const footer = new Element("footer"); footer.id = "wizard-footer";
-  root.append(draftStatus, stepper, panel, footer);
-  documentStub._root = root;
-
-  // wizard.js reads window.CW / window.MOCK_SETUP_DATA.
-  globalThis.window = globalThis;
-  require("../wizard.js");
-
-  // Stepper: 4 steps, step 1 current.
-  assert.equal(stepper.findAll("stepper__step").length, 4);
-  assert.equal(stepper.findAll("stepper__step--current").length, 1);
-
-  // Step 1 content rendered.
-  assert.ok(panel.textContent.includes("Home Assistant discovery summary"));
-
-  // Footer: Save and finish later is always available; primary is Continue on step 1.
-  assert.ok(footer.findButton("Save and finish later"), "Save and finish later available");
-  assert.ok(footer.findButton("Continue"), "Continue available on step 1");
-  assert.equal(footer.findButton("Activate"), null, "incomplete draft cannot activate");
-
-  // Draft status shows incomplete with blocking count.
-  assert.ok(draftStatus.textContent.includes("Incomplete"));
-  assert.ok(draftStatus.textContent.includes("3 blocking"));
-});
-
-test("wizard: saving the draft keeps it incomplete (no activation)", () => {
-  // The wizard already rendered in the previous test (same stub DOM).
-  const footer = documentStub.getElementById("wizard-footer");
-  const panel = documentStub.getElementById("step-panel");
-  const draftStatus = documentStub.getElementById("draft-status");
-
-  footer.findButton("Save and finish later").dispatch("click");
-  assert.ok(draftStatus.textContent.includes("Saved"), "draft save time shown");
-  assert.ok(draftStatus.textContent.includes("Incomplete"), "still incomplete after save");
-  assert.equal(footer.findButton("Activate"), null, "still cannot activate");
-  assert.ok(panel.textContent.length > 0, "panel still rendered");
 });

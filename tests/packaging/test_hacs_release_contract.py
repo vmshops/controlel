@@ -32,7 +32,6 @@ def test_hacs_source_contract_is_exact() -> None:
         "frontend/index.html",
         "frontend/wizard.html",
         "frontend/README.md",
-        "frontend/wizard.js",
         "frontend/mock-data.js",
         "frontend/mock-app-data.js",
     } & set(files)
@@ -40,7 +39,11 @@ def test_hacs_source_contract_is_exact() -> None:
     panel_source = files["frontend/ha-panel.js"].decode("utf-8")
     assert "mock-data.js" not in panel_source
     assert "mock-app-data.js" not in panel_source
-    assert '"wizard.js"' not in panel_source
+    assert '"wizard.js"' in panel_source
+    wizard_source = files["frontend/wizard.js"].decode("utf-8")
+    assert "MOCK_SETUP_DATA" not in wizard_source
+    assert ".activate(" not in wizard_source
+    assert ".canonicalize(" not in wizard_source
     assert json.loads((ROOT / "hacs.json").read_text(encoding="utf-8")) == EXPECTED_HACS_MANIFEST
 
 

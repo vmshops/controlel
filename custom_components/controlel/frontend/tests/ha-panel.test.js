@@ -79,6 +79,10 @@ test("custom panel forwards HA lifecycle properties and scopes CSS to its shadow
   assert.equal(bootstrapCalls[0].narrow, true);
   assert.equal(bootstrapCalls[0].route, route);
   assert.equal(panel.hasAttribute("narrow"), true);
+  assert.ok(
+    documentStub.head.children.some((node) => node.src === "/controlel_static/wizard.js"),
+    "the real setup wizard asset is loaded by the panel"
+  );
 
   const shadowLinks = panel.shadowRoot.children.filter((node) => node.tagName === "LINK");
   const documentLinks = documentStub.head.children.filter((node) => node.tagName === "LINK");

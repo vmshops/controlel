@@ -19,7 +19,7 @@
       <div id="app-nav" class="app__nav"></div>
       <div class="app__sidebar-footer">
         <p id="app-mode" class="app__mode">Frontend API v1</p>
-        <p data-i18n="panel.readonly_footer">Read-only · no configuration writes</p>
+        <p data-i18n="panel.readonly_footer">Setup drafts only · no activation or runtime control</p>
       </div>
     </aside>
 
@@ -31,11 +31,8 @@
 
       <main id="view-root" class="app__content"></main>
 
-      <!-- Setup view: the existing wizard renders into these containers (wizard.js). -->
+      <!-- Setup view: wizard.js consumes the real Setup Write API v1 contract. -->
       <div id="wizard-view" class="app__content app__content--wizard" hidden>
-        <div class="note note--info" id="wizard-demo-label" data-i18n="panel.wizard_demo_label">
-          Prototype setup flow (demo data only) — real setup readiness is shown above. Activation is not implemented.
-        </div>
         <div id="draft-status" class="draft-status" hidden></div>
         <nav id="stepper" class="stepper" aria-label="Setup steps"></nav>
         <section id="step-panel" class="step-panel" aria-live="polite"></section>
@@ -45,7 +42,6 @@
   </div>
 
   <script src="i18n.js"></script>
-  <script src="mock-data.js"></script>
   <script src="mock-app-data.js"></script>
   <script src="api-client.js"></script>
   <script src="components.js"></script>
