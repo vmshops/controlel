@@ -49,6 +49,7 @@ EXPECTED_ARCHIVE_FILES = frozenset(
         "scheduler.py",
         "sensor.py",
         "setup_backend.py",
+        "setup_write_websocket.py",
         "strings.json",
         "translations/en.json",
         # Runtime frontend assets required by the HA panel (see panel.py).

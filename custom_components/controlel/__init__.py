@@ -61,12 +61,14 @@ else:
 
 
 async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
-    """Register the authenticated process-wide read-only transport."""
+    """Register the authenticated process-wide integration transports."""
 
     from .frontend_api_websocket import async_register_frontend_api_v1
+    from .setup_write_websocket import async_register_setup_write_api_v1
 
     del config
     async_register_frontend_api_v1(hass)
+    async_register_setup_write_api_v1(hass)
     return True
 
 
