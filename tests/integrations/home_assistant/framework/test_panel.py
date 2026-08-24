@@ -13,8 +13,6 @@ connection. No control actions, new endpoints, or custom authentication are
 introduced.
 """
 
-from pathlib import Path
-
 import pytest
 from homeassistant.components import frontend
 from homeassistant.setup import async_setup_component
@@ -22,14 +20,13 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.controlel.const import DOMAIN
 from custom_components.controlel.panel import (
+    _STATIC_PATH_REGISTERED_KEY,
     FRONTEND_DIR,
     FRONTEND_MODULE_URL,
     FRONTEND_SIDEBAR_ICON,
     FRONTEND_SIDEBAR_TITLE,
-    FRONTEND_STATIC_URL_BASE,
     FRONTEND_URL_PATH,
     FRONTEND_WEBCOMPONENT_NAME,
-    _STATIC_PATH_REGISTERED_KEY,
 )
 
 # The shell files that must be present for the panel to load.
@@ -68,9 +65,7 @@ def _static_path_registered(hass) -> bool:
 
 
 @pytest.mark.asyncio
-async def test_panel_registered_with_correct_module_url_and_config(
-    hass, entry_data, http_component
-) -> None:
+async def test_panel_registered_with_correct_module_url_and_config(hass, entry_data, http_component) -> None:
     """Setting up a config entry registers the Controlel sidebar panel."""
     entry = MockConfigEntry(domain=DOMAIN, title="Living room", data=entry_data)
     entry.add_to_hass(hass)
@@ -144,9 +139,7 @@ async def test_reload_does_not_duplicate_panel(hass, entry_data, http_component)
 
 
 @pytest.mark.asyncio
-async def test_panel_registration_failure_is_not_fatal(
-    hass, entry_data
-) -> None:
+async def test_panel_registration_failure_is_not_fatal(hass, entry_data) -> None:
     """Without the http component the integration still sets up (panel is a
     UI convenience, not a core requirement)."""
     entry = MockConfigEntry(domain=DOMAIN, title="Living room", data=entry_data)

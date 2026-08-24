@@ -293,9 +293,7 @@ async def async_setup_entry(
     try:
         await async_register_controlel_panel(hass, entry.entry_id)
     except Exception:
-        LOGGER.exception(
-            "Controlel panel registration failed; the integration remains functional"
-        )
+        LOGGER.exception("Controlel panel registration failed; the integration remains functional")
     return True
 
 

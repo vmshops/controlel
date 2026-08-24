@@ -249,6 +249,52 @@ def test_unknown_values_remain_unknown_and_dispatch_is_not_physical_confirmation
     assert source["command_outcome"] == "dispatched"
 
 
+def test_deferred_and_held_outcomes_remain_distinct_from_state_evidence() -> None:
+    events = tuple(
+        OperationalEventEvidenceV1(
+            event_id=f"event:{index}",
+            timestamp=NOW + timedelta(seconds=index),
+            category="source_control",
+            severity="info",
+            event_code=f"source_command_{outcome}",
+            summary_code=f"source_command_{outcome}",
+            reason_code=None,
+            scope=ScopeV1(type="source", source_id="source:shared"),
+            requested_command="enable",
+            command_outcome=outcome,
+        )
+        for index, outcome in enumerate(("deferred", "held"), start=1)
+    )
+
+    for outcome in ("deferred", "held"):
+        evidence = FrontendApiEvidenceV1(
+            system=SystemEvidenceV1(status="active", operating_mode="NORMAL"),
+            building=BuildingEvidenceV1(
+                heat_source=HeatSourceEvidenceV1(
+                    permission="disabled",
+                    requested_command="enable",
+                    command_outcome=outcome,
+                    reported_state="UNKNOWN",
+                )
+            ),
+            event_stream=EventStreamEvidenceV1(events=events, total_emitted=2),
+        )
+        provider = _provider(evidence)
+        source = frontend_response_to_dict(provider.heating())["building"]["heat_source"]
+        recent_events = frontend_response_to_dict(provider.diagnostics())["recent_events"]
+        event_outcomes = {item["command"]["outcome"] for item in recent_events}
+
+        assert source == {
+            "permission": "disabled",
+            "requested_command": "enable",
+            "command_outcome": outcome,
+            "reported_state": "UNKNOWN",
+            "physical_state": "unknown",
+            "last_decision_summary": None,
+        }
+        assert event_outcomes == {"deferred", "held"}
+
+
 def test_stable_ids_are_ordered_and_raw_entity_locator_cannot_leak_as_identity() -> None:
     evidence = _normal_evidence()
     provider = _provider(

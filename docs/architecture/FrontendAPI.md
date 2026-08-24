@@ -1,11 +1,11 @@
 # Frontend API v1
 
-Status: Architecture design (no implementation)
+Status: Implemented read-only contract
 
-This document defines the first stable contract between a future Controlel
-frontend and the Controlel backend. It is a boundary definition only: no
-endpoints, no frontend code, and no backend code are introduced by this
-document.
+This document defines the first stable contract between Controlel frontends
+and the Controlel backend. Core provides the immutable v1 DTOs and passive
+provider; the Home Assistant adapter exposes the four read-only domains over
+its authenticated WebSocket transport.
 
 ## 1. Purpose
 
@@ -120,8 +120,10 @@ Building level (one shared heat source):
 - `building.heat_source.requested_command` — `enable`, `disable`, or
   `null` (no command requested).
 - `building.heat_source.command_outcome` — `dispatched`, `failed`,
-  `suppressed`, or `null`. A successful dispatch proves only that an
-  adapter call returned successfully.
+  `suppressed`, `deferred`, `held`, or `null`. `deferred` means execution
+  was postponed for a known control or protection deadline; `held` means it
+  was intentionally not dispatched under the current authority or resilience
+  state. None of these outcomes is physical confirmation.
 - `building.heat_source.reported_state` — what the controller reported:
   `ENABLED`, `DISABLED`, `UNKNOWN`, `UNAVAILABLE`.
 - `building.heat_source.physical_state` — always `unknown` in v1 unless a

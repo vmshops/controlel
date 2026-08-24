@@ -123,6 +123,15 @@ from controlel.infrastructure.home_assistant import (
     HomeAssistantDiscoveryAdapter,
     HomeAssistantSetupRepository,
 )
+from controlel.frontend_api.v1 import (
+    FRONTEND_API_VERSION,
+    BuildingEvidenceV1,
+    FrontendApiEvidenceV1,
+    FrontendApiProviderV1,
+    HeatSourceEvidenceV1,
+    SystemEvidenceV1,
+    frontend_response_to_dict,
+)
 
 expected_version = os.environ["CONTROLEL_EXPECTED_VERSION"]
 repository_root = Path(os.environ["CONTROLEL_REPOSITORY_ROOT"]).resolve()
@@ -277,6 +286,53 @@ assert hasattr(HeatingSetupHostService, "canonicalize_heating_draft")
 assert not hasattr(HeatingSetupHostService, "activate")
 assert not hasattr(HeatingSetupHostService, "activate_heating_draft")
 assert not any(name == "homeassistant" or name.startswith("homeassistant.") for name in sys.modules)
+
+frontend_api_contracts = (
+    BuildingEvidenceV1,
+    FrontendApiEvidenceV1,
+    FrontendApiProviderV1,
+    HeatSourceEvidenceV1,
+    SystemEvidenceV1,
+    frontend_response_to_dict,
+)
+for contract in frontend_api_contracts:
+    module_path = Path(importlib.import_module(contract.__module__).__file__).resolve()
+    assert module_path.is_relative_to(package_path.parent)
+assert FRONTEND_API_VERSION == 1
+
+class FrontendEvidenceSource:
+    def snapshot(self):
+        return FrontendApiEvidenceV1(
+            system=SystemEvidenceV1(status="active", operating_mode="NORMAL"),
+            building=BuildingEvidenceV1(
+                heat_source=HeatSourceEvidenceV1(
+                    permission="unknown",
+                    command_outcome="held",
+                    reported_state="UNKNOWN",
+                )
+            ),
+        )
+
+class FrontendClock:
+    def now(self):
+        return datetime(2026, 1, 1, tzinfo=UTC)
+
+frontend_provider = FrontendApiProviderV1(source=FrontendEvidenceSource(), clock=FrontendClock())
+frontend_payloads = tuple(
+    frontend_response_to_dict(response)
+    for response in (
+        frontend_provider.overview(),
+        frontend_provider.heating(),
+        frontend_provider.diagnostics(),
+        frontend_provider.setup(),
+    )
+)
+frontend_heating = frontend_payloads[1]
+assert all(payload["frontend_api_version"] == 1 for payload in frontend_payloads)
+assert frontend_heating["building"]["heat_source"]["command_outcome"] == "held"
+assert frontend_heating["building"]["heat_source"]["reported_state"] == "UNKNOWN"
+assert frontend_heating["building"]["heat_source"]["physical_state"] == "unknown"
+
 activity_notification_planner = NotificationPlanner(
     NotificationPolicy(
         enabled=True,

@@ -196,6 +196,10 @@ def _requested_command(value: str | None) -> str | None:
 def _command_outcome(value: CommandOutcome) -> str | None:
     if value is CommandOutcome.DISPATCHED:
         return "dispatched"
+    if value is CommandOutcome.DEFERRED:
+        return "deferred"
+    if value is CommandOutcome.HELD:
+        return "held"
     if value in {CommandOutcome.FAILED_RECOVERABLE, CommandOutcome.FAILED_FATAL}:
         return "failed"
     if value in {CommandOutcome.SUPPRESSED, CommandOutcome.SUPPRESSED_DUPLICATE}:
@@ -276,6 +280,10 @@ def _event(item: OperationalEvent) -> OperationalEventEvidenceV1:
 def _event_command_outcome(value: str | None) -> str | None:
     if value == "dispatched":
         return "dispatched"
+    if value == "deferred":
+        return "deferred"
+    if value == "held":
+        return "held"
     if value == "failed":
         return "failed"
     if value in {"suppressed", "suppressed_duplicate"}:

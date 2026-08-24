@@ -39,9 +39,7 @@ FRONTEND_SIDEBAR_ICON = "mdi:fire"
 _STATIC_PATH_REGISTERED_KEY = f"{DOMAIN}_static_path_registered"
 
 
-async def async_register_controlel_panel(
-    hass: HomeAssistant, config_entry_id: str
-) -> None:
+async def async_register_controlel_panel(hass: HomeAssistant, config_entry_id: str) -> None:
     """Serve the packaged frontend and register the Controlel sidebar panel.
 
     Idempotent: the static path is registered once per process, and the panel
@@ -49,9 +47,7 @@ async def async_register_controlel_panel(
     duplicate it).
     """
     if not hass.data.get(_STATIC_PATH_REGISTERED_KEY):
-        await hass.http.async_register_static_paths(
-            [StaticPathConfig(FRONTEND_STATIC_URL_BASE, FRONTEND_DIR)]
-        )
+        await hass.http.async_register_static_paths([StaticPathConfig(FRONTEND_STATIC_URL_BASE, FRONTEND_DIR)])
         hass.data[_STATIC_PATH_REGISTERED_KEY] = True
 
     if not frontend.async_panel_exists(hass, FRONTEND_URL_PATH):

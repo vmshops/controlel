@@ -109,6 +109,7 @@ def test_manifest_pins_published_core_and_keeps_version_independent() -> None:
 def test_core_artifact_verification_binds_representative_public_contracts() -> None:
     validator = (ROOT / "scripts" / "packaging" / "validate_artifacts.py").read_text(encoding="utf-8")
     clean_install = (ROOT / "scripts" / "packaging" / "verify_clean_install.py").read_text(encoding="utf-8")
+    public_core = (ROOT / "scripts" / "ci" / "verify_public_core.py").read_text(encoding="utf-8")
 
     required_contracts = {
         "SourceOwnership",
@@ -172,8 +173,25 @@ def test_core_artifact_verification_binds_representative_public_contracts() -> N
         "HeatingSetupSessionDTO",
         "HomeAssistantDiscoveryAdapter",
         "HomeAssistantSetupRepository",
+        "FRONTEND_API_VERSION",
+        "FrontendApiEvidenceV1",
+        "FrontendApiProviderV1",
+        "HeatSourceEvidenceV1",
+        "BuildingEvidenceV1",
+        "SystemEvidenceV1",
+        "frontend_response_to_dict",
     }
     assert all(contract in clean_install for contract in required_contracts)
+    frontend_api_contracts = {
+        "FRONTEND_API_VERSION",
+        "FrontendApiEvidenceV1",
+        "FrontendApiProviderV1",
+        "HeatSourceEvidenceV1",
+        "BuildingEvidenceV1",
+        "SystemEvidenceV1",
+        "frontend_response_to_dict",
+    }
+    assert all(contract in public_core for contract in frontend_api_contracts)
     for module in (
         "domain/source_control/__init__.py",
         "domain/operating_mode/__init__.py",
@@ -204,6 +222,10 @@ def test_core_artifact_verification_binds_representative_public_contracts() -> N
         "infrastructure/home_assistant/setup_discovery.py",
         "infrastructure/home_assistant/setup_host.py",
         "infrastructure/home_assistant/setup_persistence.py",
+        "frontend_api/__init__.py",
+        "frontend_api/v1/__init__.py",
+        "frontend_api/v1/models.py",
+        "frontend_api/v1/provider.py",
     ):
         assert module in validator
 
@@ -288,6 +310,7 @@ def test_ci_validates_ha_candidate_against_the_exact_public_core() -> None:
 
     assert "tests/domain" in workflow
     assert "tests/application" in workflow
+    assert "tests/frontend_api" in workflow
     assert "tests/infrastructure" in workflow
     assert "tests/architecture" in workflow
     assert "tests/packaging" in workflow

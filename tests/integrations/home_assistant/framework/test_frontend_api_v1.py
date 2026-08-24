@@ -19,7 +19,11 @@ from custom_components.controlel.const import (
     CONF_TEMPERATURE_ENTITY_ID,
     DOMAIN,
 )
-from custom_components.controlel.frontend_api import create_frontend_api_provider_v1
+from custom_components.controlel.frontend_api import (
+    _command_outcome,
+    _event_command_outcome,
+    create_frontend_api_provider_v1,
+)
 from custom_components.controlel.frontend_api_websocket import (
     FRONTEND_API_V1_DIAGNOSTICS,
     FRONTEND_API_V1_HEATING,
@@ -28,6 +32,7 @@ from custom_components.controlel.frontend_api_websocket import (
     FrontendApiRegistryV1,
     register_frontend_api_provider_v1,
 )
+from custom_components.controlel.operational import CommandOutcome
 
 
 async def _read(client, command: str, entry_id: str) -> dict[str, object]:
@@ -53,6 +58,13 @@ def test_registry_supports_multiple_entries_and_stale_safe_cleanup() -> None:
     unregister_second()
     unregister_replacement()
     assert registry.providers == {}
+
+
+def test_bridge_preserves_deferred_and_held_current_and_event_outcomes() -> None:
+    assert _command_outcome(CommandOutcome.DEFERRED) == "deferred"
+    assert _command_outcome(CommandOutcome.HELD) == "held"
+    assert _event_command_outcome("deferred") == "deferred"
+    assert _event_command_outcome("held") == "held"
 
 
 @pytest.mark.asyncio
