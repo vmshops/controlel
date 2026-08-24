@@ -15,7 +15,7 @@ from pathlib import Path, PurePosixPath
 ROOT = Path(__file__).parents[2]
 DOMAIN = "controlel"
 ARCHIVE_FILENAME = "controlel.zip"
-CORE_REQUIREMENT = "controlel==0.12.0"
+CORE_REQUIREMENT = "controlel==0.13.0"
 ISSUE_TRACKER = "https://github.com/vmshops/controlel/issues"
 DOCUMENTATION_URL = "https://github.com/vmshops/controlel"
 HOME_ASSISTANT_VERSION = "2026.7.3"
@@ -56,10 +56,7 @@ EXPECTED_ARCHIVE_FILES = frozenset(
         "frontend/app.js",
         "frontend/api-client.js",
         "frontend/components.js",
-        "frontend/wizard.js",
         "frontend/i18n.js",
-        "frontend/mock-data.js",
-        "frontend/mock-app-data.js",
         "frontend/styles.css",
     }
 )
@@ -72,6 +69,9 @@ DEV_ONLY_ARCHIVE_FILES = frozenset(
         "frontend/index.html",
         "frontend/wizard.html",
         "frontend/README.md",
+        "frontend/wizard.js",
+        "frontend/mock-data.js",
+        "frontend/mock-app-data.js",
     }
 )
 

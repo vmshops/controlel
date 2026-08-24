@@ -20,23 +20,21 @@ The goal is to create a reliable heating controller capable of optimizing comfor
 
 ## Status
 
-Project phase: Core/Home Assistant 0.12.0 release candidate preparation
+Project phase: Home Assistant 0.13.0 release candidate preparation
 
-Published Core package: 0.11.0
-Published Home Assistant integration: 0.11.0
-Repository Core and Home Assistant candidates: 0.12.0
+Published Core package: 0.13.0
+Published Home Assistant integration: 0.12.0
+Repository Home Assistant candidate: 0.13.0
 
-The immutable published integration 0.11.0 continues to depend on published
-Core 0.10.0. The checked-out 0.12.0 integration candidate instead pins exact
-Core `controlel==0.12.0` so it can consume the Setup public boundary. Core
-0.12.0 must be reviewed, tagged, published to PyPI, and provenance-verified
-before the integration candidate may be published.
+The checked-out integration candidate pins exact public Core
+`controlel==0.13.0`. Core 0.13.0 is published on PyPI and independently
+verified against its immutable tag-bound wheel and sdist provenance.
 
-The candidate adds observational anomaly, deterministic Shadow Runtime, and
-Setup / Discovery / Import foundations. Setup remains non-activating: draft,
-validation, and canonicalization operations cannot change active control.
-
-Frontend transport/UI and Setup runtime activation remain future milestones.
+The candidate ships the read-only Frontend API v1 bridge, authenticated Home
+Assistant WebSocket commands, sidebar panel lifecycle, packaged real-data UI,
+and English/Czech localization foundations. Loading, disconnected, error, and
+unknown states are explicit. Production failures never fall back to mock data.
+No write API, Setup runtime activation, or reconciliation is included.
 
 Refer to `release-metadata/releases.yaml` and `docs/releases/` for canonical
 release facts and human-oriented release pages.
@@ -54,7 +52,7 @@ installation flow is:
    **Controlel**.
 
 The currently published integration manifest makes Home Assistant install exact
-public Core `controlel==0.10.0`; users must not install the core manually.
+public Core `controlel==0.12.0`; users must not install the core manually.
 Detailed prerequisites, configuration, safety behavior, manual installation,
 upgrades, removal, and current limitations are in the
 [Home Assistant installation guide](docs/operations/HomeAssistantInstallation.md).
@@ -222,11 +220,11 @@ or control influence. Integration `0.11.0` now hosts this pipeline without
 reimplementing activity composition, policy, de-duplication, rate limits, or
 cursor semantics.
 
-The published integration 0.11.0 requires exact public Core 0.10.0. The
-repository's integration 0.12.0 candidate instead requires exact Core 0.12.0.
-Candidate framework tests install it as a normal local package; before the HA
-candidate is published, they must be rerun against the immutable public Core
-0.12.0 artifact. Users of released integrations do not install Core manually.
+The published integration 0.12.0 requires exact public Core 0.12.0. The
+repository's integration 0.13.0 candidate requires exact public Core 0.13.0.
+Candidate framework tests install that immutable package from PyPI and verify
+its artifact provenance and Frontend API v1 surface. Users of released
+integrations do not install Core manually.
 
 Framework compatibility is tested against Home Assistant `2026.7.3` with
 `pytest-homeassistant-custom-component==0.13.347` on Python 3.14.2 or newer.
@@ -234,20 +232,19 @@ The isolated, hashed environment is defined by `requirements/ha-test.in` and
 `requirements/ha-test.txt`; setup and suite commands are in the
 [development guide](docs/development/DevelopmentGuide.md). The compatibility
 harness is separate from HACS release validation. HACS metadata and
-deterministic release packaging must pass before the unpublished `0.12.0`
+deterministic release packaging must pass before the unpublished `0.13.0`
 candidate may be tagged; no default-store publication exists.
 
 ## Core package artifacts
 
 The reusable core is published as the `controlel` distribution and import
-package. Version `0.11.0` is the latest public immutable release; `0.12.0` is
-the current candidate. The static version source
+package. Version `0.13.0` is the latest public immutable release. The static version source
 and PEP 517 build configuration live in `pyproject.toml`; normal installation
 depends only on Pydantic. Packaging validation builds one wheel and one sdist,
 inspects their contents, and installs the wheel into a clean environment
 outside the checkout.
 
-Core versions `0.1.0`, `0.2.0`, `0.3.0`, `0.4.0`, `0.5.0`, `0.6.0`, `0.7.0`, `0.8.0`, `0.9.0`, `0.10.0`, and `0.11.0` are published on
+Core versions `0.1.0`, `0.2.0`, `0.3.0`, `0.4.0`, `0.5.0`, `0.6.0`, `0.7.0`, `0.8.0`, `0.9.0`, `0.10.0`, `0.11.0`, `0.12.0`, and `0.13.0` are published on
 PyPI and immutable. Future core corrections require a new version; rebuilt artifacts for an already
 published version must never be uploaded.
 Repository packaging CI remains validation-only and contains no publication

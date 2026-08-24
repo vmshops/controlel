@@ -1,8 +1,10 @@
-# Controlel Frontend Prototype
+# Controlel Frontend
 
-A small, self-contained prototype of the Controlel application shell for
-Home Assistant. It is a **design/UX prototype only**: mock data, no backend
-calls, no build step, no external UI framework.
+This directory contains the dependency-free Home Assistant read-only panel and
+its development/demo harness. The production panel uses Home Assistant's
+authenticated WebSocket connection and Frontend API v1. Mock data is available
+only through the standalone development pages and is not packaged in the HACS
+release.
 
 ## Run
 
@@ -53,6 +55,9 @@ step 1 — the draft state is kept in memory for the page session.
 
 | File | Purpose |
 | --- | --- |
+| `ha-panel.js` | Home Assistant panel entrypoint; loads production runtime assets only |
+| `api-client.js` | Authenticated read-only Frontend API v1 client and data adapter |
+| `i18n.js` | English/Czech localization foundation |
 | `index.html` | Application shell entry (all views + hosted wizard) |
 | `wizard.html` | Standalone setup wizard page (original entry point) |
 | `styles.css` | Prototype styling (wizard + app shell) |
@@ -63,6 +68,10 @@ step 1 — the draft state is kept in memory for the page session.
 | `app.js` | App shell: routing, views, mock-data rendering (`CA.*`) |
 | `tests/dom-stub.js` | Minimal DOM stub for Node-based tests |
 | `tests/app.test.js` | Behavior tests (navigation, module status, Continue setup, diagnostics filtering, components, wizard) |
+
+The HACS archive includes `ha-panel.js`, `app.js`, `api-client.js`,
+`components.js`, `i18n.js`, and `styles.css`. It excludes the standalone HTML,
+README, Node tests, prototype wizard, and mock datasets.
 
 ## Tests
 
@@ -80,8 +89,9 @@ actions, incomplete draft cannot activate).
 ## Architecture notes
 
 - **Mock-data boundary**: all mock backend state lives in `mock-data.js` and
-  `mock-app-data.js`. Presentation components only render what the data layer
-  provides; the frontend is not a second source of configuration truth.
+  `mock-app-data.js`. These files are development-only and never ship in the
+  HACS artifact. Real request failures remain explicit errors or disconnected
+  states; they never select mock data.
 - **Truthfulness**: temperatures are sensor *reports*, the heat source state
   is a *permission* state, and unknown stays unknown. A successful command is
   never rendered as physical confirmation.

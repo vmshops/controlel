@@ -39,13 +39,35 @@ releases:
       - "Explicit unknown physical-state semantics without inferring reality from commands or reports"
       - "Command outcomes remain distinct: dispatched, failed, suppressed, deferred, and held"
     compatibility:
-      current_home_assistant_integration: "0.12.0"
+      home_assistant_integration_candidate: "0.13.0"
       python: ">=3.13"
       pydantic: ">=2.0"
     notes:
       - "No write API, activation, reconciliation, or heating/control behavior change is included."
       - "Published PyPI bytes match the deterministic final artifacts bound to core-v0.13.0."
-      - "Home Assistant integration 0.12.0 remains unchanged; a Core 0.13.0 pin requires separate integration work."
+      - "Home Assistant integration 0.13.0 consumes this public boundary through an exact package pin."
+
+  - release_id: controlel-home_assistant-0.13.0
+    component: home_assistant
+    title: "Controlel Home Assistant integration 0.13.0"
+    version: "0.13.0"
+    status: candidate
+    tag: null
+    commit_sha: null
+    summary: "Authenticated read-only Home Assistant panel over public Core Frontend API v1"
+    highlights:
+      - "Frontend API v1 bridge exposed through authenticated read-only Home Assistant WebSocket commands"
+      - "Home Assistant sidebar panel with deterministic setup, reload, and unload lifecycle"
+      - "Packaged real-data UI shell with English and Czech localization foundations"
+      - "Explicit loading, disconnected, error, and unknown states without silent mock fallback"
+    compatibility:
+      required_core: "0.13.0"
+      config_entry_version: 1
+      home_assistant: "2026.7.3"
+    notes:
+      - "Existing version-1 config entries continue using the compatible runtime path without automatic migration."
+      - "The panel and WebSocket surface are read-only; no write APIs, activation, or reconciliation are included."
+      - "The public Core gate is satisfied; the integration remains unpublished pending candidate installation testing and separate release approval."
 
   - release_id: controlel-core-0.12.0
     component: core
@@ -79,7 +101,7 @@ releases:
       - "Module-neutral Setup authority, HA discovery/resolution, and resumable Heating setup host APIs"
       - "Evidence-driven source reconciliation avoids periodic successful-command retries"
     compatibility:
-      home_assistant_integration_candidate: "0.12.0"
+      home_assistant_integration: "0.12.0"
       python: ">=3.13"
       pydantic: ">=2.0"
     notes:
@@ -90,9 +112,10 @@ releases:
     component: home_assistant
     title: "Controlel Home Assistant integration 0.12.0"
     version: "0.12.0"
-    status: candidate
-    tag: null
-    commit_sha: null
+    status: published
+    tag: "v0.12.0"
+    commit_sha: "ae0b7368f2638bf8e9863eecb9f8fe5c016f7054"
+    tagged_at: "2026-08-21T21:24:58+02:00"
     summary: "Host-facing resumable Setup backend over the Core 0.12.0 setup authority"
     highlights:
       - "Read-only HA registry discovery and exact registry-ID resolution"
@@ -103,8 +126,8 @@ releases:
       config_entry_version: 1
     notes:
       - "Existing legacy config entries continue using the unchanged runtime path; settings are never silently merged into canonical Setup."
-      - "No frontend transport/UI or runtime activation is included."
-      - "The public Core gate is satisfied; the integration remains unpublished pending its separate review, tag, and GitHub/HACS release."
+      - "The immutable v0.12.0 release predates the read-only panel stack delivered by integration 0.13.0."
+      - "Published as an immutable GitHub/HACS integration release."
 
   - release_id: controlel-core-0.11.0
     component: core

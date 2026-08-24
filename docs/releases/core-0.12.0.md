@@ -36,7 +36,7 @@ In short, runtime activation is not exposed in this release.
 
 - Python: 3.13 or newer.
 - Runtime dependency remains only `pydantic>=2.0`.
-- Intended Home Assistant integration candidate: 0.12.0.
+- Published Home Assistant integration: 0.12.0.
 - Immutable annotated Core tag: `core-v0.12.0`, resolving to
   `992b291902318f4f0406c4b368282ff3a7ed4dbf`.
 - Published to PyPI beginning at `2026-08-21T18:47:45.590591Z`.
@@ -45,5 +45,4 @@ In short, runtime activation is not exposed in this release.
 - Sdist: `controlel-0.12.0.tar.gz`, 160,765 bytes, SHA-256
   `6e59c5fae5098a35069458f5c09b2eed8e837cd9a95b7bd7156865a1acdde6a6`.
 - Both public files match the final deterministic artifacts bound to the tag.
-- Home Assistant integration 0.12.0 remains unpublished until its separate
-  validation, review, tag, and GitHub/HACS release steps are complete.
+- Home Assistant integration 0.12.0 is published and immutable from `v0.12.0`.

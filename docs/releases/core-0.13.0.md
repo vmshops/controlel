@@ -37,7 +37,7 @@ physical reality. Command outcomes remain explicit and distinct:
 
 - Python: 3.13 or newer.
 - Runtime dependency remains only `pydantic>=2.0`.
-- Home Assistant integration 0.12.0 remains pinned to public Core 0.12.0.
+- Home Assistant integration 0.13.0 candidate pins public Core 0.13.0 exactly.
 - Immutable annotated Core tag: `core-v0.13.0`, resolving to
   `0fdaaa21341e03e9c01f33acfdac8197929fa841`.
 - Published to PyPI beginning at `2026-08-24T08:54:39.374314Z`.
@@ -46,5 +46,5 @@ physical reality. Command outcomes remain explicit and distinct:
 - Sdist: `controlel-0.13.0.tar.gz`, 165,233 bytes, SHA-256
   `001e69c0f0fd3bdfeecc751472689d2d59d27b6f8ff0e4b3cde7d3b1cd08c164`.
 - Both public files match the final deterministic artifacts bound to the tag.
-- Home Assistant integration 0.12.0 remains unchanged; pinning Core 0.13.0 is
-  separate integration work.
+- Home Assistant integration 0.13.0 consumes this public boundary through an
+  independently verified public-package composition.

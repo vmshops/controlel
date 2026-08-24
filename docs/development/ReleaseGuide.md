@@ -9,14 +9,13 @@ Unknown physical state remains explicit, and command outcomes remain distinct
 as `dispatched`, `failed`, `suppressed`, `deferred`, or `held`.
 
 This Core release adds no write API, activation, reconciliation, or change to
-heating/control behavior. Home Assistant integration `0.12.0` remains pinned to
-published Core `0.12.0`; moving that pin is separate integration work.
+heating/control behavior. The Home Assistant integration `0.13.0` candidate
+pins exact public Core `0.13.0` and verifies that composition independently.
 
-## Published Core 0.12.0 and Home Assistant 0.12.0 candidate
+## Published Core and Home Assistant 0.12.0
 
 Core `0.12.0` is published and immutable from `core-v0.12.0`. Home Assistant
-integration `0.11.0` remains the current published integration from `v0.11.0`;
-integration `0.12.0` is the next release candidate.
+integration `0.12.0` is published and immutable from `v0.12.0`.
 
 Core 0.12.0 packages the observational anomaly, deterministic Shadow Runtime,
 and Setup / Discovery / Import foundations. Its Setup public boundary includes
@@ -29,19 +28,10 @@ validation, readiness, and inactive canonicalization. It deliberately exposes
 no runtime activation operation.
 
 Integration 0.12.0 pins exact `controlel==0.12.0`. Existing version-1 config
-entries and the legacy runtime path remain compatible; this candidate does not
+entries and the legacy runtime path remain compatible; the release does not
 silently convert or merge them with canonical Setup. No config-entry migration
-is required. Legacy conversion, frontend transport/UI, and runtime activation
-are separate future changes.
-
-The publication order is mandatory:
-
-Steps 1-4 are complete: repository HA CI now installs public immutable
-`controlel==0.12.0` with `--no-cache-dir`, verifies its wheel and sdist
-identities, and checks the installed Setup API surface from `site-packages`.
-The remaining step is to review and tag `v0.12.0`, then publish the validated
-HACS artifact. Integration tagging or upload before final HA review remains
-prohibited.
+is required. The read-only panel and Frontend API v1 composition belong to the
+separate integration 0.13.0 release boundary.
 
 ## Core 0.11.0 M31C.1 heating-performance assessment foundation
 
@@ -276,7 +266,7 @@ Controlel uses distinct release states:
 4. **Published core package** is currently immutable `controlel==0.13.0` on
    PyPI.
 5. **Home Assistant exact dependency pin** for the next candidate is
-   `"requirements": ["controlel==0.12.0"]`; the public Core gate is satisfied.
+   `"requirements": ["controlel==0.13.0"]`; the public Core gate is satisfied.
 6. **HACS readiness** additionally requires integration release packaging and
    HACS metadata. A verified or published core wheel alone does not provide
    HACS readiness.
@@ -290,7 +280,7 @@ PyPI and immutable. PyPI versions are immutable; corrections always require a
 higher version.
 
 The current public core release is immutable `0.13.0`. Integration metadata is
-the separate `0.12.0` candidate; its composition checks install and verify the
+the separate `0.13.0` candidate; its composition checks install and verify the
 public package rather than repository source.
 
 The first core release is `0.1.0`. The single authoritative release
@@ -300,8 +290,8 @@ version is the static `project.version` in `pyproject.toml`. Runtime access uses
 `0.0.0+uninstalled`; it never pretends to be a release.
 
 The custom-component manifest version is a separate integration version.
-Integration `0.11.0` is the current published release; the implementation is
-prepared as unpublished candidate `0.12.0` at its separate release boundary.
+Integration `0.12.0` is the current published release; the implementation is
+prepared as unpublished candidate `0.13.0` at its separate release boundary.
 Neither version is a second source for the core package version.
 
 ## Permanent tag namespaces
@@ -616,25 +606,25 @@ must not upload rebuilt artifacts for an already published version.
 
 ## Home Assistant dependency contract
 
-The `0.12.0` candidate pins exactly `controlel==0.12.0`. Its adapter and
+The `0.13.0` candidate pins exactly `controlel==0.13.0`. Its adapter and
 framework public-package jobs install with `--no-cache-dir`, verify both public
-artifact identities and the installed Setup API surface, and never install the
-repository as a distribution. Repository Core source is validated separately
-by domain, application, infrastructure, architecture, packaging, and API tests.
-Normal supported integration installation can obtain the declared core
-automatically.
+artifact identities and the installed Setup and Frontend API v1 surfaces, and
+never install the repository as a distribution. Repository Core source is
+validated separately by domain, application, infrastructure, architecture,
+packaging, and API tests. Normal supported integration installation can obtain
+the declared core automatically.
 
 ## Home Assistant integration release contract
 
 Integration releases use a separate version stream:
 
-- manifest and `INTEGRATION_VERSION`: `0.12.0`;
-- future integration tag: `v0.12.0`;
+- manifest and `INTEGRATION_VERSION`: `0.13.0`;
+- future integration tag: `v0.13.0`;
 - GitHub Release name:
-  `Controlel Home Assistant Integration v0.12.0`;
+  `Controlel Home Assistant Integration v0.13.0`;
 - HACS asset: `controlel.zip`;
 - checksum asset: `controlel.zip.sha256`;
-- exact core dependency: `controlel==0.12.0`.
+- exact core dependency: `controlel==0.13.0`.
 
 The published `v0.6.0` tag is immutable. The unpublished `v0.7.0` candidate was
 never tagged or released. Integration tags always use
@@ -656,9 +646,9 @@ Every remote step requires explicit approval:
 3. Build the archive twice and require byte-identical output.
 4. Run the independent validator and manually inspect the member list.
 5. Record the ZIP SHA-256.
-6. Create annotated tag `v0.12.0` at the reviewed commit.
+6. Create annotated tag `v0.13.0` at the reviewed commit.
 7. Create GitHub Release
-   `Controlel Home Assistant Integration v0.12.0`.
+   `Controlel Home Assistant Integration v0.13.0`.
 8. Attach `controlel.zip` and `controlel.zip.sha256`; download them again and
    verify their hashes.
 9. Install through HACS in a clean supported Home Assistant instance.

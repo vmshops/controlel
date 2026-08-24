@@ -199,11 +199,12 @@ Do not add Windows-specific compatibility hacks for Home Assistant tests, includ
 - asyncio/event-loop policy changes
 - pytest/conftest changes whose only purpose is native Windows compatibility
 
-For current Frontend API development, use the local editable Controlel source installed in the canonical WSL environment.
+For local Frontend API development, use the local editable Controlel source installed in the canonical WSL environment.
 
-Published Core `0.12.0` does not contain Frontend API v1.
-A failure of the public-composition tests for that specific reason is a known release dependency pending Core `0.13.0`.
-Do not bypass, weaken, or rewrite public-composition tests to hide that dependency.
+Published Core `0.13.0` contains Frontend API v1. Home Assistant 0.13.0
+public-composition tests must install exact `controlel==0.13.0` from PyPI and
+verify its published artifact identities and imported public surface.
+Do not bypass, weaken, or rewrite public-composition tests.
 
 If a Home Assistant test fails:
 1. reproduce it using the canonical WSL runner;

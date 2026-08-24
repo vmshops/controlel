@@ -6,15 +6,15 @@ The ordinary development environment deliberately has no Home Assistant
 dependency. Use these separate suites:
 
 ```text
-# A. Repository Core 0.12.0 candidate and release-contract tests
+# A. Repository Core 0.13.0 release-contract tests
 python -m pytest tests/domain tests/application tests/infrastructure \
   tests/architecture tests/packaging
 
-# B. Home Assistant adapter tests with installed Core 0.12.0 candidate
+# B. Home Assistant adapter tests with installed public Core 0.13.0
 python -m pytest tests/integrations/home_assistant \
   --ignore=tests/integrations/home_assistant/framework
 
-# C. Real Home Assistant framework tests with installed Core 0.12.0 candidate
+# C. Real Home Assistant framework tests with installed public Core 0.13.0
 python -m pytest tests/integrations/home_assistant/framework
 ```
 
@@ -32,22 +32,21 @@ python3.14 -m venv .venv-ha
 ./.venv-ha/bin/python -m pip install --upgrade pip
 ./.venv-ha/bin/python -m pip install --require-hashes \
   -r requirements/ha-test.txt
-./.venv-ha/bin/python -m pip install --no-cache-dir .
-CONTROLEL_FRAMEWORK_COMPOSITION=candidate \
+./.venv-ha/bin/python -m pip install --no-cache-dir controlel==0.13.0
+CONTROLEL_FRAMEWORK_COMPOSITION=public \
   ./.venv-ha/bin/python -m pytest \
   tests/integrations/home_assistant/framework
 ```
 
 This environment loads `custom_components/controlel` from the checkout through
-the normal Home Assistant custom-component test mechanism, but imports the core
-from `site-packages`. It must not add `src` to `PYTHONPATH`.
+the normal Home Assistant custom-component test mechanism, but imports exact
+public Core 0.13.0 from `site-packages`. It must not add `src` to `PYTHONPATH`.
 
-Core and integration `0.11.0` are published and immutable. The repository
-prepares candidate `0.12.0`; both HA suites install that candidate as a normal
-non-editable site-packages distribution and verify it matches the manifest's
-exact `controlel==0.12.0` pin. After Core publication, the HA release gate must
-rerun these suites against the immutable public artifact before integration
-tagging. Suite A remains the independent repository-Core boundary.
+Core `0.13.0` and integration `0.12.0` are published and immutable. The
+repository prepares integration candidate `0.13.0`; both HA suites install
+Core from PyPI as a normal non-editable site-packages distribution and verify
+it matches the manifest's exact `controlel==0.13.0` pin and published artifact
+identities. Suite A remains the independent repository-Core boundary.
 
 Home Assistant 2026.7.3 imports POSIX-only `fcntl` and `resource` modules in
 its pytest bootstrap, so the standard framework command does not run in native
@@ -105,9 +104,9 @@ python3 -m script.hassfest --action validate \
 ```
 
 Framework compatibility is separate from HACS release validation. The candidate
-manifest pins exact Core `controlel==0.12.0`; candidate CI installs the checkout
-as a non-editable package. Public-artifact verification must replace that proof
-after Core publication and before integration tagging.
+manifest pins exact public Core `controlel==0.13.0`; candidate CI installs it
+from PyPI with `--no-cache-dir` and verifies its provenance and public API
+surface before integration tagging.
 
 ## HACS release candidate
 
@@ -115,10 +114,10 @@ Build and independently validate the fixed-name release candidate from the
 repository root:
 
 ```text
-python scripts/packaging/build_hacs_release.py --version 0.12.0
+python scripts/packaging/build_hacs_release.py --version 0.13.0
 python scripts/packaging/validate_hacs_release.py \
   dist/hacs/controlel.zip \
-  --version 0.12.0 \
+  --version 0.13.0 \
   --checksum dist/hacs/controlel.zip.sha256
 ```
 
@@ -133,9 +132,9 @@ rejection behavior. Generated files remain below ignored `dist/hacs/`.
 
 ## Configuration and options development
 
-The implementation and release metadata are prepared as Core and integration
-`0.12.0` candidates. The integration consumes only the new versioned Setup
-boundary and pins exact Core `controlel==0.12.0`.
+Core `0.13.0` is published and immutable. The integration and release metadata
+are prepared as candidate `0.13.0`, consuming the versioned Setup and read-only
+Frontend API v1 boundaries through exact public Core `controlel==0.13.0`.
 
 Anomaly v1 extends the passive M31C development boundary with immutable,
 bounded observation state and transition-oriented operational events. New

@@ -95,14 +95,13 @@ def test_project_version_is_the_only_release_version_source() -> None:
     assert project_version not in package_source
 
 
-def test_manifest_pins_published_core_and_keeps_version_independent() -> None:
+def test_manifest_pins_published_core_and_keeps_release_metadata_independent() -> None:
     manifest = json.loads((ROOT / "custom_components" / "controlel" / "manifest.json").read_text(encoding="utf-8"))
     core_version = load_pyproject()["project"]["version"]
 
     assert core_version == "0.13.0"
-    assert manifest["requirements"] == ["controlel==0.12.0"]
-    assert manifest["version"] == "0.12.0"
-    assert manifest["version"] != core_version
+    assert manifest["requirements"] == ["controlel==0.13.0"]
+    assert manifest["version"] == "0.13.0"
     assert manifest["issue_tracker"] == "https://github.com/vmshops/controlel/issues"
 
 
@@ -254,12 +253,13 @@ def test_setup_backend_uses_the_versioned_public_core_surface_without_activation
 def test_release_metadata_records_published_core_and_unpublished_ha_boundary() -> None:
     metadata = (ROOT / "release-metadata" / "releases.yaml").read_text(encoding="utf-8")
     core_note = (ROOT / "docs" / "releases" / "core-0.13.0.md").read_text(encoding="utf-8")
-    integration_note = (ROOT / "docs" / "releases" / "home-assistant-0.12.0.md").read_text(encoding="utf-8")
+    integration_note = (ROOT / "docs" / "releases" / "home-assistant-0.13.0.md").read_text(encoding="utf-8")
 
     assert "release_id: controlel-core-0.13.0" in metadata
     assert "release_id: controlel-core-0.12.0" in metadata
+    assert "release_id: controlel-home_assistant-0.13.0" in metadata
     assert "release_id: controlel-home_assistant-0.12.0" in metadata
-    assert metadata.count('version: "0.13.0"') == 1
+    assert metadata.count('version: "0.13.0"') == 2
     assert metadata.count('version: "0.12.0"') == 2
     assert metadata.count("status: published") >= 4
     assert metadata.count("status: candidate") >= 1
@@ -271,12 +271,14 @@ def test_release_metadata_records_published_core_and_unpublished_ha_boundary() -
     assert 'commit_sha: "992b291902318f4f0406c4b368282ff3a7ed4dbf"' in metadata
     assert "d8fd95c1534affd4f1c967e6765a8682587e05dc54528b86721332e950aaf78b" in metadata
     assert "6e59c5fae5098a35069458f5c09b2eed8e837cd9a95b7bd7156865a1acdde6a6" in metadata
-    assert 'required_core: "0.12.0"' in metadata
+    assert 'required_core: "0.13.0"' in metadata
     assert "No write endpoints" in core_note
     assert "deferred" in core_note
     assert "held" in core_note
     assert "Both public files match" in core_note
-    assert "Core publication gate is satisfied" in integration_note
+    assert "Frontend API v1" in integration_note
+    assert "authenticated read-only WebSocket" in integration_note
+    assert "No write APIs" in integration_note
 
 
 def test_packaging_tools_are_pinned_and_isolated() -> None:
@@ -328,7 +330,7 @@ def test_ci_validates_ha_candidate_against_the_exact_public_core() -> None:
     assert "home-assistant-framework-public:" in workflow
     assert "home-assistant-candidate:" not in workflow
     assert "CONTROLEL_FRAMEWORK_COMPOSITION: public" in workflow
-    assert workflow.count("python -m pip install --no-cache-dir controlel==0.12.0") == 2
+    assert workflow.count("python -m pip install --no-cache-dir controlel==0.13.0") == 2
     assert workflow.count("python scripts/ci/verify_public_core.py") == 2
     assert workflow.count("--asyncio-mode=auto") == 1
     assert "controlel==0.10.0" not in workflow
@@ -354,12 +356,12 @@ def test_public_core_provenance_records_history_and_current_composition_hash() -
     assert "equivalent to `core-v0.3.0`" in release_guide
     assert wheel_hash in release_guide
     assert sdist_hash in release_guide
-    assert "controlel-0.12.0-py3-none-any.whl" in checker
-    assert "PUBLIC_WHEEL_SIZE = 231_118" in checker
-    assert "d8fd95c1534affd4f1c967e6765a8682587e05dc54528b86721332e950aaf78b" in checker
-    assert "controlel-0.12.0.tar.gz" in checker
-    assert "PUBLIC_SDIST_SIZE = 160_765" in checker
-    assert "6e59c5fae5098a35069458f5c09b2eed8e837cd9a95b7bd7156865a1acdde6a6" in checker
+    assert "controlel-0.13.0-py3-none-any.whl" in checker
+    assert "PUBLIC_WHEEL_SIZE = 237_489" in checker
+    assert "233f395993dd9b6b0f16fa3cf267b61ec332e2e7f36aa17d84ac37a1fa925ff2" in checker
+    assert "controlel-0.13.0.tar.gz" in checker
+    assert "PUBLIC_SDIST_SIZE = 165_233" in checker
+    assert "001e69c0f0fd3bdfeecc751472689d2d59d27b6f8ff0e4b3cde7d3b1cd08c164" in checker
     assert 'distribution.read_text("direct_url.json") is None' in checker
 
 

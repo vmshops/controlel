@@ -39,15 +39,24 @@ from controlel.infrastructure.home_assistant import (
 )
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-CORE_VERSION = "0.12.0"
+CORE_VERSION = "0.13.0"
 CORE_REQUIREMENT = f"controlel=={CORE_VERSION}"
-PUBLIC_WHEEL_FILENAME = "controlel-0.12.0-py3-none-any.whl"
-PUBLIC_WHEEL_SIZE = 231_118
-PUBLIC_WHEEL_SHA256 = "d8fd95c1534affd4f1c967e6765a8682587e05dc54528b86721332e950aaf78b"
-PUBLIC_SDIST_FILENAME = "controlel-0.12.0.tar.gz"
-PUBLIC_SDIST_SIZE = 160_765
-PUBLIC_SDIST_SHA256 = "6e59c5fae5098a35069458f5c09b2eed8e837cd9a95b7bd7156865a1acdde6a6"
+PUBLIC_WHEEL_FILENAME = "controlel-0.13.0-py3-none-any.whl"
+PUBLIC_WHEEL_SIZE = 237_489
+PUBLIC_WHEEL_SHA256 = "233f395993dd9b6b0f16fa3cf267b61ec332e2e7f36aa17d84ac37a1fa925ff2"
+PUBLIC_SDIST_FILENAME = "controlel-0.13.0.tar.gz"
+PUBLIC_SDIST_SIZE = 165_233
+PUBLIC_SDIST_SHA256 = "001e69c0f0fd3bdfeecc751472689d2d59d27b6f8ff0e4b3cde7d3b1cd08c164"
 PYPI_METADATA_URL = f"https://pypi.org/pypi/controlel/{CORE_VERSION}/json"
+
+
+def _contract_module_path(contract: object) -> Path:
+    """Return the concrete module path for an imported public contract."""
+    module = inspect.getmodule(contract)
+    assert module is not None
+    module_file = module.__file__
+    assert module_file is not None
+    return Path(module_file).resolve()
 
 
 def verify_public_artifact_metadata() -> None:
@@ -119,10 +128,7 @@ def main() -> int:
         HomeAssistantDiscoveryAdapter,
         HomeAssistantSetupRepository,
     )
-    assert all(
-        Path(inspect.getmodule(contract).__file__).resolve().is_relative_to(package_path.parent)
-        for contract in setup_contracts
-    )
+    assert all(_contract_module_path(contract).is_relative_to(package_path.parent) for contract in setup_contracts)
     assert SETUP_STORAGE_VERSION == 1
     assert hasattr(HeatingSetupHostService, "canonicalize_heating_draft")
     assert not hasattr(HeatingSetupHostService, "activate")
@@ -137,8 +143,7 @@ def main() -> int:
         frontend_response_to_dict,
     )
     assert all(
-        Path(inspect.getmodule(contract).__file__).resolve().is_relative_to(package_path.parent)
-        for contract in frontend_api_contracts
+        _contract_module_path(contract).is_relative_to(package_path.parent) for contract in frontend_api_contracts
     )
     assert FRONTEND_API_VERSION == 1
 

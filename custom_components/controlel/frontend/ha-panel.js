@@ -22,14 +22,11 @@
 
 const SCRIPT_BASE = "/controlel_static/";
 const SCRIPTS = [
-  // i18n.js first: components.js, wizard.js and app.js resolve their UI
-  // strings through the shared CI18N instance it provides.
+  // i18n.js first: components.js and app.js resolve their UI strings through
+  // the shared CI18N instance it provides.
   "i18n.js",
-  "mock-data.js",
-  "mock-app-data.js",
   "api-client.js",
   "components.js",
-  "wizard.js",
   "app.js",
 ];
 const CSS_URL = SCRIPT_BASE + "styles.css";
@@ -105,16 +102,6 @@ function _buildShellDOM() {
 
       <main id="view-root" class="app__content"></main>
 
-      <!-- Setup view: the existing wizard renders into these containers (wizard.js). -->
-      <div id="wizard-view" class="app__content app__content--wizard" hidden>
-        <div class="note note--info" id="wizard-demo-label" data-i18n="panel.wizard_demo_label">
-          Prototype setup flow (demo data only) — real setup readiness is shown above. Activation is not implemented.
-        </div>
-        <div id="draft-status" class="draft-status" hidden></div>
-        <nav id="stepper" class="stepper" aria-label="Setup steps"></nav>
-        <section id="step-panel" class="step-panel" aria-live="polite"></section>
-        <footer id="wizard-footer" class="wizard-footer"></footer>
-      </div>
     </div>
   `;
   return app;
