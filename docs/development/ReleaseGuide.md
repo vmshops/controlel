@@ -1,17 +1,16 @@
 # Release guide
 
-## Core 0.13.0 release candidate
+## Published Core 0.13.0
 
-Core `0.13.0` is the frozen release candidate for the public read-only
-Frontend API v1. It adds versioned immutable models and a passive provider for
-overview, heating, diagnostics, and setup projections. Unknown physical state
-remains explicit, and command outcomes remain distinct as `dispatched`,
-`failed`, `suppressed`, `deferred`, or `held`.
+Core `0.13.0` is published and immutable from `core-v0.13.0`. It provides the
+public read-only Frontend API v1. It adds versioned immutable models and a
+passive provider for overview, heating, diagnostics, and setup projections.
+Unknown physical state remains explicit, and command outcomes remain distinct
+as `dispatched`, `failed`, `suppressed`, `deferred`, or `held`.
 
 This Core release adds no write API, activation, reconciliation, or change to
 heating/control behavior. Home Assistant integration `0.12.0` remains pinned to
-published Core `0.12.0` until Core `0.13.0` is tagged, published, and
-independently verified.
+published Core `0.12.0`; moving that pin is separate integration work.
 
 ## Published Core 0.12.0 and Home Assistant 0.12.0 candidate
 
@@ -274,7 +273,7 @@ Controlel uses distinct release states:
    backend under `dist/`.
 3. **Verified wheel** has passed metadata, archive-content, and clean
    out-of-checkout installation checks.
-4. **Published core package** is currently immutable `controlel==0.12.0` on
+4. **Published core package** is currently immutable `controlel==0.13.0` on
    PyPI.
 5. **Home Assistant exact dependency pin** for the next candidate is
    `"requirements": ["controlel==0.12.0"]`; the public Core gate is satisfied.
@@ -286,10 +285,11 @@ Controlel uses distinct release states:
 
 The distribution name and Python import package are both `controlel`. Versions
 `0.1.0`, `0.2.0`, `0.3.0`, `0.4.0`, `0.5.0`, `0.6.0`, `0.7.0`, `0.8.0`,
-`0.9.0`, `0.10.0`, `0.11.0`, and `0.12.0` are publicly available on PyPI and immutable.
-PyPI versions are immutable; corrections always require a higher version.
+`0.9.0`, `0.10.0`, `0.11.0`, `0.12.0`, and `0.13.0` are publicly available on
+PyPI and immutable. PyPI versions are immutable; corrections always require a
+higher version.
 
-The current public core release is immutable `0.12.0`. Integration metadata is
+The current public core release is immutable `0.13.0`. Integration metadata is
 the separate `0.12.0` candidate; its composition checks install and verify the
 public package rather than repository source.
 

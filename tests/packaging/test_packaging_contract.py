@@ -261,8 +261,12 @@ def test_release_metadata_records_published_core_and_unpublished_ha_boundary() -
     assert "release_id: controlel-home_assistant-0.12.0" in metadata
     assert metadata.count('version: "0.13.0"') == 1
     assert metadata.count('version: "0.12.0"') == 2
-    assert metadata.count("status: published") >= 3
+    assert metadata.count("status: published") >= 4
     assert metadata.count("status: candidate") >= 1
+    assert 'tag: "core-v0.13.0"' in metadata
+    assert 'commit_sha: "0fdaaa21341e03e9c01f33acfdac8197929fa841"' in metadata
+    assert "233f395993dd9b6b0f16fa3cf267b61ec332e2e7f36aa17d84ac37a1fa925ff2" in metadata
+    assert "001e69c0f0fd3bdfeecc751472689d2d59d27b6f8ff0e4b3cde7d3b1cd08c164" in metadata
     assert 'tag: "core-v0.12.0"' in metadata
     assert 'commit_sha: "992b291902318f4f0406c4b368282ff3a7ed4dbf"' in metadata
     assert "d8fd95c1534affd4f1c967e6765a8682587e05dc54528b86721332e950aaf78b" in metadata
@@ -271,6 +275,7 @@ def test_release_metadata_records_published_core_and_unpublished_ha_boundary() -
     assert "No write endpoints" in core_note
     assert "deferred" in core_note
     assert "held" in core_note
+    assert "Both public files match" in core_note
     assert "Core publication gate is satisfied" in integration_note
 
 

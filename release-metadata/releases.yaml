@@ -11,9 +11,27 @@ releases:
     component: core
     title: "Controlel Core 0.13.0"
     version: "0.13.0"
-    status: candidate
-    tag: null
-    commit_sha: null
+    status: published
+    tag: "core-v0.13.0"
+    commit_sha: "0fdaaa21341e03e9c01f33acfdac8197929fa841"
+    tagged_at: "2026-08-24T10:39:25+02:00"
+    published_at: "2026-08-24T08:54:39.374314Z"
+    provenance:
+      method: "tag-bound deterministic build verified against public PyPI bytes"
+      tag_object_sha: "14336dc112468b6bfce9f7fd30fa4b04157b5c95"
+      resolved_tag_commit: "0fdaaa21341e03e9c01f33acfdac8197929fa841"
+      verification_status: passed
+    artifacts:
+      wheel:
+        filename: "controlel-0.13.0-py3-none-any.whl"
+        size: 237489
+        sha256: "233f395993dd9b6b0f16fa3cf267b61ec332e2e7f36aa17d84ac37a1fa925ff2"
+        uploaded_at: "2026-08-24T08:54:39.374314Z"
+      sdist:
+        filename: "controlel-0.13.0.tar.gz"
+        size: 165233
+        sha256: "001e69c0f0fd3bdfeecc751472689d2d59d27b6f8ff0e4b3cde7d3b1cd08c164"
+        uploaded_at: "2026-08-24T08:54:40.564275Z"
     summary: "Public read-only Frontend API v1 with explicit unknown semantics and preserved command outcomes"
     highlights:
       - "Versioned controlel.frontend_api.v1 immutable models and passive provider"
@@ -26,7 +44,8 @@ releases:
       pydantic: ">=2.0"
     notes:
       - "No write API, activation, reconciliation, or heating/control behavior change is included."
-      - "The Home Assistant integration must not pin Core 0.13.0 until this package is published and independently verified."
+      - "Published PyPI bytes match the deterministic final artifacts bound to core-v0.13.0."
+      - "Home Assistant integration 0.12.0 remains unchanged; a Core 0.13.0 pin requires separate integration work."
 
   - release_id: controlel-core-0.12.0
     component: core
