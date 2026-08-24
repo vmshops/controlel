@@ -1,5 +1,18 @@
 # Release guide
 
+## Core 0.13.0 release candidate
+
+Core `0.13.0` is the frozen release candidate for the public read-only
+Frontend API v1. It adds versioned immutable models and a passive provider for
+overview, heating, diagnostics, and setup projections. Unknown physical state
+remains explicit, and command outcomes remain distinct as `dispatched`,
+`failed`, `suppressed`, `deferred`, or `held`.
+
+This Core release adds no write API, activation, reconciliation, or change to
+heating/control behavior. Home Assistant integration `0.12.0` remains pinned to
+published Core `0.12.0` until Core `0.13.0` is tagged, published, and
+independently verified.
+
 ## Published Core 0.12.0 and Home Assistant 0.12.0 candidate
 
 Core `0.12.0` is published and immutable from `core-v0.12.0`. Home Assistant

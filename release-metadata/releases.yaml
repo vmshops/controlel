@@ -7,6 +7,27 @@
 metadata_version: 1
 
 releases:
+  - release_id: controlel-core-0.13.0
+    component: core
+    title: "Controlel Core 0.13.0"
+    version: "0.13.0"
+    status: candidate
+    tag: null
+    commit_sha: null
+    summary: "Public read-only Frontend API v1 with explicit unknown semantics and preserved command outcomes"
+    highlights:
+      - "Versioned controlel.frontend_api.v1 immutable models and passive provider"
+      - "Read-only overview, heating, diagnostics, and setup projections"
+      - "Explicit unknown physical-state semantics without inferring reality from commands or reports"
+      - "Command outcomes remain distinct: dispatched, failed, suppressed, deferred, and held"
+    compatibility:
+      current_home_assistant_integration: "0.12.0"
+      python: ">=3.13"
+      pydantic: ">=2.0"
+    notes:
+      - "No write API, activation, reconciliation, or heating/control behavior change is included."
+      - "The Home Assistant integration must not pin Core 0.13.0 until this package is published and independently verified."
+
   - release_id: controlel-core-0.12.0
     component: core
     title: "Controlel Core 0.12.0"
