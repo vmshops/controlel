@@ -3,13 +3,13 @@
  *
  * This module exposes the EXISTING Controlel application shell as a Home
  * Assistant custom element (`controlel-panel`). It does not reimplement the
- * shell: it builds the same DOM structure as index.html, bridges the panel
- * config into `window.panelConfig` (the contract api-client.js already
- * reads), and loads the existing scripts in their original order.
+ * shell: it builds the same DOM structure as index.html, forwards Home
+ * Assistant's supported custom-panel properties to the shell, and loads the
+ * existing scripts in their original order.
  *
  * Truthfulness / safety (see AGENTS.md):
  *   - The shell stays read-only and uses the existing authenticated Home
- *     Assistant WebSocket connection (`window.hass.connection`).
+ *     Assistant WebSocket connection (`this.hass.connection`).
  *   - No custom authentication, transport, or control actions are created.
  *   - If no config entry id is available, the shell renders its truthful
  *     "unavailable" state; it never falls back to mock data silently.
@@ -43,30 +43,22 @@ function _loadScript(src) {
   });
 }
 
-function _loadCss(href) {
-  return new Promise((resolve, reject) => {
-    const l = document.createElement("link");
-    l.rel = "stylesheet";
-    l.href = href;
-    l.onload = () => resolve();
-    l.onerror = () => reject(new Error("Failed to load " + href));
-    document.head.appendChild(l);
-  });
-}
-
-/** Load the shell's CSS + scripts exactly once, in their original order. */
+/** Load the shell scripts exactly once, in their original order. */
 function _ensureAssets() {
   if (!_assetsLoaded) {
     // The element lifecycle owns bootstrapping; stop app.js auto-bootstrapping.
     window.CA_NO_AUTO_BOOTSTRAP = true;
     _assetsLoaded = Promise.resolve()
-      .then(() => _loadCss(CSS_URL))
       .then(() =>
         SCRIPTS.reduce(
           (chain, name) => chain.then(() => _loadScript(SCRIPT_BASE + name)),
           Promise.resolve()
         )
-      );
+      )
+      .catch((error) => {
+        _assetsLoaded = null;
+        throw error;
+      });
   }
   return _assetsLoaded;
 }
@@ -110,47 +102,134 @@ function _buildShellDOM() {
 class ControlelPanel extends HTMLElement {
   constructor() {
     super();
+    this.attachShadow({ mode: "open" });
+    this._hass = null;
+    this._panel = null;
     this._panelConfig = {};
+    this._narrow = false;
+    this._route = null;
+    this._styleLink = null;
+    this._styleLoaded = null;
     this._bootstrapped = false;
+    this._connectionToken = 0;
   }
 
-  /** Home Assistant sets `.config` before the element is connected. */
+  /** Home Assistant's authenticated runtime object (official panel contract). */
+  set hass(value) {
+    const previousConnection = this._hass && this._hass.connection;
+    this._hass = value || null;
+    const nextConnection = this._hass && this._hass.connection;
+    if (this._bootstrapped && previousConnection !== nextConnection) this._bootstrap();
+  }
+
+  get hass() {
+    return this._hass;
+  }
+
+  /** Home Assistant panel metadata; integration config is `panel.config`. */
+  set panel(value) {
+    const previousEntryId = this._configEntryId();
+    this._panel = value && typeof value === "object" ? value : null;
+    if (this._bootstrapped && previousEntryId !== this._configEntryId()) this._bootstrap();
+  }
+
+  get panel() {
+    return this._panel;
+  }
+
+  /** Backward-compatible standalone/test config property. */
   set config(value) {
+    const previousEntryId = this._configEntryId();
     this._panelConfig = value && typeof value === "object" ? value : {};
-    if (this._bootstrapped) this._bootstrap();
+    if (this._bootstrapped && previousEntryId !== this._configEntryId()) this._bootstrap();
   }
 
   get config() {
     return this._panelConfig;
   }
 
+  set narrow(value) {
+    this._narrow = Boolean(value);
+    this.toggleAttribute("narrow", this._narrow);
+  }
+
+  get narrow() {
+    return this._narrow;
+  }
+
+  set route(value) {
+    this._route = value || null;
+  }
+
+  get route() {
+    return this._route;
+  }
+
   connectedCallback() {
-    _ensureAssets()
+    const token = ++this._connectionToken;
+    Promise.all([_ensureAssets(), this._ensureStyle()])
       .then(() => {
+        if (token !== this._connectionToken) return;
         this._bootstrap();
         this._bootstrapped = true;
       })
-      .catch((err) => this._renderError(err));
+      .catch((err) => {
+        if (token === this._connectionToken) this._renderError(err);
+      });
+  }
+
+  disconnectedCallback() {
+    // Invalidate pending work; reconnecting starts one fresh bootstrap.
+    this._connectionToken += 1;
+    this._bootstrapped = false;
+  }
+
+  _ensureStyle() {
+    if (!this._styleLoaded) {
+      const link = document.createElement("link");
+      link.rel = "stylesheet";
+      link.href = CSS_URL;
+      this._styleLink = link;
+      this._styleLoaded = new Promise((resolve, reject) => {
+        link.onload = () => resolve();
+        link.onerror = () => reject(new Error("Failed to load " + CSS_URL));
+      }).catch((error) => {
+        link.remove();
+        if (this._styleLink === link) this._styleLink = null;
+        this._styleLoaded = null;
+        throw error;
+      });
+      this.shadowRoot.appendChild(link);
+    }
+    return this._styleLoaded;
+  }
+
+  _effectiveConfig() {
+    const panelConfig = this._panel && this._panel.config;
+    return panelConfig && typeof panelConfig === "object" ? panelConfig : this._panelConfig;
+  }
+
+  _configEntryId() {
+    const config = this._effectiveConfig();
+    return config && typeof config.config_entry_id === "string" ? config.config_entry_id : null;
   }
 
   _bootstrap() {
-    // Bridge the panel config into the window for the shell's
-    // detectHaEnvironment() (api-client.js reads window.panelConfig).
-    window.panelConfig = {
-      config_entry_id:
-        (this._panelConfig && this._panelConfig.config_entry_id) || null,
-    };
-    // Build the shell DOM (same structure as index.html).
-    this.innerHTML = "";
-    this.appendChild(_buildShellDOM());
-    // Bootstrap the app (re-entrant; app.js exports CA.bootstrap).
+    const config = this._effectiveConfig();
+    this.shadowRoot.replaceChildren(this._styleLink, _buildShellDOM());
     if (window.CA && typeof window.CA.bootstrap === "function") {
-      window.CONTROLEL_APP = window.CA.bootstrap();
+      window.CONTROLEL_APP = window.CA.bootstrap({
+        root: this.shadowRoot,
+        hass: this._hass,
+        panel: this._panel,
+        config,
+        narrow: this._narrow,
+        route: this._route,
+      });
     }
   }
 
   _renderError(err) {
-    this.innerHTML = "";
     const app = document.createElement("div");
     app.className = "app";
     const message = (err && err.message) ? err.message : String(err);
@@ -167,7 +246,8 @@ class ControlelPanel extends HTMLElement {
       "</div></main></div>";
     app.querySelector(".state-panel__title").textContent = title;
     app.querySelector(".state-panel__message").textContent = message;
-    this.appendChild(app);
+    const children = this._styleLink ? [this._styleLink, app] : [app];
+    this.shadowRoot.replaceChildren(...children);
   }
 }
 

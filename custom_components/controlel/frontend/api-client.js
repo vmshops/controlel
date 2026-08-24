@@ -3,7 +3,7 @@
  *
  * This is the ONLY place that talks to the backend. It uses the Home
  * Assistant frontend's existing authenticated WebSocket connection
- * (`window.hass.connection`) and never creates its own transport or
+ * (the custom panel's `hass.connection`) and never creates its own transport or
  * authentication. Components consume the normalized models produced here,
  * not HA internals.
  *
@@ -332,14 +332,18 @@
    * registered by the integration) or from an explicit `?entry=` URL
    * parameter. Neither is authentication — the WS connection is HA's.
    */
-  function detectHaEnvironment(win) {
+  function detectHaEnvironment(win, context) {
     const w = win || (typeof window !== "undefined" ? window : null);
-    const hass = w && w.hass;
+    const supplied = context && typeof context === "object" ? context : null;
+    const hasSuppliedHass = supplied && Object.prototype.hasOwnProperty.call(supplied, "hass");
+    const hass = hasSuppliedHass ? supplied.hass : w && w.hass;
     const connection = hass && hass.connection;
     const hasConnection = Boolean(connection && typeof connection.subscribeMessage === "function");
 
     let configEntryId = null;
-    const panelConfig = w && w.panelConfig;
+    const panelConfig = supplied
+      ? supplied.panelConfig || (supplied.panel && supplied.panel.config) || null
+      : w && w.panelConfig;
     if (panelConfig && typeof panelConfig.config_entry_id === "string" && panelConfig.config_entry_id) {
       configEntryId = panelConfig.config_entry_id;
     } else if (w && w.location && typeof w.location.search === "string" && w.location.search) {

@@ -155,6 +155,8 @@ function buildApp({ mode = "real", responses = fullResponses(), failTransport = 
     viewRoot,
     wizardRoot,
     topbarStatusRoot: topbar,
+    modeRoot: modeEl,
+    renderRoot: root,
   });
   return { app, root, navRoot, viewRoot, wizardRoot, topbar, modeEl, connection };
 }
@@ -556,6 +558,44 @@ test("navList renders items with a current marker", () => {
   const current = node.findAll("app-nav__item--current");
   assert.equal(current.length, 1);
   assert.equal(current[0].getAttribute("data-route"), "b");
+});
+
+test("bootstrap resolves shell nodes inside the supplied shadow root", async () => {
+  const documentRoot = new Element("div");
+  const decoyNav = new Element("div"); decoyNav.id = "app-nav";
+  const decoyView = new Element("main"); decoyView.id = "view-root";
+  const decoyTopbar = new Element("span"); decoyTopbar.id = "topbar-status";
+  const decoyMode = new Element("p"); decoyMode.id = "app-mode";
+  documentRoot.append(decoyNav, decoyView, decoyTopbar, decoyMode);
+  documentStub._root = documentRoot;
+
+  const host = new Element("controlel-panel");
+  const shadowRoot = host.attachShadow({ mode: "open" });
+  const navRoot = new Element("div"); navRoot.id = "app-nav";
+  const viewRoot = new Element("main"); viewRoot.id = "view-root";
+  const topbar = new Element("span"); topbar.id = "topbar-status";
+  const modeRoot = new Element("p"); modeRoot.id = "app-mode";
+  const shadowOnly = new Element("span"); shadowOnly.id = "shadow-only";
+  shadowRoot.append(navRoot, viewRoot, topbar, modeRoot, shadowOnly);
+  documentRoot.append(host);
+
+  assert.equal(documentStub.getElementById("shadow-only"), null, "document lookup does not cross the shadow root");
+  assert.equal(shadowRoot.getElementById("shadow-only"), shadowOnly);
+
+  const connection = fakeConnection({ responses: fullResponses() });
+  const app = CA.bootstrap({
+    root: shadowRoot,
+    hass: { connection },
+    panel: { config: { config_entry_id: "entry-shadow" } },
+  });
+  await settle(app);
+
+  assert.ok(navRoot.findAll("app-nav__item").length > 0, "shadow-root navigation rendered");
+  assert.ok(viewRoot.textContent.includes("Overview"), "shadow-root view rendered");
+  assert.equal(modeRoot.textContent, "Frontend API v1 · live");
+  assert.equal(decoyNav.children.length, 0, "outer document navigation was untouched");
+  assert.equal(decoyView.children.length, 0, "outer document view was untouched");
+  assert.equal(decoyMode.textContent, "", "outer document mode label was untouched");
 });
 
 // ------------------------------------------------------- preserved wizard

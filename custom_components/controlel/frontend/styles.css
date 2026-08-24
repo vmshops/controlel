@@ -1,6 +1,6 @@
 /* Controlel setup wizard — prototype styles */
 
-:root {
+:root, :host {
   --bg: #f4f6f8;
   --surface: #ffffff;
   --border: #d9e0e6;
@@ -18,6 +18,11 @@
   --info-soft: #e7f1fb;
   --neutral-soft: #eef1f4;
   --radius: 10px;
+}
+
+:host {
+  display: block;
+  min-height: 100%;
 }
 
 /*
@@ -710,3 +715,16 @@
   .app-nav__item { width: auto; }
   .app__sidebar-footer { display: none; }
 }
+
+:host([narrow]) .app { grid-template-columns: 1fr; }
+:host([narrow]) .app__sidebar {
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  border-right: none;
+  border-bottom: 1px solid var(--border);
+}
+:host([narrow]) .app__nav { flex: 1; min-width: 200px; }
+:host([narrow]) .app-nav__list { display: flex; gap: 0.3rem; flex-wrap: wrap; }
+:host([narrow]) .app-nav__item { width: auto; }
+:host([narrow]) .app__sidebar-footer { display: none; }

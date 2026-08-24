@@ -219,8 +219,20 @@
    * @param {object} opts.viewRoot        element for the non-wizard views
    * @param {object} opts.wizardRoot      element hosting the wizard (wizard.js)
    * @param {object} [opts.topbarStatusRoot] element for the overall status badge
+   * @param {object} [opts.modeRoot]         element for the connection-mode label
+   * @param {object} [opts.renderRoot]       document/shadow root containing the shell
    */
-  function createApp({ mode, dataSource, demoFactory, navRoot, viewRoot, wizardRoot, topbarStatusRoot }) {
+  function createApp({
+    mode,
+    dataSource,
+    demoFactory,
+    navRoot,
+    viewRoot,
+    wizardRoot,
+    topbarStatusRoot,
+    modeRoot,
+    renderRoot,
+  }) {
     const state = {
       route: DEFAULT_ROUTE,
       mode,
@@ -340,7 +352,9 @@
       renderModeLabel();
       // Re-translate the static shell markup (tagline, footer, labels) so a
       // language switch updates it too. No-op in Node (no querySelectorAll).
-      if (CI18N && typeof CI18N.applyI18n === "function") CI18N.applyI18n(document);
+      if (CI18N && typeof CI18N.applyI18n === "function") {
+        CI18N.applyI18n(renderRoot || document);
+      }
 
       if (state.mode === "unavailable") {
         if (viewRoot) viewRoot.hidden = false;
@@ -360,9 +374,9 @@
     }
 
     function renderModeLabel() {
-      const modeEl = (typeof document !== "undefined" && document.getElementById) ? document.getElementById("app-mode") : null;
-      if (!modeEl) return;
-      modeEl.textContent =
+      const target = modeRoot || _findById(renderRoot || document, "app-mode");
+      if (!target) return;
+      target.textContent =
         state.mode === "demo" ? t("mode.demo")
         : state.mode === "real" ? t("mode.real")
         : t("mode.disconnected");
@@ -917,11 +931,29 @@
     }
   }
 
-  function bootstrap() {
+  function _findById(root, id) {
+    if (!root) return null;
+    if (typeof root.getElementById === "function") return root.getElementById(id);
+    if (typeof root.querySelector === "function") return root.querySelector(`#${id}`);
+    return null;
+  }
+
+  /** Bootstrap within a document or shadow root. */
+  function bootstrap(options) {
     const CA_API = global.CA_API;
     if (!CA_API) return null;
+    const opts = options && typeof options === "object" ? options : {};
+    const root = opts.root || document;
 
-    const env = CA_API.detectHaEnvironment();
+    const hasLifecycleContext = Object.prototype.hasOwnProperty.call(opts, "hass") ||
+      Object.prototype.hasOwnProperty.call(opts, "panel") ||
+      Object.prototype.hasOwnProperty.call(opts, "config");
+    const env = CA_API.detectHaEnvironment(
+      global,
+      hasLifecycleContext
+        ? { hass: opts.hass, panel: opts.panel, panelConfig: opts.config }
+        : null
+    );
     let mode;
     let dataSource = null;
 
@@ -944,10 +976,12 @@
       mode,
       dataSource,
       demoFactory: global.MOCK_APP_DATA ? () => CA_API.createDemoDataSource(global.MOCK_APP_DATA) : null,
-      navRoot: document.getElementById("app-nav"),
-      viewRoot: document.getElementById("view-root"),
-      wizardRoot: document.getElementById("wizard-view"),
-      topbarStatusRoot: document.getElementById("topbar-status"),
+      navRoot: _findById(root, "app-nav"),
+      viewRoot: _findById(root, "view-root"),
+      wizardRoot: _findById(root, "wizard-view"),
+      topbarStatusRoot: _findById(root, "topbar-status"),
+      modeRoot: _findById(root, "app-mode"),
+      renderRoot: root,
     });
 
     // Hash routing: deep links + back/forward (re-entrant, see above).

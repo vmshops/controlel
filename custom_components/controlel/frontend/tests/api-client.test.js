@@ -313,6 +313,22 @@ test("detectHaEnvironment is available with a connection and entry id", () => {
   assert.equal(env.reason, null);
 });
 
+test("detectHaEnvironment uses supported panel properties over window globals", () => {
+  const globalConnection = { subscribeMessage() {} };
+  const panelConnection = { subscribeMessage() {} };
+  const win = {
+    hass: { connection: globalConnection },
+    panelConfig: { config_entry_id: "global-entry" },
+  };
+  const env = CA_API.detectHaEnvironment(win, {
+    hass: { connection: panelConnection },
+    panel: { config: { config_entry_id: "panel-entry" } },
+  });
+  assert.equal(env.available, true);
+  assert.equal(env.connection, panelConnection);
+  assert.equal(env.configEntryId, "panel-entry");
+});
+
 test("detectHaEnvironment falls back to the ?entry= URL parameter", () => {
   const connection = { subscribeMessage() {} };
   const win = { hass: { connection }, location: { search: "?entry=entry-url" } };

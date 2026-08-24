@@ -21,7 +21,7 @@ class TextNode {
 }
 
 class Element {
-  constructor(tagName) {
+  constructor(tagName = "element") {
     this.nodeType = 1;
     this.tagName = String(tagName).toUpperCase();
     this.children = [];
@@ -32,6 +32,7 @@ class Element {
     this._hidden = false;
     this._checked = false;
     this._disabled = false;
+    this.shadowRoot = null;
   }
 
   get className() { return this.attributes.class || ""; }
@@ -52,6 +53,19 @@ class Element {
   setAttribute(key, value) { this.attributes[key] = String(value); }
   getAttribute(key) { return Object.prototype.hasOwnProperty.call(this.attributes, key) ? this.attributes[key] : null; }
   hasAttribute(key) { return Object.prototype.hasOwnProperty.call(this.attributes, key); }
+  removeAttribute(key) { delete this.attributes[key]; }
+  toggleAttribute(key, force) {
+    const present = force === undefined ? !this.hasAttribute(key) : Boolean(force);
+    if (present) this.setAttribute(key, "");
+    else this.removeAttribute(key);
+    return present;
+  }
+
+  attachShadow({ mode }) {
+    if (this.shadowRoot) throw new Error("Shadow root already attached");
+    this.shadowRoot = new ShadowRoot(this, mode);
+    return this.shadowRoot;
+  }
 
   append(...nodes) {
     for (const node of nodes) {
@@ -84,6 +98,33 @@ class Element {
         yield* child.walk();
       }
     }
+  }
+
+  appendChild(node) {
+    this.append(node);
+    return node;
+  }
+
+  remove() {
+    if (!this.parentNode) return;
+    this.parentNode.children = this.parentNode.children.filter((child) => child !== this);
+    this.parentNode = null;
+  }
+
+  getElementById(id) {
+    for (const el of this.walk()) {
+      if (el.id === id) return el;
+    }
+    return null;
+  }
+
+  querySelector(selector) {
+    if (selector.startsWith("#")) return this.getElementById(selector.slice(1));
+    const tag = selector.toUpperCase();
+    for (const el of this.walk()) {
+      if (el.tagName === tag) return el;
+    }
+    return null;
   }
 
   get textContent() {
@@ -126,17 +167,23 @@ class Element {
   }
 }
 
+class ShadowRoot extends Element {
+  constructor(host, mode) {
+    super("#shadow-root");
+    this.nodeType = 11;
+    this.host = host;
+    this.mode = mode;
+  }
+}
+
 const documentStub = {
   createElement: (tag) => new Element(tag),
   createTextNode: (text) => new TextNode(text),
   _root: null,
   getElementById(id) {
     if (!this._root) return null;
-    for (const el of this._root.walk()) {
-      if (el.id === id) return el;
-    }
-    return null;
+    return this._root.getElementById(id);
   },
 };
 
-module.exports = { Element, TextNode, documentStub };
+module.exports = { Element, ShadowRoot, TextNode, documentStub };
