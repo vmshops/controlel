@@ -216,18 +216,16 @@ function setupRaw() {
 
 function fakeConnection(responses) {
   return {
-    subscribeMessage(callback, message) {
+    sendMessagePromise(message) {
       const domain = Object.keys(CA_API.COMMANDS).find((d) => CA_API.COMMANDS[d] === message.type);
       const resp = responses[domain];
       if (!resp) {
-        callback({ success: false, error: { code: "not_found", message: "no provider" } });
-        return;
+        return Promise.reject({ code: "not_found", message: "no provider" });
       }
       if (resp.__error) {
-        callback({ success: false, error: { code: "error", message: resp.__error } });
-        return;
+        return Promise.reject({ code: "error", message: resp.__error });
       }
-      callback({ success: true, result: resp });
+      return Promise.resolve(resp);
     },
   };
 }

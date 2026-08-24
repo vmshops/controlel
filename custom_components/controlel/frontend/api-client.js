@@ -258,12 +258,12 @@
    * Create a read-only client bound to one HA connection + config entry.
    *
    * @param {object} opts
-   * @param {object} opts.connection      HA connection (must expose subscribeMessage)
+   * @param {object} opts.connection      HA connection (must expose sendMessagePromise)
    * @param {string} opts.configEntryId   Controlel config entry id
    * @param {number} [opts.timeoutMs]     per-request timeout (default 15000)
    */
   function createFrontendApiClient({ connection, configEntryId, timeoutMs = 15000 }) {
-    if (!connection || typeof connection.subscribeMessage !== "function") {
+    if (!connection || typeof connection.sendMessagePromise !== "function") {
       throw new ApiError("disconnected", "No Home Assistant connection is available");
     }
     if (typeof configEntryId !== "string" || configEntryId.length === 0) {
@@ -292,22 +292,28 @@
         }
 
         try {
-          connection.subscribeMessage((msg) => {
-            if (settled) return;
-            if (msg && msg.success && msg.result !== undefined) {
+          connection.sendMessagePromise({
+            type: COMMANDS[domain],
+            config_entry_id: configEntryId,
+          }).then(
+            (result) => {
+              if (settled) return;
               try {
-                succeed(NORMALIZERS[domain](msg.result));
+                // HA resolves sendMessagePromise with the successful
+                // `result` payload directly, not the WebSocket envelope.
+                succeed(NORMALIZERS[domain](result));
               } catch (err) {
                 fail(err instanceof ApiError ? err : new ApiError("invalid_response", "Unexpected response shape", domain));
               }
-            } else {
+            },
+            (err) => {
               const message =
-                (msg && msg.error && msg.error.message) ||
-                (msg && msg.message) ||
+                (err && err.error && err.error.message) ||
+                (err && err.message) ||
                 "The request failed";
               fail(new ApiError("error", message, domain));
             }
-          }, { type: COMMANDS[domain], config_entry_id: configEntryId });
+          );
         } catch (err) {
           fail(new ApiError("disconnected", (err && err.message) || String(err), domain));
         }
@@ -338,7 +344,7 @@
     const hasSuppliedHass = supplied && Object.prototype.hasOwnProperty.call(supplied, "hass");
     const hass = hasSuppliedHass ? supplied.hass : w && w.hass;
     const connection = hass && hass.connection;
-    const hasConnection = Boolean(connection && typeof connection.subscribeMessage === "function");
+    const hasConnection = Boolean(connection && typeof connection.sendMessagePromise === "function");
 
     let configEntryId = null;
     const panelConfig = supplied

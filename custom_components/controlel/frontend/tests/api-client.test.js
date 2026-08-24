@@ -140,28 +140,26 @@ function setupRaw(overrides = {}) {
 
 /**
  * A minimal stand-in for the HA connection. It records sent messages and
- * replies synchronously from a per-domain response map. `failTransport`
+ * resolves one-shot results from a per-domain response map. `failTransport`
  * simulates a closed connection; `hang` simulates no response (timeout).
  */
 function fakeConnection({ responses = {}, failTransport = false, hang = false } = {}) {
   const sent = [];
   return {
     sent,
-    subscribeMessage(callback, message) {
+    sendMessagePromise(message) {
       sent.push(message);
       if (failTransport) throw new Error("connection closed");
-      if (hang) return; // never respond → exercises the client timeout
+      if (hang) return new Promise(() => {}); // never respond → exercises the client timeout
       const domain = Object.keys(CA_API.COMMANDS).find((d) => CA_API.COMMANDS[d] === message.type);
       const resp = responses[domain];
       if (!resp) {
-        callback({ success: false, error: { code: "not_found", message: "no provider" } });
-        return;
+        return Promise.reject({ code: "not_found", message: "no provider" });
       }
       if (resp.__error) {
-        callback({ success: false, error: { code: "error", message: resp.__error } });
-        return;
+        return Promise.reject({ code: "error", message: resp.__error });
       }
-      callback({ success: true, result: resp });
+      return Promise.resolve(resp);
     },
   };
 }
@@ -274,6 +272,22 @@ test("client resolves a normalized model on success", async () => {
   assert.equal(data.zones[0].current_temperature_c, 21.4);
 });
 
+test("successful one-shot results resolve without any subscription callback", async () => {
+  const sent = [];
+  const connection = {
+    sendMessagePromise(message) {
+      sent.push(message);
+      return Promise.resolve(heatingRaw());
+    },
+  };
+  assert.equal(connection.subscribeMessage, undefined, "no subscription API is available");
+
+  const data = await clientFor(connection).heating();
+
+  assert.equal(sent.length, 1);
+  assert.equal(data.zones[0].current_temperature_c, 21.4);
+});
+
 test("client rejects with a typed error on a failed request", async () => {
   const connection = fakeConnection({ responses: { setup: { __error: "config entry is not loaded" } } });
   const client = clientFor(connection);
@@ -305,7 +319,7 @@ test("client rejects with a timeout error when no response arrives", async () =>
 // ------------------------------------------------------ environment detect
 
 test("detectHaEnvironment is available with a connection and entry id", () => {
-  const connection = { subscribeMessage() {} };
+  const connection = { sendMessagePromise() {} };
   const win = { hass: { connection }, panelConfig: { config_entry_id: "entry-9" } };
   const env = CA_API.detectHaEnvironment(win);
   assert.equal(env.available, true);
@@ -314,8 +328,8 @@ test("detectHaEnvironment is available with a connection and entry id", () => {
 });
 
 test("detectHaEnvironment uses supported panel properties over window globals", () => {
-  const globalConnection = { subscribeMessage() {} };
-  const panelConnection = { subscribeMessage() {} };
+  const globalConnection = { sendMessagePromise() {} };
+  const panelConnection = { sendMessagePromise() {} };
   const win = {
     hass: { connection: globalConnection },
     panelConfig: { config_entry_id: "global-entry" },
@@ -330,7 +344,7 @@ test("detectHaEnvironment uses supported panel properties over window globals", 
 });
 
 test("detectHaEnvironment falls back to the ?entry= URL parameter", () => {
-  const connection = { subscribeMessage() {} };
+  const connection = { sendMessagePromise() {} };
   const win = { hass: { connection }, location: { search: "?entry=entry-url" } };
   const env = CA_API.detectHaEnvironment(win);
   assert.equal(env.available, true);
@@ -343,8 +357,17 @@ test("detectHaEnvironment is unavailable without a connection", () => {
   assert.equal(env.reason, "no_ha_connection");
 });
 
+test("detectHaEnvironment rejects a subscription-only connection", () => {
+  const env = CA_API.detectHaEnvironment({
+    hass: { connection: { subscribeMessage() {} } },
+    panelConfig: { config_entry_id: "entry-subscription-only" },
+  });
+  assert.equal(env.available, false);
+  assert.equal(env.reason, "no_ha_connection");
+});
+
 test("detectHaEnvironment is unavailable without a config entry id", () => {
-  const connection = { subscribeMessage() {} };
+  const connection = { sendMessagePromise() {} };
   const env = CA_API.detectHaEnvironment({ hass: { connection } });
   assert.equal(env.available, false);
   assert.equal(env.reason, "missing_config_entry_id");

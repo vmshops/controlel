@@ -114,19 +114,17 @@ function fullResponses() {
 
 function fakeConnection({ responses = {}, failTransport = false } = {}) {
   return {
-    subscribeMessage(callback, message) {
+    sendMessagePromise(message) {
       if (failTransport) throw new Error("connection closed");
       const domain = Object.keys(CA_API.COMMANDS).find((d) => CA_API.COMMANDS[d] === message.type);
       const resp = responses[domain];
       if (!resp) {
-        callback({ success: false, error: { code: "not_found", message: "no provider" } });
-        return;
+        return Promise.reject({ code: "not_found", message: "no provider" });
       }
       if (resp.__error) {
-        callback({ success: false, error: { code: "error", message: resp.__error } });
-        return;
+        return Promise.reject({ code: "error", message: resp.__error });
       }
-      callback({ success: true, result: resp });
+      return Promise.resolve(resp);
     },
   };
 }
@@ -243,7 +241,8 @@ test("a view shows a loading state before data arrives", () => {
 });
 
 test("a view shows loaded data after the request resolves", async () => {
-  const { app, viewRoot } = buildApp();
+  const { app, viewRoot, connection } = buildApp();
+  assert.equal(connection.subscribeMessage, undefined, "rendering does not depend on a subscription callback");
   app.navigate("overview");
   await settle(app);
   assert.ok(viewRoot.textContent.includes("Living Room") === false, "overview has no zone name");

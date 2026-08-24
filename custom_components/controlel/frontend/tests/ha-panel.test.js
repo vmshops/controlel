@@ -60,7 +60,7 @@ async function flushLifecycle() {
 test("custom panel forwards HA lifecycle properties and scopes CSS to its shadow root", async () => {
   const panel = new Panel();
   loadShadowStyles(panel);
-  const connection = { subscribeMessage() {} };
+  const connection = { sendMessagePromise() {} };
   const panelInfo = { config: { config_entry_id: "entry-real-ha" } };
   const route = { prefix: "/controlel", path: "/controlel" };
 
@@ -90,7 +90,7 @@ test("custom panel forwards HA lifecycle properties and scopes CSS to its shadow
 test("custom panel reboots only for connection/config changes and remains reconnect-safe", async () => {
   const panel = new Panel();
   loadShadowStyles(panel);
-  const firstConnection = { subscribeMessage() {} };
+  const firstConnection = { sendMessagePromise() {} };
   panel.hass = { connection: firstConnection };
   panel.panel = { config: { config_entry_id: "entry-1" } };
   panel.connectedCallback();
@@ -100,7 +100,7 @@ test("custom panel reboots only for connection/config changes and remains reconn
   panel.hass = { connection: firstConnection, states: { updated: true } };
   assert.equal(bootstrapCalls.length, initialCalls, "ordinary hass updates do not rebuild the shell");
 
-  const secondConnection = { subscribeMessage() {} };
+  const secondConnection = { sendMessagePromise() {} };
   panel.hass = { connection: secondConnection };
   assert.equal(bootstrapCalls.length, initialCalls + 1, "a replacement connection is handed off");
 
