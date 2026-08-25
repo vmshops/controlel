@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime
 
 from controlel.application.setup.model import (
@@ -9,6 +10,7 @@ from controlel.application.setup.model import (
     ActivationState,
     ActiveReference,
     CandidateRuntimeReady,
+    CanonicalConfigurationRevision,
     LoadedRuntimeConfiguration,
 )
 from controlel.application.setup.repository import (
@@ -25,12 +27,16 @@ class ActivationCoordinator:
         self,
         configurations: ConfigurationAuthorityRepository,
         attempts: ActivationAttemptRepository,
+        *,
+        supported_module_schema_versions: Mapping[str, int],
     ) -> None:
         self._configurations = configurations
         self._attempts = attempts
+        self._supported_module_schema_versions = dict(supported_module_schema_versions)
 
     def prepare(self, revision_id: str, *, attempt_id: str, prepared_at: datetime) -> ActivationAttempt:
         candidate = self._configurations.get_canonical_revision(revision_id)
+        self._require_supported_module_contract(candidate)
         scope = (candidate.environment_id, candidate.module_key, candidate.module_instance_id)
         active = self._configurations.get_active_reference(scope)
         attempt = ActivationAttempt(
@@ -86,6 +92,8 @@ class ActivationCoordinator:
             raise SetupConflictError("only APPLYING activation may commit")
         if attempt.candidate_runtime_ready is None:
             raise SetupConflictError("candidate runtime readiness must be persisted before commit")
+        candidate = self._configurations.get_canonical_revision(attempt.candidate_revision_id)
+        self._require_supported_module_contract(candidate)
         _validate_candidate_ready(attempt, attempt.candidate_runtime_ready)
         active_reference = ActiveReference(
             environment_id=attempt.environment_id,
@@ -192,6 +200,16 @@ class ActivationCoordinator:
             expected_state=previous.state,
             expected_version=previous.version,
         )
+
+    def _require_supported_module_contract(self, candidate: CanonicalConfigurationRevision) -> None:
+        required_version = self._supported_module_schema_versions.get(candidate.module_key)
+        if required_version is None:
+            raise SetupConflictError(f"activation module contract is not registered: {candidate.module_key}")
+        if candidate.module_schema_version != required_version:
+            raise SetupConflictError(
+                "activation candidate uses an unsupported module schema version: "
+                f"{candidate.module_key} requires {required_version}, got {candidate.module_schema_version}"
+            )
 
 
 def _updated(attempt: ActivationAttempt, **changes: object) -> ActivationAttempt:

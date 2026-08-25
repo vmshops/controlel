@@ -11,6 +11,8 @@ from pydantic import ValidationError
 from controlel.application.configuration.heating_setup_adapter import (
     HEATING_SETUP_SCHEMA_VERSION,
     POLICY_LESS_HEATING_SETUP_SCHEMA_VERSION,
+    SOURCE_DISABLE_TARGET_ROLE,
+    SOURCE_ENABLE_TARGET_ROLE,
     HeatingDiagnosticPolicy,
     HeatingNotificationPolicy,
     HeatingNotificationRecipient,
@@ -24,6 +26,7 @@ from controlel.application.setup import (
     InMemorySetupRepository,
 )
 from controlel.application.setup.json_data import normalize_json
+from controlel.domain.commands.heating_action import HeatingAction
 
 from .conftest import NOW, complete_draft
 
@@ -323,6 +326,120 @@ def test_heating_schema_and_validator_policy_versions_identify_policy_contract()
     assert adapter.module_schema_version == 2
     assert adapter.validator_policy_version == 3
     assert report.validator_policy_version == 3
+
+
+def test_canonicalization_rejects_outdated_validator_policy_report() -> None:
+    adapter = HeatingSetupAdapter()
+    draft = complete_draft()
+    current = adapter.validate(draft, report_id="current-policy-report", evaluated_at=NOW)
+    outdated_document = current.model_dump(mode="python")
+    outdated_document["validator_policy_version"] = 2
+    outdated = type(current).model_validate(outdated_document)
+
+    with pytest.raises(ValueError, match="requires validator policy version 3"):
+        adapter.canonicalize(
+            draft,
+            outdated,
+            configuration_id="outdated-policy-configuration",
+            revision_id="outdated-policy-revision",
+            revision=1,
+            provider="home_assistant",
+            provider_instance_id="ha-home",
+            created_at=NOW,
+            actor="user:owner",
+            source="setup_api",
+            change_kind="CREATE",
+            reason="outdated_policy_test",
+            core_version="0.13.0",
+            integration_version="0.13.0",
+        )
+
+
+@pytest.mark.parametrize("action", tuple(HeatingAction))
+def test_timeout_action_accepts_current_runtime_domain(action: HeatingAction) -> None:
+    settings = _settings()
+    settings["indeterminate_timeout_action"] = action.value
+
+    payload = HeatingSetupPayload.model_validate(settings)
+    report = HeatingSetupAdapter().validate(_draft(settings), report_id=f"timeout-{action.value}", evaluated_at=NOW)
+
+    assert payload.indeterminate_timeout_action is action
+    assert payload.model_dump(mode="json")["indeterminate_timeout_action"] == action.value
+    assert report.activation_ready is True
+
+
+@pytest.mark.parametrize("action", ["hold", "unknown", "ENABLE_HEATING", ""])
+def test_timeout_action_rejects_values_outside_current_runtime_domain(action: str) -> None:
+    settings = _settings()
+    settings["indeterminate_timeout_action"] = action
+
+    report = HeatingSetupAdapter().validate(_draft(settings), report_id="invalid-timeout", evaluated_at=NOW)
+
+    assert report.activation_ready is False
+    assert "heating.invalid_setting" in {issue.code for issue in report.issues}
+
+
+def test_simple_source_control_accepts_current_switch_service_contract() -> None:
+    settings = _settings()
+    settings.update(
+        {
+            "source_control_mode": "simple",
+            "source_enable": {
+                "domain": "switch",
+                "service": "turn_on",
+                "target_binding_role": SOURCE_ENABLE_TARGET_ROLE,
+            },
+            "source_disable": {
+                "domain": "switch",
+                "service": "turn_off",
+                "target_binding_role": SOURCE_DISABLE_TARGET_ROLE,
+            },
+        }
+    )
+
+    report = HeatingSetupAdapter().validate(_draft(settings), report_id="simple-switch", evaluated_at=NOW)
+
+    assert report.activation_ready is True
+
+
+@pytest.mark.parametrize(
+    ("setting", "domain", "service"),
+    [
+        ("source_enable", "vendor_boiler", "grant_heat_permission"),
+        ("source_enable", "switch", "toggle"),
+        ("source_disable", "script", "revoke_heat_permission"),
+        ("source_disable", "switch", "turn_on"),
+    ],
+)
+def test_simple_source_control_rejects_services_outside_current_switch_contract(
+    setting: str,
+    domain: str,
+    service: str,
+) -> None:
+    settings = _settings()
+    settings.update(
+        {
+            "source_control_mode": "simple",
+            "source_enable": {
+                "domain": "switch",
+                "service": "turn_on",
+                "target_binding_role": SOURCE_ENABLE_TARGET_ROLE,
+            },
+            "source_disable": {
+                "domain": "switch",
+                "service": "turn_off",
+                "target_binding_role": SOURCE_DISABLE_TARGET_ROLE,
+            },
+        }
+    )
+    source_call = settings[setting]
+    assert isinstance(source_call, dict)
+    source_call.update({"domain": domain, "service": service})
+
+    report = HeatingSetupAdapter().validate(_draft(settings), report_id="invalid-simple-source", evaluated_at=NOW)
+
+    assert report.activation_ready is False
+    assert "heating.invalid_setting" in {issue.code for issue in report.issues}
 
 
 def test_policy_less_schema_v1_revision_imports_only_to_blocked_draft() -> None:
