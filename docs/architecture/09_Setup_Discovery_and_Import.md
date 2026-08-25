@@ -873,6 +873,22 @@ are separate version axes:
 - a Home Assistant config-entry version changes only when the persisted host
   layout requires it.
 
+Heating module payload schema v2 is the first policy-complete Heating contract.
+It adds explicit configured diagnostics and notification policies. Notification
+recipient order is meaningful because the current runtime processes recipients
+in configured order, so v2 preserves that order in canonical content and the
+semantic fingerprint. Notification categories remain set-like and normalize to
+unique sorted values.
+
+Policy-less Heating schema-v1 revisions remain integrity-readable and may be
+imported only as inactive drafts. The Heating adapter reports
+`heating.policy_less_schema_v1_requires_recanonicalization` and refuses to
+canonicalize them as v2. An explicit migration or newly materialized v2 draft is
+required; v2 defaults are never silently applied under a schema-v1 identity.
+Canonical defaults describe new canonical setup only. A source converter must
+materialize every effective source value explicitly, including the legacy
+Home Assistant default of `detailed` when `diagnostic_profile` was absent.
+
 v0.1 implements only the explicit legacy-entry converter and otherwise defines
 migration contracts and unsupported-version errors, not a general migration
 engine. A future deterministic migration first retains the original canonical

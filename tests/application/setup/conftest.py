@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 import pytest
 
 from controlel.application.configuration.heating_setup_adapter import (
+    HEATING_SETUP_SCHEMA_VERSION,
     PRIMARY_TEMPERATURE_ROLE,
     SOURCE_DISABLE_TARGET_ROLE,
     SOURCE_ENABLE_TARGET_ROLE,
@@ -66,7 +67,7 @@ def complete_draft(*, draft_id: str = "draft-1", revision: int = 1) -> DraftRevi
         environment_id="home",
         module_key="heating",
         module_instance_id="main-heating",
-        module_schema_version=1,
+        module_schema_version=HEATING_SETUP_SCHEMA_VERSION,
         created_at=NOW,
         updated_at=NOW,
         settings={

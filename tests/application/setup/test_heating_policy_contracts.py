@@ -9,13 +9,20 @@ import pytest
 from pydantic import ValidationError
 
 from controlel.application.configuration.heating_setup_adapter import (
+    HEATING_SETUP_SCHEMA_VERSION,
+    POLICY_LESS_HEATING_SETUP_SCHEMA_VERSION,
     HeatingDiagnosticPolicy,
     HeatingNotificationPolicy,
     HeatingNotificationRecipient,
     HeatingSetupAdapter,
     HeatingSetupPayload,
 )
-from controlel.application.setup import CanonicalConfigurationRevision, DraftRevision
+from controlel.application.setup import (
+    CanonicalConfigurationImporter,
+    CanonicalConfigurationRevision,
+    DraftRevision,
+    InMemorySetupRepository,
+)
 from controlel.application.setup.json_data import normalize_json
 
 from .conftest import NOW, complete_draft
@@ -104,7 +111,7 @@ def test_debug_until_changed_preserves_configured_duration_without_an_expiry_dur
     assert until_changed.model_dump(mode="json")["debug_until_changed"] is True
 
 
-def test_recipient_order_is_canonical_category_sets_normalize_and_duplicate_recipients_fail() -> None:
+def test_recipient_order_is_preserved_category_sets_normalize_and_duplicate_recipients_fail() -> None:
     first = HeatingNotificationRecipient.model_validate(
         {
             "recipient_id": "wall_panel",
@@ -122,8 +129,9 @@ def test_recipient_order_is_canonical_category_sets_normalize_and_duplicate_reci
     forward = HeatingNotificationPolicy(recipients=(first, second))
     reverse = HeatingNotificationPolicy(recipients=(second, first))
 
-    assert forward == reverse
-    assert tuple(recipient.recipient_id for recipient in forward.recipients) == ("family_phone", "wall_panel")
+    assert forward != reverse
+    assert tuple(recipient.recipient_id for recipient in forward.recipients) == ("wall_panel", "family_phone")
+    assert tuple(recipient.recipient_id for recipient in reverse.recipients) == ("family_phone", "wall_panel")
     assert tuple(category.value for category in first.categories) == ("runtime", "supervision")
 
     with pytest.raises(ValidationError, match="recipient IDs must be unique"):
@@ -192,9 +200,33 @@ def test_notification_policy_rejects_values_outside_current_runtime_bounds(field
 
 
 def test_complete_heating_payload_serializes_and_deserializes_losslessly() -> None:
-    payload = HeatingSetupPayload.model_validate(_settings())
+    settings = _settings()
+    notification = settings["notification_policy"]
+    assert isinstance(notification, dict)
+    recipients = notification["recipients"]
+    assert isinstance(recipients, list)
+    recipients.insert(
+        0,
+        {
+            "recipient_id": "wall_panel",
+            "transport": "home_assistant_notify",
+            "target": "notify.wall_panel",
+            "enabled": False,
+            "minimum_level": "critical",
+            "categories": ["safety", "runtime"],
+        },
+    )
+    payload = HeatingSetupPayload.model_validate(settings)
     serialized = payload.model_dump_json()
     reconstructed = HeatingSetupPayload.model_validate_json(serialized)
+    canonical = _canonicalize(_draft(settings))
+    reconstructed_canonical = CanonicalConfigurationRevision.model_validate_json(canonical.canonical_json())
+    reconstructed_canonical_payload = normalize_json(reconstructed_canonical.module_payload)
+    assert isinstance(reconstructed_canonical_payload, dict)
+    reconstructed_canonical_policy = reconstructed_canonical_payload["notification_policy"]
+    assert isinstance(reconstructed_canonical_policy, dict)
+    reconstructed_canonical_recipients = reconstructed_canonical_policy["recipients"]
+    assert isinstance(reconstructed_canonical_recipients, list)
 
     assert reconstructed == payload
     assert reconstructed.diagnostic_policy.diagnostic_profile == "debug"
@@ -207,7 +239,18 @@ def test_complete_heating_payload_serializes_and_deserializes_losslessly() -> No
     assert reconstructed.notification_policy.critical_maximum_per_window == 30
     assert reconstructed.notification_policy.critical_rate_window_seconds == 180.0
     assert reconstructed.notification_policy.history_capacity == 250
-    assert reconstructed.notification_policy.recipients[0].target == "notify.family_phone"
+    assert tuple(recipient.recipient_id for recipient in reconstructed.notification_policy.recipients) == (
+        "wall_panel",
+        "family_phone",
+    )
+    assert tuple(category.value for category in reconstructed.notification_policy.recipients[0].categories) == (
+        "runtime",
+        "safety",
+    )
+    assert [recipient["recipient_id"] for recipient in reconstructed_canonical_recipients] == [
+        "wall_panel",
+        "family_phone",
+    ]
 
 
 def test_representative_complete_heating_configuration_includes_both_policies_in_canonical_payload() -> None:
@@ -269,7 +312,107 @@ def test_existing_setup_drafts_materialize_current_new_entry_policy_defaults() -
     }
 
 
-def test_canonicalization_and_fingerprint_are_independent_of_policy_input_order() -> None:
+def test_heating_schema_and_validator_policy_versions_identify_policy_contract() -> None:
+    adapter = HeatingSetupAdapter()
+    draft = complete_draft()
+    report = adapter.validate(draft, report_id="versioned-policy-report", evaluated_at=NOW)
+
+    assert POLICY_LESS_HEATING_SETUP_SCHEMA_VERSION == 1
+    assert HEATING_SETUP_SCHEMA_VERSION == 2
+    assert draft.module_schema_version == 2
+    assert adapter.module_schema_version == 2
+    assert adapter.validator_policy_version == 3
+    assert report.validator_policy_version == 3
+
+
+def test_policy_less_schema_v1_revision_imports_only_to_blocked_draft() -> None:
+    current = _canonicalize(complete_draft())
+    document = normalize_json(current.canonical_data())
+    assert isinstance(document, dict)
+    document.pop("document_hash")
+    document.pop("semantic_configuration_fingerprint")
+    document["module_schema_version"] = POLICY_LESS_HEATING_SETUP_SCHEMA_VERSION
+    payload = document["module_payload"]
+    assert isinstance(payload, dict)
+    payload.pop("diagnostic_policy")
+    payload.pop("notification_policy")
+    old_revision = CanonicalConfigurationRevision.model_validate(document)
+    repository = InMemorySetupRepository()
+    imported = CanonicalConfigurationImporter(repository).import_to_draft(
+        old_revision.canonical_json(),
+        draft_id="policy-less-schema-v1",
+        imported_at=NOW,
+        target_environment_id="home",
+    )
+
+    adapter = HeatingSetupAdapter()
+    report = adapter.validate(imported.draft, report_id="schema-v1-report", evaluated_at=NOW)
+    issue = next(
+        issue
+        for issue in report.issues
+        if issue.code == "heating.policy_less_schema_v1_requires_recanonicalization"
+    )
+
+    assert imported.activated is False
+    assert imported.draft.module_schema_version == 1
+    assert report.activation_ready is False
+    assert "heating.invalid_setting" not in {item.code for item in report.issues}
+    assert issue.parameters == {
+        "actual_module_schema_version": 1,
+        "required_module_schema_version": 2,
+    }
+    assert issue.suggested_action == "create_explicit_policy_bearing_schema_v2_draft"
+    assert repository.get_active_reference(("home", "heating", "main-heating")) is None
+    with pytest.raises(
+        ValueError,
+        match="policy-less Heating schema version 1 requires explicit migration or recanonicalization",
+    ):
+        adapter.canonicalize(
+            imported.draft,
+            report,
+            configuration_id="schema-v1-configuration",
+            revision_id="schema-v1-revision",
+            revision=1,
+            provider="home_assistant",
+            provider_instance_id="ha-home",
+            created_at=NOW,
+            actor="system:migration",
+            source="setup_import",
+            change_kind="MIGRATE",
+            reason="explicit_policy_upgrade_required",
+            core_version="0.13.0",
+            integration_version="0.13.0",
+        )
+
+
+def test_source_converter_must_materialize_legacy_detailed_profile_instead_of_using_canonical_default() -> None:
+    default_settings = _settings()
+    default_settings.pop("diagnostic_policy")
+    explicit_legacy_settings = deepcopy(default_settings)
+    explicit_legacy_settings["diagnostic_policy"] = {
+        "diagnostic_profile": "detailed",
+        "configured_debug_duration_seconds": 3600.0,
+        "debug_until_changed": False,
+        "diagnostic_profile_before_debug": "detailed",
+    }
+
+    canonical_default = _canonicalize(_draft(default_settings))
+    explicit_legacy = _canonicalize(_draft(explicit_legacy_settings))
+    canonical_default_payload = normalize_json(canonical_default.module_payload)
+    explicit_legacy_payload = normalize_json(explicit_legacy.module_payload)
+    assert isinstance(canonical_default_payload, dict)
+    assert isinstance(explicit_legacy_payload, dict)
+    canonical_default_diagnostic = canonical_default_payload["diagnostic_policy"]
+    explicit_legacy_diagnostic = explicit_legacy_payload["diagnostic_policy"]
+    assert isinstance(canonical_default_diagnostic, dict)
+    assert isinstance(explicit_legacy_diagnostic, dict)
+
+    assert canonical_default_diagnostic["diagnostic_profile"] == "basic"
+    assert explicit_legacy_diagnostic["diagnostic_profile"] == "detailed"
+    assert canonical_default.semantic_configuration_fingerprint != explicit_legacy.semantic_configuration_fingerprint
+
+
+def test_reversing_recipient_order_changes_canonical_payload_and_semantic_fingerprint() -> None:
     forward_settings = _settings()
     notification = deepcopy(forward_settings["notification_policy"])
     assert isinstance(notification, dict)
@@ -301,9 +444,25 @@ def test_canonicalization_and_fingerprint_are_independent_of_policy_input_order(
     forward = _canonicalize(_draft(forward_settings))
     reverse = _canonicalize(_draft(reverse_settings))
 
-    assert forward.module_payload == reverse.module_payload
-    assert forward.semantic_configuration_fingerprint == reverse.semantic_configuration_fingerprint
-    assert forward.canonical_json() == reverse.canonical_json()
+    forward_policy = normalize_json(forward.module_payload["notification_policy"])
+    reverse_policy = normalize_json(reverse.module_payload["notification_policy"])
+    assert isinstance(forward_policy, dict)
+    assert isinstance(reverse_policy, dict)
+    forward_recipients = forward_policy["recipients"]
+    reverse_recipients = reverse_policy["recipients"]
+    assert isinstance(forward_recipients, list)
+    assert isinstance(reverse_recipients, list)
+    assert [recipient["recipient_id"] for recipient in forward_recipients] == [
+        "family_phone",
+        "alarm_panel",
+    ]
+    assert [recipient["recipient_id"] for recipient in reverse_recipients] == [
+        "alarm_panel",
+        "family_phone",
+    ]
+    assert forward.module_payload != reverse.module_payload
+    assert forward.semantic_configuration_fingerprint != reverse.semantic_configuration_fingerprint
+    assert forward.canonical_json() != reverse.canonical_json()
 
 
 def test_both_policies_are_behavior_affecting_semantic_fingerprint_content() -> None:

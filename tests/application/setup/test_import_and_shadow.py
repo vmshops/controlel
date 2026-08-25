@@ -177,7 +177,7 @@ def test_shadow_derived_configuration_cannot_be_marked_authoritative(canonical_r
             semantic_configuration_fingerprint=canonical_revision.semantic_configuration_fingerprint,
             module_key="heating",
             module_instance_id="main-heating",
-            module_schema_version=1,
+            module_schema_version=canonical_revision.module_schema_version,
             origin=RuntimeConfigurationOrigin.SHADOW_SIMULATION,
             environment_id="shadow",
             bindings=(),
