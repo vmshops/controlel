@@ -90,6 +90,30 @@ def complete_draft(*, draft_id: str = "draft-1", revision: int = 1) -> DraftRevi
                 "service": "revoke_heat_permission",
                 "target_binding_role": SOURCE_DISABLE_TARGET_ROLE,
             },
+            "diagnostic_policy": {
+                "diagnostic_profile": "debug",
+                "configured_debug_duration_seconds": 1800.0,
+                "debug_until_changed": True,
+                "diagnostic_profile_before_debug": "basic",
+            },
+            "notification_policy": {
+                "enabled": True,
+                "recipients": [
+                    {
+                        "recipient_id": "family_phone",
+                        "transport": "home_assistant_notify",
+                        "target": "notify.family_phone",
+                        "enabled": True,
+                        "minimum_level": "detailed",
+                        "categories": ["supervision", "runtime"],
+                    }
+                ],
+                "maximum_per_window": 4,
+                "rate_window_seconds": 120.0,
+                "critical_maximum_per_window": 30,
+                "critical_rate_window_seconds": 180.0,
+                "history_capacity": 250,
+            },
         },
         bindings=bindings,
     )
