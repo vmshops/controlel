@@ -4,6 +4,7 @@ import pytest
 
 from controlel.application.configuration.heating_setup_adapter import (
     HEAT_DELIVERY_ACTUATOR_ROLE,
+    HEATING_SETUP_SCHEMA_VERSION,
     HeatingSetupAdapter,
 )
 from controlel.application.setup import (
@@ -27,7 +28,7 @@ def test_incomplete_draft_can_be_saved_reopened_edited_and_deleted() -> None:
         environment_id="home",
         module_key="heating",
         module_instance_id="main-heating",
-        module_schema_version=1,
+        module_schema_version=HEATING_SETUP_SCHEMA_VERSION,
         created_at=NOW,
         updated_at=NOW,
         settings=settings,
@@ -72,7 +73,7 @@ def test_validation_failure_does_not_destroy_or_edit_draft() -> None:
         environment_id="home",
         module_key="heating",
         module_instance_id="main-heating",
-        module_schema_version=1,
+        module_schema_version=HEATING_SETUP_SCHEMA_VERSION,
         created_at=NOW,
         updated_at=NOW,
         settings={"zone_name": "incomplete"},

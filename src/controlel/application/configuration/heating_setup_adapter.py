@@ -51,7 +51,8 @@ from controlel.domain.notifications import (
 )
 from controlel.domain.operational_events import OperationalEventCategory
 
-HEATING_SETUP_SCHEMA_VERSION = 1
+POLICY_LESS_HEATING_SETUP_SCHEMA_VERSION = 1
+HEATING_SETUP_SCHEMA_VERSION = 2
 PRIMARY_TEMPERATURE_ROLE = "heating.primary_temperature"
 SOURCE_ENABLE_TARGET_ROLE = "heating.source.enable_target"
 SOURCE_DISABLE_TARGET_ROLE = "heating.source.disable_target"
@@ -276,7 +277,7 @@ class HeatingNotificationPolicy(BaseModel):
         return _finite_configured_duration(value, str(getattr(info, "field_name", "notification window")))
 
     @model_validator(mode="after")
-    def recipients_must_be_bounded_unique_and_deterministic(self) -> HeatingNotificationPolicy:
+    def recipients_must_be_bounded_and_unique(self) -> HeatingNotificationPolicy:
         if len(self.recipients) > MAX_NOTIFICATION_RECIPIENTS:
             raise ValueError(f"notification recipients must not exceed {MAX_NOTIFICATION_RECIPIENTS}")
         recipient_ids = tuple(recipient.recipient_id for recipient in self.recipients)
@@ -287,16 +288,11 @@ class HeatingNotificationPolicy(BaseModel):
         )
         if len(enabled_bindings) != len(set(enabled_bindings)):
             raise ValueError("enabled notification transport and target bindings must be unique")
-        object.__setattr__(
-            self,
-            "recipients",
-            tuple(sorted(self.recipients, key=lambda recipient: recipient.recipient_id)),
-        )
         return self
 
 
 class HeatingSetupPayload(BaseModel):
-    """Small normalized Heating v1 payload with canonical units."""
+    """Small normalized Heating v2 payload with canonical units and explicit policies."""
 
     zone_id: str = Field(min_length=1)
     zone_name: str = Field(min_length=1)
@@ -377,7 +373,7 @@ class HeatingSetupAdapter:
 
     module_key = "heating"
     module_schema_version = HEATING_SETUP_SCHEMA_VERSION
-    validator_policy_version = 2
+    validator_policy_version = 3
     recommendation_policy_version = HEATING_RECOMMENDATION_POLICY_VERSION
     required_roles = frozenset(
         {
@@ -533,28 +529,53 @@ class HeatingSetupAdapter:
         resolution_generation: int | None = None,
     ) -> ValidationReport:
         issues: list[ValidationIssue] = []
-        if draft.module_key != self.module_key or draft.module_schema_version != self.module_schema_version:
+        supported_contract = (
+            draft.module_key == self.module_key and draft.module_schema_version == self.module_schema_version
+        )
+        if not supported_contract:
+            policy_less_schema = (
+                draft.module_key == self.module_key
+                and draft.module_schema_version == POLICY_LESS_HEATING_SETUP_SCHEMA_VERSION
+            )
             issues.append(
                 _issue(
-                    "heating.unsupported_module_contract",
+                    (
+                        "heating.policy_less_schema_v1_requires_recanonicalization"
+                        if policy_less_schema
+                        else "heating.unsupported_module_contract"
+                    ),
                     ("module_schema_version",),
-                    "setup.heating.unsupported_module_contract",
+                    (
+                        "setup.heating.policy_less_schema_v1_requires_recanonicalization"
+                        if policy_less_schema
+                        else "setup.heating.unsupported_module_contract"
+                    ),
+                    parameters={
+                        "actual_module_schema_version": draft.module_schema_version,
+                        "required_module_schema_version": self.module_schema_version,
+                    },
+                    suggested_action=(
+                        "create_explicit_policy_bearing_schema_v2_draft"
+                        if policy_less_schema
+                        else "use_supported_heating_module_contract"
+                    ),
                 )
             )
         normalized: HeatingSetupPayload | None = None
-        try:
-            normalized = HeatingSetupPayload.model_validate(draft.settings)
-        except ValidationError as error:
-            for detail in error.errors(include_url=False):
-                issues.append(
-                    ValidationIssue(
-                        code="heating.invalid_setting",
-                        severity=ValidationSeverity.ERROR,
-                        path=tuple(str(part) for part in detail["loc"]),
-                        message_key="setup.heating.invalid_setting",
-                        parameters={"error_type": detail["type"]},
+        if supported_contract:
+            try:
+                normalized = HeatingSetupPayload.model_validate(draft.settings)
+            except ValidationError as error:
+                for detail in error.errors(include_url=False):
+                    issues.append(
+                        ValidationIssue(
+                            code="heating.invalid_setting",
+                            severity=ValidationSeverity.ERROR,
+                            path=tuple(str(part) for part in detail["loc"]),
+                            message_key="setup.heating.invalid_setting",
+                            parameters={"error_type": detail["type"]},
+                        )
                     )
-                )
         required_roles = set(self.required_roles)
         if normalized is not None and normalized.heat_delivery_mode == "setpoint_assist":
             required_roles.add(HEAT_DELIVERY_ACTUATOR_ROLE)
@@ -692,6 +713,15 @@ class HeatingSetupAdapter:
         integration_version: str | None = None,
         parent_revision_id: str | None = None,
     ) -> CanonicalConfigurationRevision:
+        if draft.module_key != self.module_key or draft.module_schema_version != self.module_schema_version:
+            if (
+                draft.module_key == self.module_key
+                and draft.module_schema_version == POLICY_LESS_HEATING_SETUP_SCHEMA_VERSION
+            ):
+                raise ValueError(
+                    "policy-less Heating schema version 1 requires explicit migration or recanonicalization"
+                )
+            raise ValueError("Heating draft uses an unsupported module contract")
         normalized = HeatingSetupPayload.model_validate(draft.settings)
         return CanonicalConfigurationRevision.from_validated_draft(
             draft,
