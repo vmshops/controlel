@@ -271,6 +271,22 @@
 
 .validation-item__code { font-size: 0.8rem; }
 .validation-item__message { flex-basis: 100%; }
+.validation-item__details { flex-basis: 100%; color: var(--text-muted); font-size: 0.8rem; }
+
+.validation-group { display: grid; gap: 0.5rem; }
+.validation-group__title { margin: 0; font-size: 0.9rem; }
+
+.readiness-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.75rem 0.9rem;
+  border-radius: 8px;
+}
+
+.readiness-summary--ready { background: var(--positive-soft); }
+.readiness-summary--not-ready { background: var(--negative-soft); }
+.readiness-summary__message { font-size: 0.9rem; }
 
 /* -------------------------------------------------------------- readiness */
 

@@ -70,6 +70,7 @@
     const state = {
       step: 1,
       status: "idle",
+      entryState: null,
       error: null,
       errorOperation: null,
       snapshot: null,
@@ -130,6 +131,56 @@
       state.dirty = false;
     }
 
+    function draftIsReady() {
+      return Boolean(
+        state.session &&
+        !state.dirty &&
+        state.session.validation_status === "CURRENT" &&
+        state.session.activation_ready
+      );
+    }
+
+    function roleLabel(role) {
+      const key = {
+        [PRIMARY_TEMPERATURE_ROLE]: "wizard.role_sensor",
+        [SOURCE_ENABLE_TARGET_ROLE]: "wizard.source_enable_target",
+        [SOURCE_DISABLE_TARGET_ROLE]: "wizard.source_disable_target",
+        "heating.source.reported_state": "wizard.reported_source_state",
+        "heating.heat_delivery.actuator": "wizard.heat_delivery_actuator",
+      }[role];
+      return key ? t(key) : role || t("common.unknown");
+    }
+
+    function validationMessage(issue) {
+      const path = Array.isArray(issue.path) && issue.path.length
+        ? issue.path.join(".")
+        : t("common.unknown");
+      const parameters = {
+        ...(issue.parameters || {}),
+        field: path,
+        role: roleLabel(issue.module_role || (issue.parameters && issue.parameters.role)),
+      };
+      return CI18N && typeof CI18N.has === "function" && CI18N.has(issue.message_key)
+        ? t(issue.message_key, parameters)
+        : t("wizard.validation_issue_fallback");
+    }
+
+    function validationDetails(issue) {
+      const details = [];
+      if (Array.isArray(issue.path) && issue.path.length) {
+        details.push(t("wizard.validation_path", { path: issue.path.join(".") }));
+      }
+      if (
+        issue.suggested_action &&
+        CI18N &&
+        typeof CI18N.has === "function" &&
+        CI18N.has(`setup_action.${issue.suggested_action}`)
+      ) {
+        details.push(t(`setup_action.${issue.suggested_action}`));
+      }
+      return details.join(" · ");
+    }
+
     function requestContext() {
       return { snapshot_id: makeId("snapshot"), captured_at: now() };
     }
@@ -164,6 +215,7 @@
           storeDraftId(session.draft_id);
         }
         applySession(session);
+        if (existingDraftId) state.step = 4;
         state.status = "loaded";
       } catch (error) {
         state.status = "error";
@@ -305,12 +357,59 @@
 
     function renderDiscovery() {
       if (state.status === "idle") {
+        const existingDraftId = storedDraftId();
+        const entry = state.entryState;
+        const readiness = entry && entry.status === "loaded" ? entry.readiness : null;
+        let entryNote = null;
+        if (readiness) {
+          const messageKey = {
+            ready: "wizard.entry_ready",
+            incomplete: "wizard.entry_incomplete",
+            invalid: "wizard.entry_invalid",
+          }[readiness.state] || "wizard.entry_unknown";
+          const tone = readiness.state === "ready"
+            ? "positive"
+            : readiness.state === "invalid"
+              ? "negative"
+              : readiness.state === "incomplete"
+                ? "warning"
+                : "neutral";
+          entryNote = el("div", { class: "panel" },
+            el("h3", { class: "panel__title" }, t("wizard.setup_entry")),
+            el("div", { class: "section__badges" },
+              badge(
+                readiness.state === "ready"
+                  ? t("wizard.ready")
+                  : readiness.state === "unknown"
+                    ? t("common.unknown")
+                    : t("wizard.not_ready"),
+                readiness.state === "ready" ? "positive" : readiness.state === "unknown" ? "neutral" : "warning"
+              ),
+              readiness.reason_code ? badge(readiness.reason_code, "neutral") : null
+            ),
+            noteBox(t(messageKey), tone)
+          );
+        } else if (entry && entry.status === "error") {
+          entryNote = noteBox(
+            t("wizard.entry_unavailable", {
+              message: entry.error && entry.error.message ? entry.error.message : t("common.request_failed"),
+            }),
+            "warning"
+          );
+        }
         return el("div", { class: "step" },
           el("h2", { class: "step__title" }, t("wizard.discovery_title")),
           el("p", { class: "step__lead" }, t("wizard.discovery_lead")),
-          noteBox(t("wizard.not_discovered"), "neutral"),
+          entryNote,
+          existingDraftId
+            ? noteBox(t("wizard.resume_available", { draft: existingDraftId }), "info")
+            : noteBox(t("wizard.not_discovered"), "neutral"),
           el("div", { class: "panel__actions" },
-            el("button", { class: "btn btn--primary", onclick: () => startDiscovery() }, t("wizard.start_discovery"))
+            el(
+              "button",
+              { class: "btn btn--primary", onclick: () => startDiscovery() },
+              existingDraftId ? t("wizard.resume_draft") : t("wizard.start_discovery")
+            )
           )
         );
       }
@@ -441,6 +540,27 @@
     function renderReview() {
       const session = state.session;
       const issues = session.validation_issues || [];
+      const blockingIssues = issues.filter((issue) => issue.severity === "ERROR");
+      const warnings = issues.filter((issue) => issue.severity !== "ERROR");
+      const ready = draftIsReady();
+      const readinessMessage = state.dirty
+        ? t("wizard.not_ready_unsaved")
+        : session.validation_status !== "CURRENT"
+          ? t("wizard.not_ready_validation", { status: session.validation_status })
+          : ready
+            ? t("wizard.ready_not_active")
+            : t("wizard.not_ready_blocking", { count: session.blocking_issue_count });
+
+      function issueList(group, severity) {
+        if (!group.length) return null;
+        return el("ul", { class: `validation-list validation-list--${severity}` }, group.map((issue) => validationItem({
+          severity,
+          code: issue.code,
+          message: validationMessage(issue),
+          details: validationDetails(issue),
+        })));
+      }
+
       return el("div", { class: "step" },
         el("h2", { class: "step__title" }, t("wizard.review_title")),
         el("p", { class: "step__lead" }, t("wizard.review_persisted_lead")),
@@ -457,18 +577,27 @@
         ),
         el("div", { class: "panel" },
           el("h3", { class: "panel__title" }, t("wizard.validation_report")),
+          el("div", { class: `readiness-summary readiness-summary--${ready ? "ready" : "not-ready"}` },
+            badge(ready ? t("wizard.ready") : t("wizard.not_ready"), ready ? "positive" : "negative"),
+            el("span", { class: "readiness-summary__message" }, readinessMessage)
+          ),
           el("div", { class: "section__badges" },
-            badge(session.validation_status, session.validation_status === "CURRENT" ? "info" : "warning"),
+            badge(t(`wizard.validation_status_${String(session.validation_status).toLowerCase()}`), session.validation_status === "CURRENT" ? "info" : "warning"),
             badge(t("wizard.blocking_count", { count: session.blocking_issue_count }), session.blocking_issue_count ? "negative" : "positive"),
             badge(t("wizard.warning_count", { count: session.warning_count }), session.warning_count ? "warning" : "neutral")
           ),
-          issues.length
-            ? el("ul", { class: "validation-list" }, issues.map((issue) => validationItem({
-                severity: issue.severity === "ERROR" ? "blocking" : "warning",
-                code: issue.code,
-                message: issue.message_key,
-              })))
-            : noteBox(t("wizard.validation_passed"), "positive"),
+          blockingIssues.length
+            ? el("div", { class: "validation-group validation-group--blocking" },
+                el("h4", { class: "validation-group__title" }, t("wizard.blocking_issues")),
+                issueList(blockingIssues, "blocking")
+              )
+            : noteBox(t("wizard.no_blocking_issues"), ready ? "positive" : "neutral"),
+          warnings.length
+            ? el("div", { class: "validation-group validation-group--warning" },
+                el("h4", { class: "validation-group__title" }, t("wizard.validation_warnings")),
+                issueList(warnings, "warning")
+              )
+            : null,
           noteBox(t("wizard.validation_preparation"), "neutral")
         )
       );
@@ -482,6 +611,7 @@
       }
       draftStatus.hidden = false;
       draftStatus.replaceChildren(
+        badge(draftIsReady() ? t("wizard.ready") : t("wizard.not_ready"), draftIsReady() ? "positive" : "negative"),
         badge(state.session.incomplete ? t("wizard.incomplete_draft") : t("wizard.draft_complete"), state.session.incomplete ? "warning" : "positive"),
         el("span", { class: "draft-status__text" },
           t("wizard.revision_status", {
@@ -544,6 +674,10 @@
 
     const api = {
       get state() { return state; },
+      setEntryState(entryState) {
+        state.entryState = entryState && typeof entryState === "object" ? entryState : null;
+        render();
+      },
       startDiscovery,
       startNewDraft,
       saveDraft,

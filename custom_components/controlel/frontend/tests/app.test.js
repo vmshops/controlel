@@ -31,6 +31,7 @@ require("../i18n.js");
 require("../mock-app-data.js");
 require("../api-client.js");
 require("../components.js");
+require("../wizard.js");
 require("../app.js");
 
 const CW = globalThis.CW;
@@ -571,10 +572,16 @@ test("bootstrap resolves shell nodes inside the supplied shadow root", async () 
   const shadowRoot = host.attachShadow({ mode: "open" });
   const navRoot = new Element("div"); navRoot.id = "app-nav";
   const viewRoot = new Element("main"); viewRoot.id = "view-root";
+  const wizardRoot = new Element("div"); wizardRoot.id = "wizard-view";
+  const draftStatus = new Element("div"); draftStatus.id = "draft-status";
+  const stepper = new Element("nav"); stepper.id = "stepper";
+  const stepPanel = new Element("section"); stepPanel.id = "step-panel";
+  const wizardFooter = new Element("footer"); wizardFooter.id = "wizard-footer";
+  wizardRoot.append(draftStatus, stepper, stepPanel, wizardFooter);
   const topbar = new Element("span"); topbar.id = "topbar-status";
   const modeRoot = new Element("p"); modeRoot.id = "app-mode";
   const shadowOnly = new Element("span"); shadowOnly.id = "shadow-only";
-  shadowRoot.append(navRoot, viewRoot, topbar, modeRoot, shadowOnly);
+  shadowRoot.append(navRoot, viewRoot, wizardRoot, topbar, modeRoot, shadowOnly);
   documentRoot.append(host);
 
   assert.equal(documentStub.getElementById("shadow-only"), null, "document lookup does not cross the shadow root");
@@ -590,6 +597,9 @@ test("bootstrap resolves shell nodes inside the supplied shadow root", async () 
 
   assert.ok(navRoot.findAll("app-nav__item").length > 0, "shadow-root navigation rendered");
   assert.ok(viewRoot.textContent.includes("Overview"), "shadow-root view rendered");
+  assert.ok(app.setupWizard, "the setup write wizard is attached");
+  assert.ok(stepPanel.textContent.includes("Current backend setup state"), "read-only readiness reaches wizard entry");
+  assert.ok(stepPanel.textContent.includes("Not Ready"), "incomplete backend state guides the wizard entry");
   assert.equal(modeRoot.textContent, "Frontend API v1 · live");
   assert.equal(decoyNav.children.length, 0, "outer document navigation was untouched");
   assert.equal(decoyView.children.length, 0, "outer document view was untouched");

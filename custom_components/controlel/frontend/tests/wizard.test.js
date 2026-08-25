@@ -126,8 +126,10 @@ function memoryStorage(initial = {}) {
 function fakeClient({
   failDiscovery = false,
   failUpdate = false,
+  failValidation = false,
   reopenOverrides = {},
   updateOverrides = {},
+  validateOverrides = {},
 } = {}) {
   const calls = [];
   return {
@@ -168,7 +170,8 @@ function fakeClient({
     },
     validateDraft(request) {
       calls.push(["validate", request]);
-      return Promise.resolve(session({ draft_revision: 2 }));
+      if (failValidation) return Promise.reject(new Error("validation backend unavailable"));
+      return Promise.resolve(session({ draft_revision: 2, ...validateOverrides }));
     },
   };
 }
@@ -254,12 +257,126 @@ test("wizard saves an updated draft and validates without activation or runtime 
 test("wizard reopens the stored backend draft after real discovery", async () => {
   const client = fakeClient();
   const storage = memoryStorage({ "controlel.setup.draft.v1.entry-real": "draft-existing" });
-  const { wizard } = create(client, storage);
+  const { panel, wizard } = create(client, storage);
 
-  await wizard.startDiscovery();
+  assert.ok(panel.findButton("Resume draft"), "the existing draft is offered explicitly");
+  panel.findButton("Resume draft").dispatch("click");
+  await settle();
 
   assert.deepEqual(client.calls.map(([operation]) => operation), ["discovery", "recommendations", "reopen"]);
   assert.equal(wizard.state.session.draft_id, "draft-existing");
+  assert.equal(wizard.state.step, 4, "a resumed draft opens on its backend validation report");
+  assert.equal(client.calls.some(([operation]) => operation === "start"), false, "resume never creates a duplicate draft");
+});
+
+test("wizard entry reflects Ready and incomplete backend setup states without treating unknown as false", () => {
+  const ready = create(fakeClient());
+  ready.wizard.setEntryState({
+    status: "loaded",
+    readiness: { state: "ready", reason_code: null },
+    error: null,
+  });
+  assert.ok(ready.panel.textContent.includes("Current backend setup state"));
+  assert.ok(ready.panel.textContent.includes("Ready"));
+  assert.ok(ready.panel.textContent.includes("does not mean a wizard draft was activated"));
+
+  ready.wizard.setEntryState({
+    status: "loaded",
+    readiness: { state: "incomplete", reason_code: "SETUP_INCOMPLETE" },
+    error: null,
+  });
+  assert.ok(ready.panel.textContent.includes("Not Ready"));
+  assert.ok(ready.panel.textContent.includes("SETUP_INCOMPLETE"));
+  assert.ok(ready.panel.findButton("Start discovery"), "incomplete setup is guided into the wizard");
+
+  ready.wizard.setEntryState({
+    status: "loaded",
+    readiness: { state: "unknown", reason_code: "runtime_readiness_unknown" },
+    error: null,
+  });
+  assert.ok(ready.panel.textContent.includes("Unknown"));
+  assert.equal(ready.panel.textContent.includes("Not Ready"), false, "unknown is not presented as false");
+});
+
+test("wizard renders blocking backend validation as a clear Not Ready state", async () => {
+  const { panel, wizard } = create(fakeClient());
+  await wizard.startDiscovery();
+  wizard.goToStep(4);
+
+  assert.ok(panel.textContent.includes("Not Ready"));
+  assert.ok(panel.textContent.includes("Blocking issues"));
+  assert.equal(panel.findAll("validation-item--blocking").length, 1);
+  assert.ok(panel.textContent.includes("target_temperature_celsius"), "the backend field path remains available");
+  assert.ok(panel.textContent.includes("heating.invalid_setting"), "the stable technical code remains available");
+  assert.equal(panel.textContent.includes("setup.heating.invalid_setting"), false, "the message key is not shown as user copy");
+});
+
+test("warning-only backend validation is Ready while warnings remain distinct", async () => {
+  const warning = {
+    code: "heating.ephemeral_custom_service_target",
+    severity: "WARNING",
+    path: ["bindings", W.SOURCE_ENABLE_TARGET_ROLE],
+    module_role: W.SOURCE_ENABLE_TARGET_ROLE,
+    message_key: "setup.heating.ephemeral_custom_service_target",
+    parameters: {},
+    evidence: { resolution_status: "EPHEMERAL" },
+    suggested_action: "confirm_external_service_target_stability",
+  };
+  const client = fakeClient({
+    validateOverrides: {
+      incomplete: false,
+      activation_ready: true,
+      blocking_issue_count: 0,
+      warning_count: 1,
+      validation_issues: [warning],
+    },
+  });
+  const { panel, wizard } = create(client);
+  await wizard.startDiscovery();
+  wizard.goToStep(4);
+  await wizard.validateDraft();
+
+  assert.ok(panel.textContent.includes("Ready"));
+  assert.ok(panel.textContent.includes("not activated"));
+  assert.ok(panel.textContent.includes("Warnings"));
+  assert.equal(panel.findAll("validation-item--warning").length, 1);
+  assert.equal(panel.findAll("validation-item--blocking").length, 0);
+});
+
+test("Ready backend validation is explicit and remains non-activating", async () => {
+  const client = fakeClient({
+    validateOverrides: {
+      incomplete: false,
+      activation_ready: true,
+      blocking_issue_count: 0,
+      warning_count: 0,
+      validation_issues: [],
+    },
+  });
+  const { panel, footer, wizard } = create(client);
+  await wizard.startDiscovery();
+  wizard.goToStep(4);
+  await wizard.validateDraft();
+
+  assert.ok(panel.textContent.includes("Ready"));
+  assert.ok(panel.textContent.includes("The draft is Ready, but it is not activated."));
+  assert.equal(footer.findButton("Activate"), null);
+  assert.equal(client.calls.some(([operation]) => operation === "activate" || operation === "canonicalize"), false);
+});
+
+test("supported backend validation messages render in the selected language", async () => {
+  globalThis.CI18N.setLanguage("cs");
+  try {
+    const { panel, wizard } = create(fakeClient());
+    await wizard.startDiscovery();
+    wizard.goToStep(4);
+
+    assert.ok(panel.textContent.includes("Nastavení „target_temperature_celsius“ chybí nebo je neplatné."));
+    assert.equal(panel.textContent.includes("setup.heating.invalid_setting"), false);
+    assert.ok(panel.textContent.includes("heating.invalid_setting"), "the technical code is language-independent");
+  } finally {
+    globalThis.CI18N.setLanguage("en");
+  }
 });
 
 test("wizard preserves authoritative settings outside the edited wizard fields", async () => {
@@ -346,4 +463,19 @@ test("wizard shows draft update errors without replacing them with mock state", 
   assert.ok(panel.textContent.includes("draft validation failed"));
   assert.equal(panel.textContent.includes("Living Room"), false);
   assert.equal(client.calls.filter(([operation]) => operation === "update").length, 1, "no silent fallback request is made");
+});
+
+test("wizard keeps backend validation failures visible", async () => {
+  const client = fakeClient({ failValidation: true });
+  const { panel, wizard } = create(client);
+  await wizard.startDiscovery();
+  wizard.goToStep(4);
+
+  await wizard.validateDraft();
+
+  assert.equal(wizard.state.status, "error");
+  assert.ok(panel.textContent.includes("Setup draft unavailable"));
+  assert.ok(panel.textContent.includes("validation backend unavailable"));
+  assert.equal(client.calls.filter(([operation]) => operation === "validate").length, 1);
+  assert.equal(client.calls.some(([operation]) => operation === "activate" || operation === "canonicalize"), false);
 });

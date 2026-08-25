@@ -127,13 +127,14 @@
     );
   }
 
-  /** One validation issue row. issue: {severity, code, message}. */
+  /** One validation issue row. issue: {severity, code, message, details?}. */
   function validationItem(issue) {
     const tone = { blocking: "negative", warning: "warning", info: "info" }[issue.severity] || "neutral";
     return el("li", { class: `validation-item validation-item--${issue.severity}` },
       badge(issue.severity.toUpperCase(), tone),
       el("code", { class: "validation-item__code" }, issue.code),
       el("span", { class: "validation-item__message" }, issue.message),
+      issue.details ? el("span", { class: "validation-item__details" }, issue.details) : null,
     );
   }
 

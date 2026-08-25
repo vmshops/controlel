@@ -221,6 +221,7 @@
    * @param {object} [opts.topbarStatusRoot] element for the overall status badge
    * @param {object} [opts.modeRoot]         element for the connection-mode label
    * @param {object} [opts.renderRoot]       document/shadow root containing the shell
+   * @param {Function} [opts.onSetupState]   reports read-only setup entry state to the wizard
    */
   function createApp({
     mode,
@@ -232,6 +233,7 @@
     topbarStatusRoot,
     modeRoot,
     renderRoot,
+    onSetupState,
   }) {
     const state = {
       route: DEFAULT_ROUTE,
@@ -340,6 +342,14 @@
     }
 
     function render() {
+      if (typeof onSetupState === "function") {
+        const setup = state.domains.setup;
+        onSetupState({
+          status: setup.status,
+          readiness: setup.status === "loaded" && setup.data ? setup.data.readiness : null,
+          error: setup.error,
+        });
+      }
       if (navRoot) {
         navRoot.replaceChildren(navList({
           items: visibleItems(NAV_ITEMS).map((item) =>
@@ -974,6 +984,15 @@
       mode = "unavailable";
     }
 
+    const setupWizard = setupWriteClient && global.CA_WIZARD && typeof global.CA_WIZARD.createSetupWizard === "function"
+      ? global.CA_WIZARD.createSetupWizard({
+          client: setupWriteClient,
+          configEntryId: env.configEntryId,
+          root,
+          storage: global.localStorage || null,
+        })
+      : null;
+
     const app = createApp({
       mode,
       dataSource,
@@ -984,16 +1003,12 @@
       topbarStatusRoot: _findById(root, "topbar-status"),
       modeRoot: _findById(root, "app-mode"),
       renderRoot: root,
+      onSetupState: setupWizard && typeof setupWizard.setEntryState === "function"
+        ? (entryState) => setupWizard.setEntryState(entryState)
+        : null,
     });
 
-    if (setupWriteClient && global.CA_WIZARD && typeof global.CA_WIZARD.createSetupWizard === "function") {
-      app.setupWizard = global.CA_WIZARD.createSetupWizard({
-        client: setupWriteClient,
-        configEntryId: env.configEntryId,
-        root,
-        storage: global.localStorage || null,
-      });
-    }
+    if (setupWizard) app.setupWizard = setupWizard;
 
     // Hash routing: deep links + back/forward (re-entrant, see above).
     _setupHashRouting(app);
