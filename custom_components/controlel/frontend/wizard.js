@@ -120,7 +120,7 @@
       state.session = session;
       state.snapshot = session.discovery;
       state.recommendations = session.recommendations;
-      state.draft.areaId = typeof session.settings.zone_id === "string" ? session.settings.zone_id : state.draft.areaId;
+      state.draft.areaId = typeof session.settings.zone_id === "string" ? session.settings.zone_id : null;
       state.draft.selections = {};
       state.draft.confirmations = {};
       for (const selection of session.selections) {
@@ -200,7 +200,7 @@
     }
 
     function draftSettings() {
-      const settings = {};
+      const settings = { ...state.session.settings };
       const area = areas().find((item) => item.native_id === state.draft.areaId);
       if (area && area.native_id) {
         settings.zone_id = area.native_id;

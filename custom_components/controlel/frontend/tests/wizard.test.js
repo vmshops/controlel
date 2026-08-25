@@ -123,7 +123,12 @@ function memoryStorage(initial = {}) {
   };
 }
 
-function fakeClient({ failDiscovery = false, failUpdate = false } = {}) {
+function fakeClient({
+  failDiscovery = false,
+  failUpdate = false,
+  reopenOverrides = {},
+  updateOverrides = {},
+} = {}) {
   const calls = [];
   return {
     calls,
@@ -141,7 +146,7 @@ function fakeClient({ failDiscovery = false, failUpdate = false } = {}) {
     },
     reopenDraft(request) {
       calls.push(["reopen", request]);
-      return Promise.resolve(session({ draft_id: request.draft_id }));
+      return Promise.resolve(session({ draft_id: request.draft_id, ...reopenOverrides }));
     },
     updateDraft(request) {
       calls.push(["update", request]);
@@ -158,6 +163,7 @@ function fakeClient({ failDiscovery = false, failUpdate = false } = {}) {
         draft_revision: request.expected_revision + 1,
         settings: request.settings,
         selections,
+        ...updateOverrides,
       }));
     },
     validateDraft(request) {
@@ -254,6 +260,62 @@ test("wizard reopens the stored backend draft after real discovery", async () =>
 
   assert.deepEqual(client.calls.map(([operation]) => operation), ["discovery", "recommendations", "reopen"]);
   assert.equal(wizard.state.session.draft_id, "draft-existing");
+});
+
+test("wizard preserves authoritative settings outside the edited wizard fields", async () => {
+  const existingSettings = {
+    zone_id: "previous_zone",
+    zone_name: "Previous zone",
+    sensor_id: "externally-supplied-sensor",
+    sensor_name: "External temperature sensor",
+    target_temperature_celsius: 20.5,
+    source_enable: {
+      domain: "vendor_boiler",
+      service: "grant_permission",
+    },
+    future_boiler_optimization: {
+      curve: "adaptive",
+      maximum_flow_temperature_celsius: 55,
+    },
+  };
+  const client = fakeClient({ reopenOverrides: { settings: existingSettings } });
+  const storage = memoryStorage({ "controlel.setup.draft.v1.entry-real": "draft-existing" });
+  const { wizard } = create(client, storage);
+  await wizard.startDiscovery();
+
+  wizard.state.draft.areaId = "living";
+  wizard.state.dirty = true;
+  await wizard.saveDraft();
+
+  const update = client.calls.find(([operation]) => operation === "update")[1];
+  assert.deepEqual(update.settings, {
+    ...existingSettings,
+    zone_id: "living",
+    zone_name: "living",
+  });
+  assert.deepEqual(update.settings.source_enable, existingSettings.source_enable);
+  assert.deepEqual(update.settings.future_boiler_optimization, existingSettings.future_boiler_optimization);
+  assert.equal(update.settings.sensor_id, existingSettings.sensor_id);
+  assert.equal(update.settings.sensor_name, existingSettings.sensor_name);
+  assert.deepEqual(wizard.state.session.settings, update.settings, "the saved backend session retains the full settings payload");
+});
+
+test("backend hydration clears an optimistic area omitted from the saved session", async () => {
+  const client = fakeClient({
+    updateOverrides: { settings: { future_backend_setting: "authoritative" } },
+  });
+  const { wizard } = create(client);
+  await wizard.startDiscovery();
+
+  wizard.state.draft.areaId = "living";
+  wizard.state.dirty = true;
+  await wizard.saveDraft();
+
+  const update = client.calls.find(([operation]) => operation === "update")[1];
+  assert.equal(update.settings.zone_id, "living", "the optimistic area was submitted");
+  assert.equal(wizard.state.session.settings.zone_id, undefined);
+  assert.equal(wizard.state.draft.areaId, null, "the backend response replaces optimistic UI state");
+  assert.equal(wizard.state.dirty, false);
 });
 
 test("wizard shows backend discovery errors and never falls back to mock data", async () => {
