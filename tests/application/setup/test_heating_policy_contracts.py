@@ -465,9 +465,7 @@ def test_policy_less_schema_v1_revision_imports_only_to_blocked_draft() -> None:
     adapter = HeatingSetupAdapter()
     report = adapter.validate(imported.draft, report_id="schema-v1-report", evaluated_at=NOW)
     issue = next(
-        issue
-        for issue in report.issues
-        if issue.code == "heating.policy_less_schema_v1_requires_recanonicalization"
+        issue for issue in report.issues if issue.code == "heating.policy_less_schema_v1_requires_recanonicalization"
     )
 
     assert imported.activated is False

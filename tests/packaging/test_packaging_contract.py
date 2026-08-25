@@ -38,7 +38,7 @@ def test_project_metadata_and_runtime_dependencies_match_release_contract() -> N
     project = load_pyproject()["project"]
 
     assert project["name"] == "controlel"
-    assert project["version"] == "0.13.0"
+    assert project["version"] == "0.14.0"
     assert project["readme"] == "README.md"
     assert project["requires-python"] == ">=3.13"
     assert project["license"] == "MIT"
@@ -86,7 +86,7 @@ def test_project_version_is_the_only_release_version_source() -> None:
         path for path in (ROOT / "src" / "controlel").rglob("*.py") if "__version__" in path.read_text(encoding="utf-8")
     ]
 
-    assert project_version == "0.13.0"
+    assert project_version == "0.14.0"
     assert controlel.__version__ == project_version
     assert importlib.metadata.version("controlel") == project_version
     assert version_files == [ROOT / "src" / "controlel" / "__init__.py"]
@@ -99,7 +99,7 @@ def test_manifest_pins_published_core_and_keeps_version_independent() -> None:
     manifest = json.loads((ROOT / "custom_components" / "controlel" / "manifest.json").read_text(encoding="utf-8"))
     core_version = load_pyproject()["project"]["version"]
 
-    assert core_version == "0.13.0"
+    assert core_version == "0.14.0"
     assert manifest["requirements"] == ["controlel==0.12.0"]
     assert manifest["version"] == "0.12.0"
     assert manifest["version"] != core_version
@@ -173,6 +173,14 @@ def test_core_artifact_verification_binds_representative_public_contracts() -> N
         "HeatingSetupSessionDTO",
         "HomeAssistantDiscoveryAdapter",
         "HomeAssistantSetupRepository",
+        "HEATING_SETUP_SCHEMA_VERSION",
+        "POLICY_LESS_HEATING_SETUP_SCHEMA_VERSION",
+        "HeatingDiagnosticPolicy",
+        "HeatingNotificationPolicy",
+        "HeatingNotificationRecipient",
+        "HeatingSetupAdapter",
+        "HeatingSetupPayload",
+        "ActivationCoordinator",
         "FRONTEND_API_VERSION",
         "FrontendApiEvidenceV1",
         "FrontendApiProviderV1",
@@ -219,6 +227,8 @@ def test_core_artifact_verification_binds_representative_public_contracts() -> N
         "application/services/heating_performance_monitor.py",
         "application/services/shadow_heating_performance_monitor.py",
         "application/setup/model.py",
+        "application/setup/activation.py",
+        "application/configuration/heating_setup_adapter.py",
         "infrastructure/home_assistant/setup_discovery.py",
         "infrastructure/home_assistant/setup_host.py",
         "infrastructure/home_assistant/setup_persistence.py",
@@ -251,18 +261,20 @@ def test_setup_backend_uses_the_versioned_public_core_surface_without_activation
     assert not hasattr(home_assistant.HeatingSetupHostService, "activate_heating_draft")
 
 
-def test_release_metadata_records_published_core_and_unpublished_ha_boundary() -> None:
+def test_release_metadata_records_core_candidate_and_unpublished_ha_boundary() -> None:
     metadata = (ROOT / "release-metadata" / "releases.yaml").read_text(encoding="utf-8")
-    core_note = (ROOT / "docs" / "releases" / "core-0.13.0.md").read_text(encoding="utf-8")
+    core_note = (ROOT / "docs" / "releases" / "core-0.14.0.md").read_text(encoding="utf-8")
     integration_note = (ROOT / "docs" / "releases" / "home-assistant-0.12.0.md").read_text(encoding="utf-8")
 
+    assert "release_id: controlel-core-0.14.0" in metadata
     assert "release_id: controlel-core-0.13.0" in metadata
     assert "release_id: controlel-core-0.12.0" in metadata
     assert "release_id: controlel-home_assistant-0.12.0" in metadata
+    assert metadata.count('version: "0.14.0"') == 1
     assert metadata.count('version: "0.13.0"') == 1
     assert metadata.count('version: "0.12.0"') == 2
     assert metadata.count("status: published") >= 4
-    assert metadata.count("status: candidate") >= 1
+    assert metadata.count("status: candidate") >= 2
     assert 'tag: "core-v0.13.0"' in metadata
     assert 'commit_sha: "0fdaaa21341e03e9c01f33acfdac8197929fa841"' in metadata
     assert "233f395993dd9b6b0f16fa3cf267b61ec332e2e7f36aa17d84ac37a1fa925ff2" in metadata
@@ -272,10 +284,11 @@ def test_release_metadata_records_published_core_and_unpublished_ha_boundary() -
     assert "d8fd95c1534affd4f1c967e6765a8682587e05dc54528b86721332e950aaf78b" in metadata
     assert "6e59c5fae5098a35069458f5c09b2eed8e837cd9a95b7bd7156865a1acdde6a6" in metadata
     assert 'required_core: "0.12.0"' in metadata
-    assert "No write endpoints" in core_note
-    assert "deferred" in core_note
-    assert "held" in core_note
-    assert "Both public files match" in core_note
+    assert "HeatingDiagnosticPolicy" in core_note
+    assert "HeatingNotificationPolicy" in core_note
+    assert "schema-v1 revisions" in core_note
+    assert "No legacy converter" in core_note
+    assert "controlel==0.12.0" in core_note
     assert "Core publication gate is satisfied" in integration_note
 
 

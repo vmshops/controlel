@@ -1,5 +1,20 @@
 # Release guide
 
+## Core 0.14.0 release candidate
+
+Core `0.14.0` is the frozen release candidate for the policy-complete Heating
+setup schema v2. It adds explicit configured diagnostic and notification
+policies to canonical Heating payloads, preserves meaningful recipient order,
+normalizes set-like notification categories, and binds policy changes into the
+semantic configuration fingerprint.
+
+Policy-less Heating schema-v1 revisions remain integrity-readable but cannot be
+silently canonicalized or activated as schema v2. Activation now requires an
+explicitly registered, supported module schema at both preparation and commit.
+This release does not add a legacy converter, schema migration, runtime
+migration, or new control behavior. Home Assistant integration `0.12.0` and its
+exact `controlel==0.12.0` dependency pin remain unchanged.
+
 ## Published Core 0.13.0
 
 Core `0.13.0` is published and immutable from `core-v0.13.0`. It provides the

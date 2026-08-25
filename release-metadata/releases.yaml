@@ -7,6 +7,30 @@
 metadata_version: 1
 
 releases:
+  - release_id: controlel-core-0.14.0
+    component: core
+    title: "Controlel Core 0.14.0"
+    version: "0.14.0"
+    status: candidate
+    tag: null
+    commit_sha: null
+    summary: "Policy-complete Heating setup schema v2 with explicit diagnostic and notification configuration"
+    highlights:
+      - "Heating schema v2 carries explicit configured diagnostic and notification policies"
+      - "Notification recipient order is preserved while set-like categories normalize deterministically"
+      - "Policy content participates in canonical serialization and semantic configuration fingerprints"
+      - "Policy-less schema-v1 revisions require explicit recanonicalization and cannot be silently activated as v2"
+      - "Activation preparation and commit reject unregistered or unsupported module schema versions"
+    compatibility:
+      current_home_assistant_integration: "0.12.0"
+      current_home_assistant_core_pin: "0.12.0"
+      python: ">=3.13"
+      pydantic: ">=2.0"
+    notes:
+      - "No legacy converter, schema migration, activation/runtime migration, or control behavior change is included."
+      - "Home Assistant integration version and its exact Core dependency pin remain unchanged."
+      - "The package must be tagged, published, and independently verified before any integration pin change."
+
   - release_id: controlel-core-0.13.0
     component: core
     title: "Controlel Core 0.13.0"

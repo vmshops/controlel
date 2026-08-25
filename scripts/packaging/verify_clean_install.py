@@ -26,6 +26,15 @@ import controlel
 from controlel.application.runtime.control_runtime import ControlRuntime
 from controlel.application.runtime.failsafe_runtime import FailsafeRuntime
 from controlel.application.runtime.runtime_supervisor import RuntimeSupervisor
+from controlel.application.configuration.heating_setup_adapter import (
+    HEATING_SETUP_SCHEMA_VERSION,
+    POLICY_LESS_HEATING_SETUP_SCHEMA_VERSION,
+    HeatingDiagnosticPolicy,
+    HeatingNotificationPolicy,
+    HeatingNotificationRecipient,
+    HeatingSetupAdapter,
+    HeatingSetupPayload,
+)
 from controlel.application.ports.notification_delivery_port import NotificationDeliveryPort
 from controlel.application.services.source_reconciliation_policy import SourceReconciliationPolicy
 from controlel.application.services.source_recovery_policy import SourceRecoveryPolicy
@@ -61,6 +70,7 @@ from controlel.application.state.runtime_supervision_state import (
     RuntimeSupervisionState,
 )
 from controlel.application.setup import (
+    ActivationCoordinator,
     ActiveReference,
     CanonicalConfigurationRevision,
     DiscoverySnapshot,
@@ -266,6 +276,7 @@ assert performance_payload["assessment_capacity"] == 2
 assert performance_payload["zones"] == []
 
 setup_contracts = (
+    ActivationCoordinator,
     ActiveReference,
     CanonicalConfigurationRevision,
     DiscoverySnapshot,
@@ -277,11 +288,33 @@ setup_contracts = (
     HeatingSetupSessionDTO,
     HomeAssistantDiscoveryAdapter,
     HomeAssistantSetupRepository,
+    HeatingDiagnosticPolicy,
+    HeatingNotificationPolicy,
+    HeatingNotificationRecipient,
+    HeatingSetupAdapter,
+    HeatingSetupPayload,
 )
 for contract in setup_contracts:
     module_path = Path(importlib.import_module(contract.__module__).__file__).resolve()
     assert module_path.is_relative_to(package_path.parent)
 assert SETUP_STORAGE_VERSION == 1
+assert POLICY_LESS_HEATING_SETUP_SCHEMA_VERSION == 1
+assert HEATING_SETUP_SCHEMA_VERSION == 2
+assert HeatingSetupAdapter.module_schema_version == 2
+assert HeatingSetupAdapter.validator_policy_version == 3
+diagnostic_policy = HeatingDiagnosticPolicy()
+assert diagnostic_policy.diagnostic_profile == "basic"
+assert diagnostic_policy.debug_duration_seconds == 3600.0
+notification_recipient = HeatingNotificationRecipient(
+    recipient_id="clean_install",
+    target="notify.clean_install",
+    categories=(OperationalEventCategory.RUNTIME, OperationalEventCategory.RUNTIME),
+)
+assert notification_recipient.target_configured is True
+assert notification_recipient.categories == (OperationalEventCategory.RUNTIME,)
+notification_policy = HeatingNotificationPolicy(enabled=True, recipients=(notification_recipient,))
+assert notification_policy.enabled is True
+assert notification_policy.recipients == (notification_recipient,)
 assert hasattr(HeatingSetupHostService, "canonicalize_heating_draft")
 assert not hasattr(HeatingSetupHostService, "activate")
 assert not hasattr(HeatingSetupHostService, "activate_heating_draft")
