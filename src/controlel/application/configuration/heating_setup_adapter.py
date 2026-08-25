@@ -7,6 +7,7 @@ from collections.abc import Collection, Mapping
 from datetime import datetime
 from enum import StrEnum
 from math import isfinite
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
@@ -34,6 +35,21 @@ from controlel.application.setup.model import (
     ValidationSeverity,
     ValidationSubjectKind,
 )
+from controlel.domain.notifications import (
+    DEFAULT_CRITICAL_MAXIMUM_PER_WINDOW,
+    DEFAULT_CRITICAL_RATE_WINDOW,
+    DEFAULT_NOTIFICATION_HISTORY_CAPACITY,
+    DEFAULT_NOTIFICATION_MAXIMUM_PER_WINDOW,
+    DEFAULT_NOTIFICATION_RATE_WINDOW,
+    MAX_CRITICAL_MAXIMUM_PER_WINDOW,
+    MAX_CRITICAL_RATE_WINDOW,
+    MAX_NOTIFICATION_HISTORY_CAPACITY,
+    MAX_NOTIFICATION_MAXIMUM_PER_WINDOW,
+    MAX_NOTIFICATION_RATE_WINDOW,
+    MAX_NOTIFICATION_RECIPIENTS,
+    NotificationLevel,
+)
+from controlel.domain.operational_events import OperationalEventCategory
 
 HEATING_SETUP_SCHEMA_VERSION = 1
 PRIMARY_TEMPERATURE_ROLE = "heating.primary_temperature"
@@ -45,6 +61,9 @@ HEATING_RECOMMENDATION_POLICY_VERSION = 1
 _HA_ENTITY_KIND = "home_assistant.entity"
 _HA_ENDPOINT_KIND = "home_assistant.endpoint"
 _CLIMATE_TARGET_TEMPERATURE_FEATURE = 1
+_DEFAULT_CONFIGURED_DEBUG_DURATION_SECONDS = 3600.0
+_IDENTIFIER_PATTERN = r"^[a-z0-9_]+$"
+_HOME_ASSISTANT_NOTIFY_TARGET_PATTERN = r"^notify\.[a-z0-9_]+$"
 
 
 class RecommendationConfidence(StrEnum):
@@ -161,6 +180,121 @@ class HeatingServiceCallSetup(BaseModel):
         return value
 
 
+class HeatingDiagnosticPolicy(BaseModel):
+    """Normalized configured diagnostics behavior; runtime expiry state is excluded."""
+
+    diagnostic_profile: Literal["basic", "detailed", "debug"] = "basic"
+    configured_debug_duration_seconds: float = Field(
+        default=_DEFAULT_CONFIGURED_DEBUG_DURATION_SECONDS,
+        gt=0,
+    )
+    debug_until_changed: bool = Field(default=False, strict=True)
+    diagnostic_profile_before_debug: Literal["basic", "detailed"] = "detailed"
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    @field_validator("configured_debug_duration_seconds", mode="before")
+    @classmethod
+    def configured_duration_must_be_finite_seconds(cls, value: object) -> float:
+        return _finite_configured_duration(value, "configured Debug duration")
+
+    @property
+    def debug_duration_seconds(self) -> float | None:
+        """Return the effective configured expiry duration without runtime deadline state."""
+
+        if self.debug_until_changed:
+            return None
+        return self.configured_debug_duration_seconds
+
+
+class HeatingNotificationRecipient(BaseModel):
+    """One normalized notification recipient with its unredacted transport target."""
+
+    recipient_id: str = Field(min_length=1, pattern=_IDENTIFIER_PATTERN)
+    transport: Literal["home_assistant_notify"] = "home_assistant_notify"
+    target: str = Field(min_length=1, pattern=_HOME_ASSISTANT_NOTIFY_TARGET_PATTERN)
+    enabled: bool = Field(default=True, strict=True)
+    minimum_level: NotificationLevel = NotificationLevel.OPERATIONAL
+    categories: tuple[OperationalEventCategory, ...] = ()
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    @field_validator("categories", mode="after")
+    @classmethod
+    def categories_must_be_deterministic(
+        cls,
+        value: tuple[OperationalEventCategory, ...],
+    ) -> tuple[OperationalEventCategory, ...]:
+        return tuple(sorted(set(value), key=lambda item: item.value))
+
+    @property
+    def target_configured(self) -> bool:
+        """Expose the redaction-safe meaning used by diagnostics projections."""
+
+        return bool(self.target)
+
+
+class HeatingNotificationPolicy(BaseModel):
+    """Deterministic bounded notification configuration in canonical units."""
+
+    enabled: bool = Field(default=False, strict=True)
+    recipients: tuple[HeatingNotificationRecipient, ...] = ()
+    maximum_per_window: int = Field(
+        default=DEFAULT_NOTIFICATION_MAXIMUM_PER_WINDOW,
+        ge=1,
+        le=MAX_NOTIFICATION_MAXIMUM_PER_WINDOW,
+        strict=True,
+    )
+    rate_window_seconds: float = Field(
+        default=DEFAULT_NOTIFICATION_RATE_WINDOW.total_seconds(),
+        ge=1,
+        le=MAX_NOTIFICATION_RATE_WINDOW.total_seconds(),
+    )
+    critical_maximum_per_window: int = Field(
+        default=DEFAULT_CRITICAL_MAXIMUM_PER_WINDOW,
+        ge=1,
+        le=MAX_CRITICAL_MAXIMUM_PER_WINDOW,
+        strict=True,
+    )
+    critical_rate_window_seconds: float = Field(
+        default=DEFAULT_CRITICAL_RATE_WINDOW.total_seconds(),
+        ge=1,
+        le=MAX_CRITICAL_RATE_WINDOW.total_seconds(),
+    )
+    history_capacity: int = Field(
+        default=DEFAULT_NOTIFICATION_HISTORY_CAPACITY,
+        ge=1,
+        le=MAX_NOTIFICATION_HISTORY_CAPACITY,
+        strict=True,
+    )
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    @field_validator("rate_window_seconds", "critical_rate_window_seconds", mode="before")
+    @classmethod
+    def rate_windows_must_be_finite_seconds(cls, value: object, info: object) -> float:
+        return _finite_configured_duration(value, str(getattr(info, "field_name", "notification window")))
+
+    @model_validator(mode="after")
+    def recipients_must_be_bounded_unique_and_deterministic(self) -> HeatingNotificationPolicy:
+        if len(self.recipients) > MAX_NOTIFICATION_RECIPIENTS:
+            raise ValueError(f"notification recipients must not exceed {MAX_NOTIFICATION_RECIPIENTS}")
+        recipient_ids = tuple(recipient.recipient_id for recipient in self.recipients)
+        if len(recipient_ids) != len(set(recipient_ids)):
+            raise ValueError("notification recipient IDs must be unique")
+        enabled_bindings = tuple(
+            (recipient.transport, recipient.target) for recipient in self.recipients if recipient.enabled
+        )
+        if len(enabled_bindings) != len(set(enabled_bindings)):
+            raise ValueError("enabled notification transport and target bindings must be unique")
+        object.__setattr__(
+            self,
+            "recipients",
+            tuple(sorted(self.recipients, key=lambda recipient: recipient.recipient_id)),
+        )
+        return self
+
+
 class HeatingSetupPayload(BaseModel):
     """Small normalized Heating v1 payload with canonical units."""
 
@@ -187,6 +321,8 @@ class HeatingSetupPayload(BaseModel):
     heat_delivery_ownership: str = "device_owned"
     heat_delivery_assist_policy: str = "no_assist"
     heat_delivery_assist_target_celsius: float = 30.0
+    diagnostic_policy: HeatingDiagnosticPolicy = Field(default_factory=HeatingDiagnosticPolicy)
+    notification_policy: HeatingNotificationPolicy = Field(default_factory=HeatingNotificationPolicy)
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -904,6 +1040,15 @@ def _supported_features(reference: ProviderReference) -> int:
 
 def _is_temperature_unit(value: str | None) -> bool:
     return value in {"°C", "°F", "K", "C", "F", "celsius", "fahrenheit", "kelvin"}
+
+
+def _finite_configured_duration(value: object, label: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise ValueError(f"{label} must be a finite number of seconds")
+    result = float(value)
+    if not isfinite(result):
+        raise ValueError(f"{label} must be a finite number of seconds")
+    return result
 
 
 def _issue(
