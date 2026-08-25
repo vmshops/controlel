@@ -1,6 +1,6 @@
 # Controlel Core 0.14.0
 
-Status: candidate
+Status: published
 
 Release: Controlel Core 0.14.0
 
@@ -50,7 +50,13 @@ not infer runtime readiness or physical state.
 
 - Python: 3.13 or newer.
 - Runtime dependency remains only `pydantic>=2.0`.
-- The immutable Core tag will be `core-v0.14.0` after final review.
-- Build, clean-install, provenance, tag, PyPI publication, and independent
-  public-artifact verification must complete before a Home Assistant
-  integration may pin Core 0.14.0.
+- Immutable annotated Core tag: `core-v0.14.0`, resolving to
+  `3c42d487a72682068e090097036b2d79cca30b23`.
+- Published to PyPI beginning at `2026-08-25T19:53:11.296639Z`.
+- Wheel: `controlel-0.14.0-py3-none-any.whl`, 239,413 bytes, SHA-256
+  `fd7b89b86f3eb1ed74322c4e290d9a168ff67cef1c001a1ee3f9270b171f4f0a`.
+- Sdist: `controlel-0.14.0.tar.gz`, 166,977 bytes, SHA-256
+  `e2af5b6345bfbfa06836d1ffa1f99a196c42bf5f9337937d4935d76dca416978`.
+- Both public files match the final deterministic artifacts bound to the tag.
+- Home Assistant integration 0.12.0 and its Core 0.12.0 pin remain unchanged;
+  pinning Core 0.14.0 is separate integration work.

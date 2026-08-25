@@ -11,9 +11,27 @@ releases:
     component: core
     title: "Controlel Core 0.14.0"
     version: "0.14.0"
-    status: candidate
-    tag: null
-    commit_sha: null
+    status: published
+    tag: "core-v0.14.0"
+    commit_sha: "3c42d487a72682068e090097036b2d79cca30b23"
+    tagged_at: "2026-08-25T21:41:57+02:00"
+    published_at: "2026-08-25T19:53:11.296639Z"
+    provenance:
+      method: "tag-bound deterministic build verified against public PyPI bytes"
+      tag_object_sha: "51793f58dfb6d1cbb04f614522e2f5188b3ea873"
+      resolved_tag_commit: "3c42d487a72682068e090097036b2d79cca30b23"
+      verification_status: passed
+    artifacts:
+      wheel:
+        filename: "controlel-0.14.0-py3-none-any.whl"
+        size: 239413
+        sha256: "fd7b89b86f3eb1ed74322c4e290d9a168ff67cef1c001a1ee3f9270b171f4f0a"
+        uploaded_at: "2026-08-25T19:53:11.296639Z"
+      sdist:
+        filename: "controlel-0.14.0.tar.gz"
+        size: 166977
+        sha256: "e2af5b6345bfbfa06836d1ffa1f99a196c42bf5f9337937d4935d76dca416978"
+        uploaded_at: "2026-08-25T19:53:12.603935Z"
     summary: "Policy-complete Heating setup schema v2 with explicit diagnostic and notification configuration"
     highlights:
       - "Heating schema v2 carries explicit configured diagnostic and notification policies"
@@ -29,7 +47,8 @@ releases:
     notes:
       - "No legacy converter, schema migration, activation/runtime migration, or control behavior change is included."
       - "Home Assistant integration version and its exact Core dependency pin remain unchanged."
-      - "The package must be tagged, published, and independently verified before any integration pin change."
+      - "Published PyPI bytes match the deterministic final artifacts bound to core-v0.14.0."
+      - "Any Core 0.14.0 integration pin requires separate integration work."
 
   - release_id: controlel-core-0.13.0
     component: core

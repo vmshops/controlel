@@ -261,7 +261,7 @@ def test_setup_backend_uses_the_versioned_public_core_surface_without_activation
     assert not hasattr(home_assistant.HeatingSetupHostService, "activate_heating_draft")
 
 
-def test_release_metadata_records_core_candidate_and_unpublished_ha_boundary() -> None:
+def test_release_metadata_records_published_core_and_unpublished_ha_boundary() -> None:
     metadata = (ROOT / "release-metadata" / "releases.yaml").read_text(encoding="utf-8")
     core_note = (ROOT / "docs" / "releases" / "core-0.14.0.md").read_text(encoding="utf-8")
     integration_note = (ROOT / "docs" / "releases" / "home-assistant-0.12.0.md").read_text(encoding="utf-8")
@@ -273,8 +273,12 @@ def test_release_metadata_records_core_candidate_and_unpublished_ha_boundary() -
     assert metadata.count('version: "0.14.0"') == 1
     assert metadata.count('version: "0.13.0"') == 1
     assert metadata.count('version: "0.12.0"') == 2
-    assert metadata.count("status: published") >= 4
-    assert metadata.count("status: candidate") >= 2
+    assert metadata.count("status: published") >= 5
+    assert metadata.count("status: candidate") >= 1
+    assert 'tag: "core-v0.14.0"' in metadata
+    assert 'commit_sha: "3c42d487a72682068e090097036b2d79cca30b23"' in metadata
+    assert "fd7b89b86f3eb1ed74322c4e290d9a168ff67cef1c001a1ee3f9270b171f4f0a" in metadata
+    assert "e2af5b6345bfbfa06836d1ffa1f99a196c42bf5f9337937d4935d76dca416978" in metadata
     assert 'tag: "core-v0.13.0"' in metadata
     assert 'commit_sha: "0fdaaa21341e03e9c01f33acfdac8197929fa841"' in metadata
     assert "233f395993dd9b6b0f16fa3cf267b61ec332e2e7f36aa17d84ac37a1fa925ff2" in metadata
@@ -289,6 +293,7 @@ def test_release_metadata_records_core_candidate_and_unpublished_ha_boundary() -
     assert "schema-v1 revisions" in core_note
     assert "No legacy converter" in core_note
     assert "controlel==0.12.0" in core_note
+    assert "Both public files match" in core_note
     assert "Core publication gate is satisfied" in integration_note
 
 
