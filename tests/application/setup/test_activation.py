@@ -2,17 +2,23 @@ from datetime import timedelta
 
 import pytest
 
-from controlel.application.configuration.heating_setup_adapter import HeatingSetupAdapter
+from controlel.application.configuration.heating_setup_adapter import (
+    HEATING_SETUP_SCHEMA_VERSION,
+    POLICY_LESS_HEATING_SETUP_SCHEMA_VERSION,
+    HeatingSetupAdapter,
+)
 from controlel.application.setup import (
     ActivationCoordinator,
     ActivationState,
     ActiveReference,
     CandidateRuntimeReady,
+    CanonicalConfigurationRevision,
     InMemorySetupRepository,
     LoadedRuntimeConfiguration,
     RuntimeConfigurationOrigin,
     SetupConflictError,
 )
+from controlel.application.setup.json_data import normalize_json
 
 from .conftest import NOW, complete_draft
 
@@ -33,6 +39,14 @@ def _ready(canonical, *, ready_at):
         ready_at=ready_at,
         host_adapter="test_host",
         readiness_evidence={"startup_recovery_completed": True},
+    )
+
+
+def _coordinator(repository: InMemorySetupRepository) -> ActivationCoordinator:
+    return ActivationCoordinator(
+        repository,
+        repository,
+        supported_module_schema_versions={"heating": HEATING_SETUP_SCHEMA_VERSION},
     )
 
 
@@ -64,7 +78,7 @@ def _second_canonical(canonical):
 
 def _activate_first(repository, canonical):
     repository.add_canonical_revision(canonical)
-    coordinator = ActivationCoordinator(repository, repository)
+    coordinator = _coordinator(repository)
     attempt = coordinator.prepare(canonical.revision_id, attempt_id="activate-1", prepared_at=NOW)
     assert repository.get_active_reference(attempt.scope_key) is None
     applying = coordinator.begin_applying(attempt.attempt_id, applying_at=NOW + timedelta(seconds=1))
@@ -91,6 +105,29 @@ def test_activation_success_selects_candidate_only_at_commit(canonical_revision)
     assert active.canonical_revision_id == canonical_revision.revision_id
     assert active.semantic_configuration_fingerprint == canonical_revision.semantic_configuration_fingerprint
     assert active.committing_operation_id == committed.attempt_id
+
+
+def test_policy_less_heating_schema_v1_cannot_enter_activation(canonical_revision) -> None:
+    document = normalize_json(canonical_revision.canonical_data())
+    assert isinstance(document, dict)
+    document.pop("document_hash")
+    document.pop("semantic_configuration_fingerprint")
+    document["module_schema_version"] = POLICY_LESS_HEATING_SETUP_SCHEMA_VERSION
+    payload = document["module_payload"]
+    assert isinstance(payload, dict)
+    payload.pop("diagnostic_policy")
+    payload.pop("notification_policy")
+    policy_less = CanonicalConfigurationRevision.model_validate(document)
+    repository = InMemorySetupRepository()
+    repository.add_canonical_revision(policy_less)
+    coordinator = _coordinator(repository)
+
+    with pytest.raises(SetupConflictError, match="heating requires 2, got 1"):
+        coordinator.prepare(policy_less.revision_id, attempt_id="activate-v1", prepared_at=NOW)
+
+    assert repository.list_non_terminal_attempts() == ()
+    scope = (policy_less.environment_id, policy_less.module_key, policy_less.module_instance_id)
+    assert repository.get_active_reference(scope) is None
 
 
 def test_failed_activation_preserves_previous_authoritative_revision(canonical_revision) -> None:
@@ -223,7 +260,7 @@ def test_loaded_runtime_stamp_requires_revision_and_fingerprint() -> None:
 def test_commit_requires_separately_persisted_host_readiness(canonical_revision) -> None:
     repository = InMemorySetupRepository()
     repository.add_canonical_revision(canonical_revision)
-    coordinator = ActivationCoordinator(repository, repository)
+    coordinator = _coordinator(repository)
     attempt = coordinator.prepare(canonical_revision.revision_id, attempt_id="activate", prepared_at=NOW)
     coordinator.begin_applying(attempt.attempt_id, applying_at=NOW + timedelta(seconds=1))
 
@@ -250,7 +287,7 @@ def test_candidate_readiness_requires_complete_matching_runtime_stamp(
 ) -> None:
     repository = InMemorySetupRepository()
     repository.add_canonical_revision(canonical_revision)
-    coordinator = ActivationCoordinator(repository, repository)
+    coordinator = _coordinator(repository)
     attempt = coordinator.prepare(canonical_revision.revision_id, attempt_id="activate", prepared_at=NOW)
     coordinator.begin_applying(attempt.attempt_id, applying_at=NOW + timedelta(seconds=1))
     runtime_values = _loaded(canonical_revision).model_dump(mode="python")
@@ -306,7 +343,7 @@ def test_loaded_runtime_evidence_rejects_shadow_origin() -> None:
 def test_activation_reservation_and_transitions_reject_stale_writes(canonical_revision) -> None:
     repository = InMemorySetupRepository()
     repository.add_canonical_revision(canonical_revision)
-    coordinator = ActivationCoordinator(repository, repository)
+    coordinator = _coordinator(repository)
     prepared = coordinator.prepare(canonical_revision.revision_id, attempt_id="activate-1", prepared_at=NOW)
 
     with pytest.raises(SetupConflictError, match="already in progress"):

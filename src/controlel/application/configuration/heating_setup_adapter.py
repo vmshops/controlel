@@ -35,6 +35,7 @@ from controlel.application.setup.model import (
     ValidationSeverity,
     ValidationSubjectKind,
 )
+from controlel.domain.commands.heating_action import HeatingAction
 from controlel.domain.notifications import (
     DEFAULT_CRITICAL_MAXIMUM_PER_WINDOW,
     DEFAULT_CRITICAL_RATE_WINDOW,
@@ -302,7 +303,7 @@ class HeatingSetupPayload(BaseModel):
     primary_measurement_max_age_seconds: float = Field(gt=0)
     maximum_future_skew_seconds: float = Field(ge=0)
     indeterminate_grace_period_seconds: float = Field(ge=0)
-    indeterminate_timeout_action: str = "disable_heating"
+    indeterminate_timeout_action: HeatingAction = HeatingAction.DISABLE_HEATING
     heating_turn_on_differential_celsius: float = Field(default=0.0, ge=0)
     heating_turn_off_differential_celsius: float = Field(default=0.0, ge=0)
     heat_demand_confirmation_seconds: float = Field(default=0.0, ge=0)
@@ -350,6 +351,11 @@ class HeatingSetupPayload(BaseModel):
             raise ValueError(f"reported source state must use {REPORTED_SOURCE_STATE_ROLE}")
         if self.source_control_mode not in {"simple", "custom"}:
             raise ValueError("source_control_mode must be simple or custom")
+        if self.source_control_mode == "simple":
+            if (self.source_enable.domain, self.source_enable.service) != ("switch", "turn_on"):
+                raise ValueError("simple source_enable must use switch.turn_on")
+            if (self.source_disable.domain, self.source_disable.service) != ("switch", "turn_off"):
+                raise ValueError("simple source_disable must use switch.turn_off")
         if self.reported_source_state_binding_role is not None and self.source_control_mode != "simple":
             raise ValueError("reported source state is currently supported only for simple source control")
         if self.heat_delivery_mode not in {"unmanaged", "setpoint_assist"}:
@@ -722,6 +728,10 @@ class HeatingSetupAdapter:
                     "policy-less Heating schema version 1 requires explicit migration or recanonicalization"
                 )
             raise ValueError("Heating draft uses an unsupported module contract")
+        if report.validator_policy_version != self.validator_policy_version:
+            raise ValueError(
+                f"Heating canonicalization requires validator policy version {self.validator_policy_version}"
+            )
         normalized = HeatingSetupPayload.model_validate(draft.settings)
         return CanonicalConfigurationRevision.from_validated_draft(
             draft,
