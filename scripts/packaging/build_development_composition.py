@@ -95,8 +95,6 @@ def _development_integration(
         raise DevelopmentCompositionError("release manifest must contain one exact public Core requirement")
     public_requirement = public_requirements[0]
     development_requirement = f"controlel=={core_version}"
-    if public_requirement == development_requirement:
-        raise DevelopmentCompositionError("development Core must not relabel the published manifest requirement")
     manifest["requirements"] = [development_requirement]
     development_files = {
         **files,
@@ -124,7 +122,7 @@ Install in this order while Home Assistant is stopped:
    The result must be `{core_version}`.
 
 The integration ZIP carries an exact `controlel=={core_version}` development
-pin. The repository's release manifest remains pinned to published Core 0.14.0.
+pin. The repository's release manifest remains pinned to published Core 0.15.0.
 """.encode()
 
 
@@ -238,7 +236,7 @@ def validate_development_composition(archive_path: Path, *, expected_core_versio
         raise DevelopmentCompositionError("development integration hash does not match")
     if integration.get("development_requirement") != f"controlel=={expected_core_version}":
         raise DevelopmentCompositionError("development integration requirement does not match Core")
-    if integration.get("release_source_requirement") != "controlel==0.14.0":
+    if integration.get("release_source_requirement") != "controlel==0.15.0":
         raise DevelopmentCompositionError("published integration requirement history was not preserved")
     wheel_name, wheel_version = _wheel_identity(wheel_content)
     if (wheel_name.casefold(), wheel_version) != ("controlel", expected_core_version):

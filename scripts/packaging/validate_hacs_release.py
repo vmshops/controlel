@@ -15,7 +15,7 @@ from pathlib import Path, PurePosixPath
 ROOT = Path(__file__).parents[2]
 DOMAIN = "controlel"
 ARCHIVE_FILENAME = "controlel.zip"
-CORE_REQUIREMENT = "controlel==0.14.0"
+CORE_REQUIREMENT = "controlel==0.15.0"
 ISSUE_TRACKER = "https://github.com/vmshops/controlel/issues"
 DOCUMENTATION_URL = "https://github.com/vmshops/controlel"
 HOME_ASSISTANT_VERSION = "2026.7.3"

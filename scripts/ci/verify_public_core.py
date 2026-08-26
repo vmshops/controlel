@@ -39,14 +39,14 @@ from controlel.infrastructure.home_assistant import (
 )
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-CORE_VERSION = "0.14.0"
+CORE_VERSION = "0.15.0"
 CORE_REQUIREMENT = f"controlel=={CORE_VERSION}"
-PUBLIC_WHEEL_FILENAME = "controlel-0.14.0-py3-none-any.whl"
-PUBLIC_WHEEL_SIZE = 239_413
-PUBLIC_WHEEL_SHA256 = "fd7b89b86f3eb1ed74322c4e290d9a168ff67cef1c001a1ee3f9270b171f4f0a"
-PUBLIC_SDIST_FILENAME = "controlel-0.14.0.tar.gz"
-PUBLIC_SDIST_SIZE = 166_977
-PUBLIC_SDIST_SHA256 = "e2af5b6345bfbfa06836d1ffa1f99a196c42bf5f9337937d4935d76dca416978"
+PUBLIC_WHEEL_FILENAME = "controlel-0.15.0-py3-none-any.whl"
+PUBLIC_WHEEL_SIZE = 239_714
+PUBLIC_WHEEL_SHA256 = "e76b984aa62c695bc65e694c42c9d8d817fabcad32e7bfedb9d85dda340b420e"
+PUBLIC_SDIST_FILENAME = "controlel-0.15.0.tar.gz"
+PUBLIC_SDIST_SIZE = 167_206
+PUBLIC_SDIST_SHA256 = "88d5e65fb42f639b8e6a838d5d639ff80ff0683689e36991e9121a64a6bc35cf"
 PYPI_METADATA_URL = f"https://pypi.org/pypi/controlel/{CORE_VERSION}/json"
 
 
