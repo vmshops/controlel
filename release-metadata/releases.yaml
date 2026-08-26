@@ -7,6 +7,49 @@
 metadata_version: 1
 
 releases:
+  - release_id: controlel-core-0.14.0
+    component: core
+    title: "Controlel Core 0.14.0"
+    version: "0.14.0"
+    status: published
+    tag: "core-v0.14.0"
+    commit_sha: "3c42d487a72682068e090097036b2d79cca30b23"
+    tagged_at: "2026-08-25T21:41:57+02:00"
+    published_at: "2026-08-25T19:53:11.296639Z"
+    provenance:
+      method: "tag-bound deterministic build verified against public PyPI bytes"
+      tag_object_sha: "51793f58dfb6d1cbb04f614522e2f5188b3ea873"
+      resolved_tag_commit: "3c42d487a72682068e090097036b2d79cca30b23"
+      verification_status: passed
+    artifacts:
+      wheel:
+        filename: "controlel-0.14.0-py3-none-any.whl"
+        size: 239413
+        sha256: "fd7b89b86f3eb1ed74322c4e290d9a168ff67cef1c001a1ee3f9270b171f4f0a"
+        uploaded_at: "2026-08-25T19:53:11.296639Z"
+      sdist:
+        filename: "controlel-0.14.0.tar.gz"
+        size: 166977
+        sha256: "e2af5b6345bfbfa06836d1ffa1f99a196c42bf5f9337937d4935d76dca416978"
+        uploaded_at: "2026-08-25T19:53:12.603935Z"
+    summary: "Policy-complete Heating setup schema v2 with explicit diagnostic and notification configuration"
+    highlights:
+      - "Heating schema v2 carries explicit configured diagnostic and notification policies"
+      - "Notification recipient order is preserved while set-like categories normalize deterministically"
+      - "Policy content participates in canonical serialization and semantic configuration fingerprints"
+      - "Policy-less schema-v1 revisions require explicit recanonicalization and cannot be silently activated as v2"
+      - "Activation preparation and commit reject unregistered or unsupported module schema versions"
+    compatibility:
+      current_home_assistant_integration: "0.12.0"
+      current_home_assistant_core_pin: "0.12.0"
+      python: ">=3.13"
+      pydantic: ">=2.0"
+    notes:
+      - "No legacy converter, schema migration, activation/runtime migration, or control behavior change is included."
+      - "Home Assistant integration version and its exact Core dependency pin remain unchanged."
+      - "Published PyPI bytes match the deterministic final artifacts bound to core-v0.14.0."
+      - "Any Core 0.14.0 integration pin requires separate integration work."
+
   - release_id: controlel-core-0.13.0
     component: core
     title: "Controlel Core 0.13.0"
@@ -61,7 +104,7 @@ releases:
       - "Packaged real-data UI shell with English and Czech localization foundations"
       - "Explicit loading, disconnected, error, and unknown states without silent mock fallback"
     compatibility:
-      required_core: "0.13.0"
+      required_core: "0.14.0"
       config_entry_version: 1
       home_assistant: "2026.7.3"
     notes:

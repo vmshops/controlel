@@ -22,12 +22,12 @@ The goal is to create a reliable heating controller capable of optimizing comfor
 
 Project phase: Home Assistant 0.13.0 release candidate preparation
 
-Published Core package: 0.13.0
+Published Core package: 0.14.0
 Published Home Assistant integration: 0.12.0
 Repository Home Assistant candidate: 0.13.0
 
 The checked-out integration candidate pins exact public Core
-`controlel==0.13.0`. Core 0.13.0 is published on PyPI and independently
+`controlel==0.14.0`. Core 0.14.0 is published on PyPI and independently
 verified against its immutable tag-bound wheel and sdist provenance.
 
 The candidate ships the read-only Frontend API v1 bridge, authenticated Home
@@ -221,7 +221,7 @@ reimplementing activity composition, policy, de-duplication, rate limits, or
 cursor semantics.
 
 The published integration 0.12.0 requires exact public Core 0.12.0. The
-repository's integration 0.13.0 candidate requires exact public Core 0.13.0.
+repository's integration 0.13.0 candidate requires exact public Core 0.14.0.
 Candidate framework tests install that immutable package from PyPI and verify
 its artifact provenance and Frontend API v1 surface. Users of released
 integrations do not install Core manually.
@@ -238,13 +238,13 @@ candidate may be tagged; no default-store publication exists.
 ## Core package artifacts
 
 The reusable core is published as the `controlel` distribution and import
-package. Version `0.13.0` is the latest public immutable release. The static version source
+package. Version `0.14.0` is the latest public immutable release. The static version source
 and PEP 517 build configuration live in `pyproject.toml`; normal installation
 depends only on Pydantic. Packaging validation builds one wheel and one sdist,
 inspects their contents, and installs the wheel into a clean environment
 outside the checkout.
 
-Core versions `0.1.0`, `0.2.0`, `0.3.0`, `0.4.0`, `0.5.0`, `0.6.0`, `0.7.0`, `0.8.0`, `0.9.0`, `0.10.0`, `0.11.0`, `0.12.0`, and `0.13.0` are published on
+Core versions `0.1.0`, `0.2.0`, `0.3.0`, `0.4.0`, `0.5.0`, `0.6.0`, `0.7.0`, `0.8.0`, `0.9.0`, `0.10.0`, `0.11.0`, `0.12.0`, `0.13.0`, and `0.14.0` are published on
 PyPI and immutable. Future core corrections require a new version; rebuilt artifacts for an already
 published version must never be uploaded.
 Repository packaging CI remains validation-only and contains no publication

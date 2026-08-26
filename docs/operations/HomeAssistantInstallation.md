@@ -19,7 +19,7 @@ history or lockout state from the switch.
 
 Controlel `0.13.0` is the current integration candidate for one heating zone,
 one primary temperature sensor, and one shared heat source. It requires the
-published immutable core package `controlel==0.13.0`. The current published
+published immutable core package `controlel==0.14.0`. The current published
 integration remains 0.12.0 until this candidate is separately approved,
 tagged, and released.
 
@@ -101,7 +101,7 @@ custom integration.
 
 HACS downloads the release asset into
 `config/custom_components/controlel/`. During integration setup, Home
-Assistant reads the manifest and installs `controlel==0.13.0` from PyPI.
+Assistant reads the manifest and installs `controlel==0.14.0` from PyPI.
 Manual core installation is neither required nor supported for normal use.
 
 After a successful setup, Controlel registers a sidebar panel backed by
@@ -253,7 +253,7 @@ structure must provide an explicit migration.
 3. Restart Home Assistant.
 
 HACS removes the integration directory but does not uninstall Python packages
-or related Home Assistant data automatically. The `controlel==0.13.0` package
+or related Home Assistant data automatically. The `controlel==0.14.0` package
 may remain in Home Assistant's managed Python environment and must not be
 manually removed.
 

@@ -1,5 +1,20 @@
 # Release guide
 
+## Published Core 0.14.0
+
+Core `0.14.0` is published and immutable from `core-v0.14.0`. It provides the
+policy-complete Heating setup schema v2. It adds explicit configured diagnostic
+and notification policies to canonical Heating payloads, preserves meaningful
+recipient order, normalizes set-like notification categories, and binds policy
+changes into the semantic configuration fingerprint.
+
+Policy-less Heating schema-v1 revisions remain integrity-readable but cannot be
+silently canonicalized or activated as schema v2. Activation now requires an
+explicitly registered, supported module schema at both preparation and commit.
+This release does not add a legacy converter, schema migration, runtime
+migration, or new control behavior. At publication, Home Assistant integration
+`0.12.0` and its exact `controlel==0.12.0` dependency pin remained unchanged.
+
 ## Published Core 0.13.0
 
 Core `0.13.0` is published and immutable from `core-v0.13.0`. It provides the
@@ -9,8 +24,9 @@ Unknown physical state remains explicit, and command outcomes remain distinct
 as `dispatched`, `failed`, `suppressed`, `deferred`, or `held`.
 
 This Core release adds no write API, activation, reconciliation, or change to
-heating/control behavior. The Home Assistant integration `0.13.0` candidate
-pins exact public Core `0.13.0` and verifies that composition independently.
+heating/control behavior. At that release boundary, the Home Assistant
+integration `0.13.0` candidate pinned exact public Core `0.13.0` and verified
+that composition independently.
 
 ## Published Core and Home Assistant 0.12.0
 
@@ -263,10 +279,10 @@ Controlel uses distinct release states:
    backend under `dist/`.
 3. **Verified wheel** has passed metadata, archive-content, and clean
    out-of-checkout installation checks.
-4. **Published core package** is currently immutable `controlel==0.13.0` on
+4. **Published core package** is currently immutable `controlel==0.14.0` on
    PyPI.
 5. **Home Assistant exact dependency pin** for the next candidate is
-   `"requirements": ["controlel==0.13.0"]`; the public Core gate is satisfied.
+   `"requirements": ["controlel==0.14.0"]`; the public Core gate is satisfied.
 6. **HACS readiness** additionally requires integration release packaging and
    HACS metadata. A verified or published core wheel alone does not provide
    HACS readiness.
@@ -275,11 +291,11 @@ Controlel uses distinct release states:
 
 The distribution name and Python import package are both `controlel`. Versions
 `0.1.0`, `0.2.0`, `0.3.0`, `0.4.0`, `0.5.0`, `0.6.0`, `0.7.0`, `0.8.0`,
-`0.9.0`, `0.10.0`, `0.11.0`, `0.12.0`, and `0.13.0` are publicly available on
-PyPI and immutable. PyPI versions are immutable; corrections always require a
-higher version.
+`0.9.0`, `0.10.0`, `0.11.0`, `0.12.0`, `0.13.0`, and `0.14.0` are publicly
+available on PyPI and immutable. PyPI versions are immutable; corrections
+always require a higher version.
 
-The current public core release is immutable `0.13.0`. Integration metadata is
+The current public core release is immutable `0.14.0`. Integration metadata is
 the separate `0.13.0` candidate; its composition checks install and verify the
 public package rather than repository source.
 
@@ -606,7 +622,7 @@ must not upload rebuilt artifacts for an already published version.
 
 ## Home Assistant dependency contract
 
-The `0.13.0` candidate pins exactly `controlel==0.13.0`. Its adapter and
+The `0.13.0` candidate pins exactly `controlel==0.14.0`. Its adapter and
 framework public-package jobs install with `--no-cache-dir`, verify both public
 artifact identities and the installed Setup and Frontend API v1 surfaces, and
 never install the repository as a distribution. Repository Core source is
@@ -624,7 +640,7 @@ Integration releases use a separate version stream:
   `Controlel Home Assistant Integration v0.13.0`;
 - HACS asset: `controlel.zip`;
 - checksum asset: `controlel.zip.sha256`;
-- exact core dependency: `controlel==0.13.0`.
+- exact core dependency: `controlel==0.14.0`.
 
 The published `v0.6.0` tag is immutable. The unpublished `v0.7.0` candidate was
 never tagged or released. Integration tags always use
