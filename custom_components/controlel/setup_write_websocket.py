@@ -28,6 +28,7 @@ SETUP_WRITE_V1_REOPEN = f"{DOMAIN}/setup/write/v1/reopen"
 SETUP_WRITE_V1_UPDATE = f"{DOMAIN}/setup/write/v1/update"
 SETUP_WRITE_V1_VALIDATE = f"{DOMAIN}/setup/write/v1/validate"
 SETUP_WRITE_V1_CANONICALIZE = f"{DOMAIN}/setup/write/v1/canonicalize"
+SETUP_WRITE_V1_ACTIVATE = f"{DOMAIN}/setup/write/v1/activate"
 
 ERR_SETUP_CONFLICT = "setup_conflict"
 ERR_SETUP_STORAGE_INTEGRITY = "setup_storage_integrity"
@@ -52,6 +53,7 @@ def async_register_setup_write_api_v1(hass: Any) -> None:
         _update,
         _validate,
         _canonicalize,
+        _activate,
     ):
         websocket_api.async_register_command(hass, handler)
     hass.data[_TRANSPORT_KEY] = True
@@ -99,6 +101,12 @@ def _aware_datetime(value: object) -> datetime:
 def _positive_integer(value: object) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 1:
         raise vol.Invalid("expected a positive integer")
+    return value
+
+
+def _non_negative_integer(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise vol.Invalid("expected a non-negative integer")
     return value
 
 
@@ -397,3 +405,66 @@ async def _validate(hass: Any, connection: websocket_api.ActiveConnection, msg: 
 @websocket_api.async_response
 async def _canonicalize(hass: Any, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
     await _send(hass, connection, msg, "canonicalize", _canonicalize_draft)
+
+
+@websocket_api.websocket_command(
+    _schema(
+        SETUP_WRITE_V1_ACTIVATE,
+        {
+            vol.Required("revision_id"): _NON_EMPTY_STRING,
+            vol.Required("semantic_configuration_fingerprint"): vol.Match(r"^[0-9a-f]{64}$"),
+            vol.Optional("expected_active_revision_id", default=None): _OPTIONAL_STRING,
+            vol.Required("expected_active_generation"): _non_negative_integer,
+            vol.Required("attempt_id"): _NON_EMPTY_STRING,
+        },
+    )
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def _activate(hass: Any, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """Activate one inactive canonical revision within the addressed config entry."""
+
+    entry = hass.config_entries.async_get_entry(msg["config_entry_id"])
+    if entry is None or entry.domain != DOMAIN:
+        connection.send_error(
+            msg["id"],
+            websocket_api.ERR_NOT_FOUND,
+            "Controlel setup config entry was not found",
+        )
+        return
+    try:
+        from .activation_backend import async_activate_canonical_revision
+
+        result = await async_activate_canonical_revision(
+            hass,
+            entry,
+            revision_id=msg["revision_id"],
+            semantic_configuration_fingerprint=msg["semantic_configuration_fingerprint"],
+            expected_active_revision_id=msg["expected_active_revision_id"],
+            expected_active_generation=msg["expected_active_generation"],
+            attempt_id=msg["attempt_id"],
+        )
+    except SetupNotFoundError:
+        connection.send_error(msg["id"], websocket_api.ERR_NOT_FOUND, "Canonical revision was not found")
+        return
+    except SetupConflictError:
+        connection.send_error(msg["id"], ERR_SETUP_CONFLICT, "Canonical activation conflicts with current state")
+        return
+    except SetupStorageIntegrityError:
+        connection.send_error(
+            msg["id"],
+            ERR_SETUP_STORAGE_INTEGRITY,
+            "Controlel setup storage failed integrity validation",
+        )
+        return
+    except (TypeError, ValueError, ValidationError):
+        connection.send_error(msg["id"], websocket_api.ERR_INVALID_FORMAT, "Canonical activation request is invalid")
+        return
+    connection.send_result(
+        msg["id"],
+        {
+            "setup_write_api_version": SETUP_WRITE_API_VERSION,
+            "operation": "activate",
+            "result": _json_result(result),
+        },
+    )

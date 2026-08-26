@@ -1,18 +1,27 @@
-"""Lazy Home Assistant composition for the new Setup backend.
-
-This module is intentionally not imported by the released runtime/config flow.
-The public integration remains compatible with its pinned Core until Setup is
-published as part of that package contract.
-"""
+"""Shared Home Assistant composition for Setup storage and activation."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+import asyncio
+from collections.abc import Coroutine, Mapping
+from dataclasses import dataclass
 from datetime import datetime
+from functools import partial
 from importlib import import_module
 from typing import Any, cast
 
-from controlel.application.setup import DiscoverySnapshot
+from controlel.application.configuration.heating_setup_adapter import HEATING_SETUP_SCHEMA_VERSION
+from controlel.application.setup import (
+    ActivationAttempt,
+    ActivationCoordinator,
+    ActivationState,
+    ActiveReference,
+    CandidateRuntimeReady,
+    CanonicalConfigurationRevision,
+    DiscoverySnapshot,
+    LoadedRuntimeConfiguration,
+)
+from controlel.application.setup.repository import ScopeKey
 from controlel.infrastructure.home_assistant import (
     ACTIVE_REFERENCE_KEY,
     SETUP_STORAGE_VERSION,
@@ -29,12 +38,170 @@ _SETUP_CACHE_KEY = f"{DOMAIN}_setup_backend"
 _LIFECYCLE_DATA_KEYS = frozenset({ACTIVE_REFERENCE_KEY})
 
 
-async def async_get_setup_service(hass: Any, entry: Any) -> HeatingSetupHostService:
+class _SynchronousRepositoryBridge:
+    """Let the synchronous Core coordinator use the HA event-loop repository."""
+
+    def __init__(self, loop: asyncio.AbstractEventLoop, repository: HomeAssistantSetupRepository) -> None:
+        self._loop = loop
+        self._repository = repository
+
+    def _run[T](self, awaitable: Coroutine[Any, Any, T]) -> T:
+        return asyncio.run_coroutine_threadsafe(awaitable, self._loop).result()
+
+    def add_canonical_revision(self, revision: CanonicalConfigurationRevision) -> None:
+        self._run(self._repository.add_canonical_revision(revision))
+
+    def get_canonical_revision(self, revision_id: str) -> CanonicalConfigurationRevision:
+        return self._run(self._repository.get_canonical_revision(revision_id))
+
+    def get_active_reference(self, scope: ScopeKey) -> ActiveReference | None:
+        return self._run(self._repository.get_active_reference(scope))
+
+    def compare_and_swap_active_reference(
+        self,
+        *,
+        scope: ScopeKey,
+        expected_revision_id: str | None,
+        expected_generation: int,
+        replacement: ActiveReference,
+    ) -> None:
+        self._run(
+            self._repository.compare_and_swap_active_reference(
+                scope=scope,
+                expected_revision_id=expected_revision_id,
+                expected_generation=expected_generation,
+                replacement=replacement,
+            )
+        )
+
+    def reserve_activation_attempt(self, attempt: ActivationAttempt) -> None:
+        self._run(self._repository.reserve_activation_attempt(attempt))
+
+    def transition_activation_attempt(
+        self,
+        attempt: ActivationAttempt,
+        *,
+        expected_state: ActivationState,
+        expected_version: int,
+    ) -> None:
+        self._run(
+            self._repository.transition_activation_attempt(
+                attempt,
+                expected_state=expected_state,
+                expected_version=expected_version,
+            )
+        )
+
+    def get_activation_attempt(self, attempt_id: str) -> ActivationAttempt:
+        return self._run(self._repository.get_activation_attempt(attempt_id))
+
+    def list_non_terminal_attempts(self) -> tuple[ActivationAttempt, ...]:
+        return self._run(self._repository.list_non_terminal_attempts())
+
+
+class HomeAssistantActivationCoordinator:
+    """Async HA facade over the released synchronous Core coordinator."""
+
+    def __init__(self, hass: Any, repository: HomeAssistantSetupRepository) -> None:
+        bridge = _SynchronousRepositoryBridge(hass.loop, repository)
+        self._hass = hass
+        self._coordinator = ActivationCoordinator(
+            bridge,
+            bridge,
+            supported_module_schema_versions={"heating": HEATING_SETUP_SCHEMA_VERSION},
+        )
+
+    async def _call(self, operation: Any, *args: Any, **kwargs: Any) -> Any:
+        return await self._hass.async_add_executor_job(partial(operation, *args, **kwargs))
+
+    async def prepare(self, revision_id: str, *, attempt_id: str, prepared_at: datetime) -> ActivationAttempt:
+        return cast(
+            ActivationAttempt,
+            await self._call(self._coordinator.prepare, revision_id, attempt_id=attempt_id, prepared_at=prepared_at),
+        )
+
+    async def begin_applying(self, attempt_id: str, *, applying_at: datetime) -> ActivationAttempt:
+        return cast(
+            ActivationAttempt,
+            await self._call(self._coordinator.begin_applying, attempt_id, applying_at=applying_at),
+        )
+
+    async def record_candidate_runtime_ready(
+        self,
+        attempt_id: str,
+        *,
+        candidate_ready: CandidateRuntimeReady,
+    ) -> ActivationAttempt:
+        return cast(
+            ActivationAttempt,
+            await self._call(
+                self._coordinator.record_candidate_runtime_ready,
+                attempt_id,
+                candidate_ready=candidate_ready,
+            ),
+        )
+
+    async def commit(self, attempt_id: str, *, committed_at: datetime) -> ActivationAttempt:
+        return cast(
+            ActivationAttempt,
+            await self._call(self._coordinator.commit, attempt_id, committed_at=committed_at),
+        )
+
+    async def record_failed_application(
+        self,
+        attempt_id: str,
+        *,
+        completed_at: datetime,
+        failure_code: str,
+        rollback_succeeded: bool,
+        rollback_runtime_stamp: LoadedRuntimeConfiguration | None = None,
+    ) -> ActivationAttempt:
+        return cast(
+            ActivationAttempt,
+            await self._call(
+                self._coordinator.record_failed_application,
+                attempt_id,
+                completed_at=completed_at,
+                failure_code=failure_code,
+                rollback_succeeded=rollback_succeeded,
+                rollback_runtime_stamp=rollback_runtime_stamp,
+            ),
+        )
+
+    async def recover_interrupted(
+        self,
+        attempt_id: str,
+        *,
+        recovered_at: datetime,
+        rollback_succeeded: bool,
+        rollback_runtime_stamp: LoadedRuntimeConfiguration | None = None,
+    ) -> ActivationAttempt:
+        return cast(
+            ActivationAttempt,
+            await self._call(
+                self._coordinator.recover_interrupted,
+                attempt_id,
+                recovered_at=recovered_at,
+                rollback_succeeded=rollback_succeeded,
+                rollback_runtime_stamp=rollback_runtime_stamp,
+            ),
+        )
+
+
+@dataclass(frozen=True)
+class SetupBackend:
+    service: HeatingSetupHostService
+    repository: HomeAssistantSetupRepository
+    activation: HomeAssistantActivationCoordinator
+    activation_lock: asyncio.Lock
+
+
+async def async_get_setup_backend(hass: Any, entry: Any) -> SetupBackend:
     """Return the one shared setup service/repository for this config entry."""
 
     cache = hass.data.setdefault(_SETUP_CACHE_KEY, {})
     existing = cache.get(entry.entry_id)
-    if isinstance(existing, HeatingSetupHostService):
+    if isinstance(existing, SetupBackend):
         return existing
 
     storage_module = import_module("homeassistant.helpers.storage")
@@ -42,7 +209,7 @@ async def async_get_setup_service(hass: Any, entry: Any) -> HeatingSetupHostServ
     store = cast(Any, store_type(hass, SETUP_STORAGE_VERSION, f"{DOMAIN}.setup.{entry.entry_id}"))
 
     def update_entry_data(data: Mapping[str, object]) -> None:
-        hass.config_entries.async_update_entry(entry, data=dict(data))
+        hass.config_entries.async_update_entry(entry, data=dict(data), options={})
 
     active_references = ConfigEntryActiveReferenceStore(entry, update_entry_data)
     repository = HomeAssistantSetupRepository(store, active_references)
@@ -68,5 +235,17 @@ async def async_get_setup_service(hass: Any, entry: Any) -> HeatingSetupHostServ
         snapshot_loader,
         legacy_configuration=legacy_status,
     )
-    cache[entry.entry_id] = service
-    return service
+    backend = SetupBackend(
+        service=service,
+        repository=repository,
+        activation=HomeAssistantActivationCoordinator(hass, repository),
+        activation_lock=asyncio.Lock(),
+    )
+    cache[entry.entry_id] = backend
+    return backend
+
+
+async def async_get_setup_service(hass: Any, entry: Any) -> HeatingSetupHostService:
+    """Return the shared frontend-neutral Setup service for a config entry."""
+
+    return (await async_get_setup_backend(hass, entry)).service

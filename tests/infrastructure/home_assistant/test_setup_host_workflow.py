@@ -517,10 +517,25 @@ async def test_lazy_ha_composition_reuses_store_backed_service_and_reports_legac
 
     class FakeConfigEntries:
         @staticmethod
-        def async_update_entry(target: FakeConfigEntry, *, data: dict[str, object]) -> None:
+        def async_update_entry(
+            target: FakeConfigEntry,
+            *,
+            data: dict[str, object],
+            options: dict[str, object] | None = None,
+        ) -> None:
             target.data = data
+            if options is not None:
+                target.options = options
 
-    hass = SimpleNamespace(data={}, config_entries=FakeConfigEntries())
+    async def async_add_executor_job(callable_object):
+        return await asyncio.to_thread(callable_object)
+
+    hass = SimpleNamespace(
+        data={},
+        config_entries=FakeConfigEntries(),
+        loop=asyncio.get_running_loop(),
+        async_add_executor_job=async_add_executor_job,
+    )
     monkeypatch.setattr(
         setup_backend,
         "import_module",

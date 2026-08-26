@@ -19,6 +19,7 @@ from controlel.application.runtime.control_runtime_startup import ControlRuntime
 from controlel.application.runtime.failsafe_runtime import FailsafeRuntime
 from controlel.application.runtime.runtime_supervisor import RuntimeSupervisor
 from controlel.application.services.operational_event_recorder import OperationalEventRecorder
+from controlel.application.setup import ActiveReference, LoadedRuntimeConfiguration
 from controlel.application.state.runtime_supervision_state import RuntimeHandoverEvidence
 from controlel.domain.capabilities.temperature_capability import (
     TemperatureCapability,
@@ -29,8 +30,10 @@ from controlel.domain.repositories.sensor_repository import SensorRepository
 from controlel.domain.repositories.zone_repository import ZoneRepository
 from controlel.domain.sensors.sensor import Sensor
 from controlel.domain.source_control import SourceCapabilities, SourceOwnership
+from controlel.infrastructure.home_assistant import ACTIVE_REFERENCE_KEY
 from controlel.infrastructure.time.system_clock import SystemClock
 
+from .canonical_runtime import async_select_runtime_configuration
 from .config import HomeAssistantIntegrationConfig, integration_config_from_entry
 from .event_loop_bridge import HomeAssistantEventLoopBridge
 from .failure_sink import HomeAssistantScheduledFailureSink, clear_entry_issues
@@ -50,6 +53,7 @@ PLATFORMS = ("sensor", "binary_sensor")
 class ControlelEntryRuntime:
     host: HomeAssistantControlelHost | None
     config: HomeAssistantIntegrationConfig
+    loaded_configuration: LoadedRuntimeConfiguration | None = None
     reloading: bool = False
     frontend_api_unregister: Callable[[], None] | None = None
 
@@ -78,7 +82,8 @@ async def async_setup_entry(
 ) -> bool:
     """Set up one Controlel runtime from a config entry."""
     core_version = await hass.async_add_executor_job(metadata.version, "controlel")
-    config = integration_config_from_entry(entry.data, entry.options)
+    selection, setup_backend = await async_select_runtime_configuration(hass, entry)
+    config = selection.config
     zone_control = config.zone_control
     heat_source_configuration = config.heat_source_configuration
 
@@ -273,10 +278,14 @@ async def async_setup_entry(
     entry.runtime_data = ControlelEntryRuntime(
         host=host,
         config=config,
+        loaded_configuration=selection.loaded_configuration,
         frontend_api_unregister=frontend_api_unregister,
     )
     try:
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+        from .activation_backend import async_recover_interrupted_activation
+
+        await async_recover_interrupted_activation(hass, entry, setup_backend, selection)
     except BaseException:
         frontend_api_unregister()
         await host.async_stop()
@@ -350,6 +359,27 @@ async def _async_update_listener(
     """Update the title and reload once after an atomic options change."""
 
     runtime_data = entry.runtime_data
+    raw_active = entry.data.get(ACTIVE_REFERENCE_KEY)
+    if raw_active is not None:
+        active = ActiveReference.model_validate(raw_active)
+        loaded = runtime_data.loaded_configuration
+        authority_matches = (
+            loaded is not None
+            and loaded.canonical_revision_id == active.canonical_revision_id
+            and loaded.semantic_configuration_fingerprint == active.semantic_configuration_fingerprint
+            and (loaded.environment_id, loaded.module_key, loaded.module_instance_id) == active.scope_key
+        )
+        if authority_matches and entry.title == runtime_data.config.zone_name:
+            return
+        if runtime_data.reloading:
+            return
+        runtime_data.reloading = True
+        if entry.title != runtime_data.config.zone_name:
+            hass.config_entries.async_update_entry(entry, title=runtime_data.config.zone_name)
+        await hass.config_entries.async_reload(entry.entry_id)
+        LOGGER.info("Controlel canonical configuration reloaded entry_id=%s", entry.entry_id)
+        return
+
     config = integration_config_from_entry(entry.data, entry.options)
     if runtime_data.config == config and entry.title == config.zone_name:
         return
