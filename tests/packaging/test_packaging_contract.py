@@ -38,7 +38,7 @@ def test_project_metadata_and_runtime_dependencies_match_release_contract() -> N
     project = load_pyproject()["project"]
 
     assert project["name"] == "controlel"
-    assert project["version"] == "0.14.0"
+    assert project["version"] == "0.15.0"
     assert project["readme"] == "README.md"
     assert project["requires-python"] == ">=3.13"
     assert project["license"] == "MIT"
@@ -86,7 +86,7 @@ def test_project_version_is_the_only_release_version_source() -> None:
         path for path in (ROOT / "src" / "controlel").rglob("*.py") if "__version__" in path.read_text(encoding="utf-8")
     ]
 
-    assert project_version == "0.14.0"
+    assert project_version == "0.15.0"
     assert controlel.__version__ == project_version
     assert importlib.metadata.version("controlel") == project_version
     assert version_files == [ROOT / "src" / "controlel" / "__init__.py"]
@@ -95,11 +95,11 @@ def test_project_version_is_the_only_release_version_source() -> None:
     assert project_version not in package_source
 
 
-def test_manifest_pins_published_core_and_keeps_release_metadata_independent() -> None:
+def test_release_manifest_keeps_published_core_while_source_prepares_next_core() -> None:
     manifest = json.loads((ROOT / "custom_components" / "controlel" / "manifest.json").read_text(encoding="utf-8"))
     core_version = load_pyproject()["project"]["version"]
 
-    assert core_version == "0.14.0"
+    assert core_version == "0.15.0"
     assert manifest["requirements"] == ["controlel==0.14.0"]
     assert manifest["version"] == "0.13.0"
     assert manifest["version"] != core_version
@@ -267,16 +267,20 @@ def test_release_metadata_records_published_core_and_unpublished_ha_boundary() -
     integration_note = (ROOT / "docs" / "releases" / "home-assistant-0.13.0.md").read_text(encoding="utf-8")
 
     assert "release_id: controlel-core-0.14.0" in metadata
+    assert "release_id: controlel-core-0.15.0" in metadata
     assert "release_id: controlel-core-0.13.0" in metadata
     assert "release_id: controlel-core-0.12.0" in metadata
     assert "release_id: controlel-home_assistant-0.13.0" in metadata
     assert "release_id: controlel-home_assistant-0.12.0" in metadata
+    assert metadata.count('version: "0.15.0"') == 1
     assert metadata.count('version: "0.14.0"') == 1
     assert metadata.count('version: "0.13.0"') == 2
     assert metadata.count('version: "0.12.0"') == 2
     assert metadata.count("status: published") >= 5
     assert metadata.count("status: candidate") >= 1
     assert 'tag: "core-v0.14.0"' in metadata
+    assert 'title: "Controlel Core 0.15.0"' in metadata
+    assert "status: candidate" in metadata
     assert 'commit_sha: "3c42d487a72682068e090097036b2d79cca30b23"' in metadata
     assert "fd7b89b86f3eb1ed74322c4e290d9a168ff67cef1c001a1ee3f9270b171f4f0a" in metadata
     assert "e2af5b6345bfbfa06836d1ffa1f99a196c42bf5f9337937d4935d76dca416978" in metadata
@@ -297,6 +301,20 @@ def test_release_metadata_records_published_core_and_unpublished_ha_boundary() -
     assert "Frontend API v1" in integration_note
     assert "authenticated read-only WebSocket" in integration_note
     assert "No write APIs" in integration_note
+    candidate_note = (ROOT / "docs" / "releases" / "core-0.15.0.md").read_text(encoding="utf-8")
+    assert "unreleased development candidate" in candidate_note
+    assert "Published Core 0.14.0 artifacts" in candidate_note
+
+
+def test_development_composition_is_additive_to_the_public_release_boundary() -> None:
+    builder = (ROOT / "scripts" / "packaging" / "build_development_composition.py").read_text(encoding="utf-8")
+    manifest = json.loads((ROOT / "custom_components" / "controlel" / "manifest.json").read_text(encoding="utf-8"))
+
+    assert manifest["requirements"] == ["controlel==0.14.0"]
+    assert 'DEVELOPMENT_CORE_VERSION = "0.15.0"' in builder
+    assert '"publishable": False' in builder
+    assert '"integration/controlel.zip"' in builder
+    assert "development integration manifest has the wrong Core pin" in builder
 
 
 def test_packaging_tools_are_pinned_and_isolated() -> None:

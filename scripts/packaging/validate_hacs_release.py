@@ -25,7 +25,9 @@ FIXED_ZIP_MODE = stat.S_IFREG | 0o644
 EXPECTED_ARCHIVE_FILES = frozenset(
     {
         "__init__.py",
+        "activation_backend.py",
         "binary_sensor.py",
+        "canonical_runtime.py",
         "config.py",
         "config_flow.py",
         "const.py",

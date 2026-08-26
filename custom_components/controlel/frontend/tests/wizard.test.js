@@ -3,6 +3,8 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const { Element, documentStub } = require("./dom-stub");
 
 global.document = documentStub;
@@ -343,6 +345,101 @@ test("selected room constrains the initial top three candidates and Show more re
   assert.equal(sensorPanel.findAll("candidate").length, 5);
   assert.equal(sensorPanel.findAll("candidate").slice(0, 4).every((item) => item.textContent.includes("sensor.living_")), true);
   assert.ok(sensorPanel.findButton("Show fewer"));
+});
+
+test("large realistic payload stays compact, safe, and navigable", async () => {
+  const { panel, footer, wizard } = create(fakeClient());
+  await wizard.startDiscovery();
+  const hexId = (value) => value.toString(16).padStart(64, "0");
+  const temperatures = Array.from({ length: 24 }, (_, index) => candidate(
+    hexId(100 + index),
+    W.PRIMARY_TEMPERATURE_ROLE,
+    `sensor.${index < 12 ? "living" : "office"}_temperature_${index + 1}`,
+    "sensor",
+    {
+      native_id: `temperature-registry-${index + 1}`,
+      area_id: index < 12 ? "living" : "office",
+      confidence: index % 3 === 0 ? "HIGH" : "MEDIUM",
+      evidence: { area_id: index < 12 ? "living" : "office", device_class: "temperature" },
+    }
+  ));
+  const switches = Array.from({ length: 16 }, (_, index) => candidate(
+    hexId(200 + index),
+    W.SOURCE_ENABLE_TARGET_ROLE,
+    `switch.${index < 8 ? "living" : "utility"}_heat_source_${index + 1}`,
+    "switch",
+    {
+      native_id: `source-registry-${index + 1}`,
+      area_id: index < 8 ? "living" : "utility",
+      evidence: { area_id: index < 8 ? "living" : "utility" },
+    }
+  ));
+  const disableSwitches = switches.map((entry, index) => ({
+    ...entry,
+    candidate_id: hexId(300 + index),
+    role: W.SOURCE_DISABLE_TARGET_ROLE,
+  }));
+  const ownTemperature = candidate(
+    hexId(400), W.PRIMARY_TEMPERATURE_ROLE, "sensor.controlel_living_room_current_temperature", "sensor",
+    { native_id: "controlel-temperature", evidence: { platform: "controlel", device_class: "temperature" } }
+  );
+  const ownSource = candidate(
+    hexId(401), W.SOURCE_ENABLE_TARGET_ROLE, "switch.controlel_heat_permission", "switch",
+    { native_id: "controlel-source", evidence: { platform: "controlel" } }
+  );
+  const weather = candidate(
+    hexId(402), W.SOURCE_ENABLE_TARGET_ROLE, "weather.home", "weather",
+    { native_id: "weather-home", capabilities: ["command.custom_service_target.unverified"] }
+  );
+  wizard.state.recommendations = [
+    {
+      role: W.PRIMARY_TEMPERATURE_ROLE,
+      recommended: ownTemperature,
+      alternatives: temperatures,
+      explicit_confirmation_required: true,
+    },
+    {
+      role: W.SOURCE_ENABLE_TARGET_ROLE,
+      recommended: ownSource,
+      alternatives: [weather, ...switches],
+      explicit_confirmation_required: true,
+    },
+    {
+      role: W.SOURCE_DISABLE_TARGET_ROLE,
+      recommended: disableSwitches[0],
+      alternatives: disableSwitches.slice(1),
+      explicit_confirmation_required: true,
+    },
+  ];
+  wizard.state.draft.areaId = "living";
+  wizard.goToStep(3);
+
+  let [sensorPanel, sourcePanel] = panel.findAll("panel");
+  assert.equal(sensorPanel.findAll("candidate").length, 3);
+  assert.equal(sourcePanel.findAll("candidate").length, 3);
+  assert.equal(panel.textContent.includes("sensor.controlel_"), false);
+  assert.equal(panel.textContent.includes("switch.controlel_"), false);
+  assert.equal(panel.textContent.includes("weather.home"), false);
+  assert.ok(sensorPanel.findButton("Show more (21)"));
+  assert.ok(sourcePanel.findButton("Show more (13)"));
+
+  sensorPanel.findButton("Show more (21)").dispatch("click");
+  [sensorPanel, sourcePanel] = panel.findAll("panel");
+  sourcePanel.findButton("Show more (13)").dispatch("click");
+  [sensorPanel, sourcePanel] = panel.findAll("panel");
+  assert.equal(sensorPanel.findAll("candidate").length, 24);
+  assert.equal(sourcePanel.findAll("candidate").length, 16);
+
+  const back = footer.findButton("Back");
+  assert.ok(back);
+  assert.equal(back.disabled, false);
+  assert.ok(back.className.includes("btn--ghost"));
+  assert.ok(footer.findButton("Save and finish later"));
+  assert.ok(footer.findButton("Continue"));
+  const styles = fs.readFileSync(path.join(__dirname, "..", "styles.css"), "utf8");
+  assert.match(styles, /\.wizard-footer\s*\{[^}]*position:\s*sticky;/s);
+  assert.match(styles, /\.wizard-footer\s*\{[^}]*bottom:\s*0;/s);
+  assert.match(styles, /\.btn--ghost\s*\{[^}]*color:/s);
 });
 
 test("one simple-switch selection derives and confirms both source bindings", async () => {

@@ -6,7 +6,7 @@ The ordinary development environment deliberately has no Home Assistant
 dependency. Use these separate suites:
 
 ```text
-# A. Repository Core 0.14.0 release-contract tests
+# A. Repository Core 0.15.0 candidate tests
 python -m pytest tests/domain tests/application tests/infrastructure \
   tests/architecture tests/packaging
 
@@ -16,6 +16,11 @@ python -m pytest tests/integrations/home_assistant \
 
 # C. Real Home Assistant framework tests with installed public Core 0.14.0
 python -m pytest tests/integrations/home_assistant/framework
+
+# D. Real loader smoke for an explicit Core 0.15.0 development composition
+CONTROLEL_DEVELOPMENT_COMPOSITION=/absolute/path/to/controlel-dev-0.15.0.zip \
+  python -m pytest \
+  tests/integrations/home_assistant/development_composition
 ```
 
 Suite C is pinned to Home Assistant `2026.7.3` and
@@ -47,6 +52,12 @@ repository prepares integration candidate `0.13.0`; both HA suites install
 Core from PyPI as a normal non-editable site-packages distribution and verify
 it matches the manifest's exact `controlel==0.14.0` pin and published artifact
 identities. Suite A remains the independent repository-Core boundary.
+
+Candidate Core `0.15.0` and the integration-side wizard fixes are tested
+together with the non-publishable bundle described in
+`HomeAssistantDevelopmentComposition.md`. This additive development path does
+not change Suites B or C, the source integration manifest, or published Core
+`0.14.0` identities.
 
 Home Assistant 2026.7.3 imports POSIX-only `fcntl` and `resource` modules in
 its pytest bootstrap, so the standard framework command does not run in native
@@ -132,9 +143,12 @@ rejection behavior. Generated files remain below ignored `dist/hacs/`.
 
 ## Configuration and options development
 
-Core `0.14.0` is published and immutable. The integration and release metadata
-are prepared as candidate `0.13.0`, consuming the versioned Setup and read-only
-Frontend API v1 boundaries through exact public Core `controlel==0.14.0`.
+Core `0.14.0` is published and immutable. Repository Core `0.15.0` is an
+unreleased candidate containing Setup recommendation fixes. The integration
+release metadata remains candidate `0.13.0` and continues to consume the
+versioned Setup and read-only Frontend API v1 boundaries through exact public
+Core `controlel==0.14.0`; the separate development composition overlays only
+its bundled integration copy to require `controlel==0.15.0`.
 
 Anomaly v1 extends the passive M31C development boundary with immutable,
 bounded observation state and transition-oriented operational events. New

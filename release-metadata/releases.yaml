@@ -7,6 +7,28 @@
 metadata_version: 1
 
 releases:
+  - release_id: controlel-core-0.15.0
+    component: core
+    title: "Controlel Core 0.15.0"
+    version: "0.15.0"
+    status: candidate
+    tag: null
+    commit_sha: null
+    summary: "Setup recommendation identity, compatibility, and relevance fixes"
+    highlights:
+      - "Heating setup candidate IDs remain valid across otherwise-identical discovery captures"
+      - "Controlel-owned entities are excluded from Heating setup input recommendations"
+      - "Temperature and heat-source recommendations require meaningful advertised compatibility"
+      - "Preferred-area candidates rank before candidates from other areas"
+    compatibility:
+      home_assistant_development_composition: "0.13.0"
+      python: ">=3.13"
+      pydantic: ">=2.0"
+    notes:
+      - "Unreleased development candidate; no tag, publication, or public artifact identity exists yet."
+      - "No runtime algorithm, activation behavior, schema migration, or automatic migration change is included."
+      - "Published Core 0.14.0 records and artifact identities remain unchanged."
+
   - release_id: controlel-core-0.14.0
     component: core
     title: "Controlel Core 0.14.0"
