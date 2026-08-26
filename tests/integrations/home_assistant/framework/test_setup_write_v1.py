@@ -216,6 +216,14 @@ async def test_valid_start_is_config_entry_scoped_and_never_changes_runtime_cont
     assert session["draft_revision"] == 1
     assert session["canonical_revision_id"] is None
     assert session["active_revision_id"] is None
+    candidates = [
+        candidate
+        for recommendation in session["recommendations"]
+        for candidate in ([recommendation["recommended"]] + recommendation["alternatives"])
+        if candidate is not None
+    ]
+    assert all(candidate["evidence"].get("platform") != DOMAIN for candidate in candidates)
+    assert all(".controlel_" not in (candidate["current_locator"] or "") for candidate in candidates)
     assert ACTIVE_REFERENCE_KEY not in entry.data
     assert dict(entry.data) == data_before
     assert dict(entry.options) == options_before

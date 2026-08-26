@@ -299,6 +299,50 @@ async def test_stale_draft_update_is_rejected_and_current_validation_survives_re
 
 
 @async_test
+async def test_rendered_candidate_ids_remain_valid_for_a_later_first_save() -> None:
+    """Regression: capture time alone must not invalidate browser selections."""
+
+    store = MemoryHAStore()
+    entry = FakeConfigEntry()
+    host = service(store, entry)
+    created = await host.start_new_heating_setup(
+        draft_id="draft-first-save",
+        module_instance_id="main-heating",
+        created_at=NOW,
+        snapshot_id="snapshot-1",
+        report_id="report-1",
+    )
+    selections = tuple(
+        HeatingBindingSelectionRequest(
+            role=item.role,
+            candidate_id=item.recommended.candidate_id,
+            user_confirmed=True,
+        )
+        for item in created.recommendations
+        if item.role in {PRIMARY_TEMPERATURE_ROLE, SOURCE_ENABLE_TARGET_ROLE, SOURCE_DISABLE_TARGET_ROLE}
+        and item.recommended is not None
+    )
+
+    updated = await host.update_heating_draft(
+        created.draft_id,
+        expected_revision=created.draft_revision,
+        updated_at=NOW + timedelta(minutes=5),
+        snapshot_id=created.discovery.snapshot_id,
+        report_id="report-first-save",
+        settings=complete_settings(),
+        selections=selections,
+        preferred_area_id=AREA.id,
+    )
+
+    assert updated.draft_revision == 2
+    assert {selection.role for selection in updated.selections} == {
+        PRIMARY_TEMPERATURE_ROLE,
+        SOURCE_ENABLE_TARGET_ROLE,
+        SOURCE_DISABLE_TARGET_ROLE,
+    }
+
+
+@async_test
 async def test_durable_draft_delete_requires_current_revision() -> None:
     store = MemoryHAStore()
     entry = FakeConfigEntry()

@@ -47,6 +47,47 @@
     return [recommendation.recommended, ...(recommendation.alternatives || [])].filter(Boolean);
   }
 
+  function candidateDomain(candidate) {
+    const evidence = candidate && candidate.evidence;
+    if (evidence && typeof evidence.domain === "string") return evidence.domain;
+    const locator = candidate && candidate.current_locator;
+    return typeof locator === "string" && locator.includes(".") ? locator.split(".", 1)[0] : null;
+  }
+
+  function isWizardCandidateCompatible(role, candidate) {
+    if (!candidate) return false;
+    const locator = candidate.current_locator || "";
+    const objectId = locator.includes(".") ? locator.slice(locator.indexOf(".") + 1) : "";
+    if ((candidate.evidence && candidate.evidence.platform === "controlel") || objectId.startsWith("controlel_")) {
+      return false;
+    }
+    const capabilities = candidate.capabilities || [];
+    if (role === PRIMARY_TEMPERATURE_ROLE) {
+      return candidateDomain(candidate) === "sensor" && capabilities.includes("measurement.temperature");
+    }
+    if (role === SOURCE_ENABLE_TARGET_ROLE || role === SOURCE_DISABLE_TARGET_ROLE) {
+      return candidateDomain(candidate) === "switch" && capabilities.includes("command.enable_disable");
+    }
+    return false;
+  }
+
+  function rankCandidates(candidates, preferredAreaId) {
+    const confidenceRank = { HIGH: 0, MEDIUM: 1, LOW: 2 };
+    const identityRank = { STABLE: 0, RECOVERABLE: 1, EPHEMERAL: 2 };
+    return candidates.slice().sort((left, right) => {
+      const leftArea = preferredAreaId && left.area_id !== preferredAreaId ? 1 : 0;
+      const rightArea = preferredAreaId && right.area_id !== preferredAreaId ? 1 : 0;
+      if (leftArea !== rightArea) return leftArea - rightArea;
+      const confidence = (confidenceRank[left.confidence] ?? 3) - (confidenceRank[right.confidence] ?? 3);
+      if (confidence) return confidence;
+      const identity = (identityRank[left.identity_quality] ?? 3) - (identityRank[right.identity_quality] ?? 3);
+      if (identity) return identity;
+      return String(left.current_locator || left.native_id || "").localeCompare(
+        String(right.current_locator || right.native_id || "")
+      );
+    });
+  }
+
   function createSetupWizard(options) {
     const opts = options && typeof options === "object" ? options : {};
     const client = opts.client;
@@ -78,6 +119,7 @@
       session: null,
       dirty: false,
       lastSavedAt: null,
+      expandedRoles: {},
       draft: { areaId: null, selections: {}, confirmations: {} },
     };
 
@@ -129,6 +171,7 @@
         state.draft.confirmations[selection.role] = Boolean(selection.user_confirmed);
       }
       state.dirty = false;
+      state.expandedRoles = {};
     }
 
     function draftIsReady() {
@@ -201,8 +244,15 @@
         const existingDraftId = forceNewDraft ? null : storedDraftId();
         let session;
         if (existingDraftId) {
-          session = await client.reopenDraft({ draft_id: existingDraftId, ...context });
-        } else {
+          try {
+            session = await client.reopenDraft({ draft_id: existingDraftId, ...context });
+          } catch (error) {
+            const recoverableCodes = new Set(["not_found", "invalid_format", "setup_storage_integrity"]);
+            if (!recoverableCodes.has(error && error.code)) throw error;
+            clearStoredDraftId();
+          }
+        }
+        if (!session) {
           session = await client.startDraft({
             draft_id: makeId("draft"),
             module_instance_id: "main-heating",
@@ -215,7 +265,7 @@
           storeDraftId(session.draft_id);
         }
         applySession(session);
-        if (existingDraftId) state.step = 4;
+        if (existingDraftId && storedDraftId() === existingDraftId) state.step = 4;
         state.status = "loaded";
       } catch (error) {
         state.status = "error";
@@ -234,19 +284,58 @@
 
     function selectArea(areaId) {
       state.draft.areaId = areaId;
+      state.expandedRoles = {};
       state.dirty = true;
       render();
+    }
+
+    function sameCandidateIdentity(left, right) {
+      if (!left || !right) return false;
+      if (left.native_id && right.native_id) return left.native_id === right.native_id;
+      return Boolean(left.current_locator && left.current_locator === right.current_locator);
+    }
+
+    function pairedSourceSelection(role, selected) {
+      const otherRole = role === SOURCE_ENABLE_TARGET_ROLE
+        ? SOURCE_DISABLE_TARGET_ROLE
+        : SOURCE_ENABLE_TARGET_ROLE;
+      return recommendationCandidates(recommendation(otherRole)).find(
+        (item) => isWizardCandidateCompatible(otherRole, item) && sameCandidateIdentity(selected, item)
+      ) || null;
     }
 
     function selectCandidate(role, candidateId) {
       state.draft.selections[role] = candidateId;
       state.draft.confirmations[role] = false;
+      if (role === SOURCE_ENABLE_TARGET_ROLE || role === SOURCE_DISABLE_TARGET_ROLE) {
+        const selected = candidate(role, candidateId);
+        const paired = pairedSourceSelection(role, selected);
+        if (paired) {
+          const otherRole = role === SOURCE_ENABLE_TARGET_ROLE
+            ? SOURCE_DISABLE_TARGET_ROLE
+            : SOURCE_ENABLE_TARGET_ROLE;
+          state.draft.selections[otherRole] = paired.candidate_id;
+          state.draft.confirmations[otherRole] = false;
+        }
+      }
       state.dirty = true;
       render();
     }
 
     function confirmCandidate(role, value) {
       state.draft.confirmations[role] = Boolean(value);
+      if (role === SOURCE_ENABLE_TARGET_ROLE || role === SOURCE_DISABLE_TARGET_ROLE) {
+        const selected = candidate(role, state.draft.selections[role]);
+        const paired = pairedSourceSelection(role, selected);
+        if (paired) {
+          const otherRole = role === SOURCE_ENABLE_TARGET_ROLE
+            ? SOURCE_DISABLE_TARGET_ROLE
+            : SOURCE_ENABLE_TARGET_ROLE;
+          if (state.draft.selections[otherRole] === paired.candidate_id) {
+            state.draft.confirmations[otherRole] = Boolean(value);
+          }
+        }
+      }
       state.dirty = true;
       render();
     }
@@ -291,6 +380,7 @@
           report_id: makeId("report"),
           settings: draftSettings(),
           selections: draftSelections(),
+          preferred_area_id: state.draft.areaId,
         });
         applySession(session);
         state.lastSavedAt = updatedAt;
@@ -322,6 +412,7 @@
           snapshot_id: state.snapshot.snapshot_id,
           evaluated_at: evaluatedAt,
           report_id: makeId("report"),
+          preferred_area_id: state.draft.areaId,
         });
         applySession(validated);
         state.lastSavedAt = evaluatedAt;
@@ -341,6 +432,11 @@
     }
 
     function goToStep(step) {
+      if (state.status === "error" && state.session) {
+        state.status = "loaded";
+        state.error = null;
+        state.errorOperation = null;
+      }
       if (state.status !== "loaded" && step !== 1) return;
       state.step = step;
       render();
@@ -490,9 +586,21 @@
 
     function renderRole(role, heading, lead) {
       const item = recommendation(role);
-      const candidates = recommendationCandidates(item);
+      const allCandidates = rankCandidates(
+        recommendationCandidates(item).filter((entry) => isWizardCandidateCompatible(role, entry)),
+        state.draft.areaId
+      );
       const selectedId = state.draft.selections[role];
-      if (!item || candidates.length === 0) {
+      const recommendedId = allCandidates.length ? allCandidates[0].candidate_id : null;
+      const selected = allCandidates.find((entry) => entry.candidate_id === selectedId) || null;
+      const areaCandidates = state.draft.areaId
+        ? allCandidates.filter((entry) => entry.area_id === state.draft.areaId)
+        : allCandidates;
+      let candidates = state.expandedRoles[role] ? allCandidates : areaCandidates.slice(0, 3);
+      if (selected && !candidates.some((entry) => entry.candidate_id === selected.candidate_id)) {
+        candidates = [selected, ...candidates.slice(0, 2)];
+      }
+      if (!item || allCandidates.length === 0) {
         return el("div", { class: "panel" },
           el("h3", { class: "panel__title" }, heading),
           noteBox(t("wizard.no_candidates"), "warning")
@@ -501,15 +609,34 @@
       return el("div", { class: "panel" },
         el("h3", { class: "panel__title" }, heading),
         el("p", { class: "panel__lead" }, lead),
-        el("div", { class: "candidate-list" }, candidates.map((entry) => candidateCard({
-          candidate: candidateView(entry),
-          isRecommended: Boolean(item.recommended && item.recommended.candidate_id === entry.candidate_id),
-          selected: selectedId === entry.candidate_id,
-          onSelect: (id) => selectCandidate(role, id),
-          confirmed: Boolean(state.draft.confirmations[role]),
-          onConfirm: item.explicit_confirmation_required ? (value) => confirmCandidate(role, value) : null,
-          roleLabel: heading,
-        }))),
+        candidates.length
+          ? el("div", { class: "candidate-list" }, candidates.map((entry) => candidateCard({
+              candidate: candidateView(entry),
+              isRecommended: entry.candidate_id === recommendedId,
+              selected: selectedId === entry.candidate_id,
+              onSelect: (id) => selectCandidate(role, id),
+              confirmed: Boolean(state.draft.confirmations[role]),
+              onConfirm: item.explicit_confirmation_required ? (value) => confirmCandidate(role, value) : null,
+              roleLabel: heading,
+            })))
+          : noteBox(t("wizard.no_candidates_in_area"), "warning"),
+        allCandidates.length > candidates.length
+          ? el("button", {
+              class: "btn btn--link candidate-list__more",
+              onclick: () => {
+                state.expandedRoles[role] = true;
+                render();
+              },
+            }, t("wizard.show_more_candidates", { count: allCandidates.length - candidates.length }))
+          : state.expandedRoles[role] && allCandidates.length > Math.min(3, areaCandidates.length)
+            ? el("button", {
+                class: "btn btn--link candidate-list__more",
+                onclick: () => {
+                  state.expandedRoles[role] = false;
+                  render();
+                },
+              }, t("wizard.show_fewer_candidates"))
+            : null,
         item.explicit_confirmation_required && selectedId && !state.draft.confirmations[role]
           ? noteBox(t("wizard.important_binding_note"), "warning")
           : null
@@ -521,8 +648,7 @@
         el("h2", { class: "step__title" }, t("wizard.bindings_title")),
         el("p", { class: "step__lead" }, t("wizard.bindings_lead")),
         renderRole(PRIMARY_TEMPERATURE_ROLE, t("wizard.role_sensor"), t("wizard.sensor_lead")),
-        renderRole(SOURCE_ENABLE_TARGET_ROLE, t("wizard.source_enable_target"), t("wizard.heat_source_lead")),
-        renderRole(SOURCE_DISABLE_TARGET_ROLE, t("wizard.source_disable_target"), t("wizard.heat_source_lead"))
+        renderRole(SOURCE_ENABLE_TARGET_ROLE, t("wizard.role_heat_source"), t("wizard.simple_switch_lead"))
       );
     }
 
@@ -695,6 +821,8 @@
     SOURCE_DISABLE_TARGET_ROLE,
     candidateView,
     recommendationCandidates,
+    isWizardCandidateCompatible,
+    rankCandidates,
     createSetupWizard,
   };
 })(typeof window !== "undefined" ? window : globalThis);

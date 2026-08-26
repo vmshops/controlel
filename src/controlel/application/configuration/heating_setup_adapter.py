@@ -762,6 +762,8 @@ def _heating_candidate(
     preferred_area_id: str | None,
     preferred_floor_id: str | None,
 ) -> HeatingSetupCandidate | None:
+    if _is_controlel_reference(reference):
+        return None
     classification = _classify_candidate(role, reference)
     if classification is None:
         return None
@@ -788,13 +790,17 @@ def _heating_candidate(
         evidence["preferred_floor_match"] = floor_match
         if floor_match:
             reason_codes.append("heating.candidate.preferred_floor_match")
-    snapshot_fingerprint = snapshot.content_fingerprint
-    if snapshot_fingerprint is None:
+    if snapshot.content_fingerprint is None:
         raise ValueError("validated discovery snapshot has no content fingerprint")
     candidate_id = hashlib.sha256(
         canonical_json(
             {
-                "snapshot_content_fingerprint": snapshot_fingerprint,
+                # Candidate identity follows the candidate evidence, not the
+                # observation timestamp or unrelated objects in the snapshot.
+                # Setup Write update requests necessarily capture a newer
+                # snapshot than the one rendered by the browser; including the
+                # whole snapshot fingerprint made every selection stale before
+                # its first save even when the registry was unchanged.
                 "role": role,
                 "reference": reference.document_data(),
                 "recommendation_policy_version": HEATING_RECOMMENDATION_POLICY_VERSION,
@@ -837,13 +843,6 @@ def _classify_candidate(
                 ("measurement.temperature",),
                 ("heating.candidate.temperature_unit",),
             )
-        locator = (reference.current_locator or "").lower()
-        if "temperature" in locator or locator.endswith("_temp"):
-            return (
-                RecommendationConfidence.LOW,
-                ("measurement.temperature.unverified",),
-                ("heating.candidate.temperature_locator_hint",),
-            )
         return None
     if role in {SOURCE_ENABLE_TARGET_ROLE, SOURCE_DISABLE_TARGET_ROLE}:
         if reference.object_kind == _HA_ENDPOINT_KIND and reference.identity_quality is IdentityQuality.EPHEMERAL:
@@ -860,17 +859,13 @@ def _classify_candidate(
                 ("command.enable_disable",),
                 ("heating.candidate.switch_enable_disable",),
             )
-        if domain in {"climate", "water_heater"}:
+        if domain in {"climate", "input_boolean", "water_heater"}:
             return (
                 RecommendationConfidence.MEDIUM,
                 ("command.custom_service_target",),
                 ("heating.candidate.external_service_target",),
             )
-        return (
-            RecommendationConfidence.LOW,
-            ("command.custom_service_target.unverified",),
-            ("heating.candidate.external_service_target_unverified",),
-        )
+        return None
     if role == REPORTED_SOURCE_STATE_ROLE:
         if reference.object_kind != _HA_ENTITY_KIND:
             return None
@@ -907,7 +902,7 @@ def _candidate_sort_key(
     *,
     preferred_area_id: str | None,
     preferred_floor_id: str | None,
-) -> tuple[int, int, int, str, str, str]:
+) -> tuple[int, int, int, int, str, str, str]:
     confidence_rank = {
         RecommendationConfidence.HIGH: 0,
         RecommendationConfidence.MEDIUM: 1,
@@ -915,14 +910,26 @@ def _candidate_sort_key(
     }[candidate.confidence]
     area_rank = 0 if preferred_area_id is None or candidate.reference.area_id == preferred_area_id else 1
     floor_rank = 0 if preferred_floor_id is None or candidate.reference.floor_id == preferred_floor_id else 1
+    identity_rank = 0 if candidate.reference.identity_quality is IdentityQuality.STABLE else 1
     return (
-        confidence_rank,
         area_rank,
         floor_rank,
+        confidence_rank,
+        identity_rank,
         candidate.reference.current_locator or "",
         candidate.reference.native_id or "",
         canonical_json(candidate.reference.document_data()),
     )
+
+
+def _is_controlel_reference(reference: ProviderReference) -> bool:
+    """Keep the integration's own observability entities out of setup inputs."""
+
+    if _evidence_string(reference, "platform") == "controlel":
+        return True
+    locator = reference.current_locator or ""
+    _, separator, object_id = locator.partition(".")
+    return bool(separator and object_id.startswith("controlel_"))
 
 
 def _resolution_issues(

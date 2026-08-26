@@ -257,6 +257,101 @@ def test_recommendation_order_is_deterministic_and_independent_of_snapshot_input
     assert forward == reverse
 
 
+def test_candidate_ids_do_not_expire_only_because_capture_time_advanced() -> None:
+    adapter = HeatingSetupAdapter()
+    first = adapter.recommend(_snapshot())
+    later_snapshot = HomeAssistantDiscoveryAdapter("ha-home").snapshot(
+        snapshot_id="heating-discovery-later",
+        captured_at=NOW + timedelta(minutes=5),
+        floors=(GROUND,),
+        areas=(LIVING,),
+        devices=(ROOM_DEVICE, BOILER_DEVICE),
+        entities=DEFAULT_ENTITIES,
+    )
+    later = adapter.recommend(later_snapshot)
+
+    assert {
+        item.role: tuple(candidate.candidate_id for candidate in item.candidates) for item in first.recommendations
+    } == {item.role: tuple(candidate.candidate_id for candidate in item.candidates) for item in later.recommendations}
+
+
+def test_recommendations_exclude_unverified_temperature_weather_and_controlel_entities() -> None:
+    named_only_temperature = replace(
+        TEMPERATURE,
+        id="entity-named-only",
+        entity_id="sensor.boiler_temperature",
+        unique_id="named-only",
+        device_class=None,
+        original_device_class=None,
+        unit_of_measurement=None,
+    )
+    weather = replace(
+        SOURCE,
+        id="entity-weather",
+        entity_id="weather.home",
+        domain="weather",
+        unique_id="weather-home",
+    )
+    own_temperature = replace(
+        TEMPERATURE,
+        id="entity-controlel-temperature",
+        entity_id="sensor.controlel_zone_temperature",
+        platform="controlel",
+        unique_id="controlel-zone-temperature",
+    )
+    own_switch = replace(
+        SOURCE,
+        id="entity-controlel-switch",
+        entity_id="switch.controlel_heat_permission",
+        platform="controlel",
+        unique_id="controlel-heat-permission",
+    )
+    recommendations = HeatingSetupAdapter().recommend(
+        _snapshot(entities=(*DEFAULT_ENTITIES, named_only_temperature, weather, own_temperature, own_switch))
+    )
+
+    temperature_ids = {
+        item.reference.native_id for item in _recommendation(recommendations, PRIMARY_TEMPERATURE_ROLE).candidates
+    }
+    source_ids = {
+        item.reference.native_id for item in _recommendation(recommendations, SOURCE_ENABLE_TARGET_ROLE).candidates
+    }
+    assert named_only_temperature.id not in temperature_ids
+    assert own_temperature.id not in temperature_ids
+    assert weather.id not in source_ids
+    assert own_switch.id not in source_ids
+    assert CUSTOM_PERMISSION_TARGET.id in source_ids
+
+
+def test_preferred_area_ranks_a_capable_local_candidate_before_other_rooms() -> None:
+    office = AreaEntry("office", GROUND.floor_id)
+    local_medium = replace(
+        ALTERNATIVE_TEMPERATURE,
+        id="entity-local-medium",
+        entity_id="sensor.living_air",
+        unique_id="living-air",
+    )
+    other_high = replace(
+        TEMPERATURE,
+        id="entity-office-high",
+        entity_id="sensor.office_temperature",
+        unique_id="office-temperature",
+        device_id=None,
+        area_id=office.id,
+    )
+    recommendations = HeatingSetupAdapter().recommend(
+        _snapshot(
+            entities=(local_medium, other_high, SOURCE),
+            areas=(LIVING, office),
+        ),
+        preferred_area_id=LIVING.id,
+    )
+
+    temperature = _recommendation(recommendations, PRIMARY_TEMPERATURE_ROLE)
+    assert temperature.recommended_candidate is not None
+    assert temperature.recommended_candidate.reference.native_id == local_medium.id
+
+
 def test_draft_creation_requires_explicit_selection_and_does_not_auto_confirm() -> None:
     snapshot = _snapshot()
     draft = _recommended_draft(snapshot, confirmed=False)

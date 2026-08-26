@@ -336,6 +336,8 @@
           "The measurement the zone demand is based on. Command success is never treated as a physical reading.",
         heat_source_lead:
           "The source-control permission target. Enabling it grants heat source permission; it does not mean the burner is running.",
+        simple_switch_lead:
+          "Select one switch. Controlel derives its turn-on and turn-off bindings together; granting permission does not mean the burner is running.",
         important_binding_note:
           "This is an important binding. Selecting a candidate is not confirmation — confirm it explicitly below the candidate.",
         not_selected: "Not selected",
@@ -379,6 +381,9 @@
         refresh_discovery: "Refresh discovery",
         no_areas: "No Home Assistant areas were discovered. The draft remains incomplete.",
         no_candidates: "No backend recommendation or candidate is available for this role.",
+        no_candidates_in_area: "No compatible candidate was found in the selected room. Show more to review candidates from other rooms.",
+        show_more_candidates: "Show more ({count})",
+        show_fewer_candidates: "Show fewer",
         source_enable_target: "Heat source enable target",
         source_disable_target: "Heat source disable target",
         review_persisted_lead:
@@ -728,6 +733,8 @@
           "Měření, na kterém se zakládá potřeba topení v zóně. Úspěch příkazu se nikdy nepovažuje za fyzikální měření.",
         heat_source_lead:
           "Cíl oprávnění zdroje tepla. Zapnutí uděluje oprávnění zdroje tepla; neznamená to, že hořák běží.",
+        simple_switch_lead:
+          "Vyberte jeden spínač. Controlel z něj společně odvodí vazby pro zapnutí i vypnutí; udělení oprávnění neznamená, že hořák běží.",
         important_binding_note:
           "Jedná se o důležité propojení. Výběr kandidáta není potvrzením — potvrďte jej explicitně pod kandidátem.",
         not_selected: "Nevybráno",
@@ -771,6 +778,9 @@
         refresh_discovery: "Obnovit objev",
         no_areas: "Nebyly objeveny žádné oblasti Home Assistant. Koncept zůstává nekompletní.",
         no_candidates: "Pro tuto roli není dostupné doporučení ani kandidát z backendu.",
+        no_candidates_in_area: "Ve vybrané místnosti nebyl nalezen kompatibilní kandidát. Další kandidáty z jiných místností zobrazíte pomocí „Zobrazit další“.",
+        show_more_candidates: "Zobrazit další ({count})",
+        show_fewer_candidates: "Zobrazit méně",
         source_enable_target: "Cíl povolení zdroje tepla",
         source_disable_target: "Cíl zakázání zdroje tepla",
         review_persisted_lead:

@@ -800,16 +800,17 @@
        */
       function languageControl() {
         const i18n = CI18N ? CI18N.defaultI18n() : null;
+        const preference = i18n ? i18n.preference : "auto";
         const select = el("select", {
           class: "select select--language",
           "aria-label": t("settings.language"),
           onchange: (e) => api.setLanguage((e.target && e.target.value) || "auto"),
         },
-          el("option", { value: "auto" }, t("language.auto")),
-          el("option", { value: "en" }, t("language.en")),
-          el("option", { value: "cs" }, t("language.cs"))
+          el("option", { value: "auto", selected: preference === "auto" ? "" : null }, t("language.auto")),
+          el("option", { value: "en", selected: preference === "en" ? "" : null }, t("language.en")),
+          el("option", { value: "cs", selected: preference === "cs" ? "" : null }, t("language.cs"))
         );
-        if (i18n) select.value = i18n.preference;
+        select.value = preference;
         return select;
       }
 

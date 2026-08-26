@@ -461,6 +461,26 @@ test("changing the language select switches the shell language", async () => {
   }
 });
 
+test("language selector keeps its explicit preference after navigation re-renders", async () => {
+  const { app, viewRoot } = buildApp({
+    responses: { overview: overviewRaw(), heating: heatingRaw(), setup: setupRaw() },
+  });
+  try {
+    app.setLanguage("cs");
+    app.navigate("setup");
+    await settle(app);
+    app.navigate("settings");
+    await settle(app);
+
+    const select = viewRoot.findAll("select--language")[0];
+    const selected = Array.from(select.walk()).find((option) => option.hasAttribute("selected"));
+    assert.equal(select.value, "cs");
+    assert.equal(selected && selected.getAttribute("value"), "cs");
+  } finally {
+    CI18N.setLanguage("en");
+  }
+});
+
 test("wizard renders in Czech with truthful binding semantics", async () => {
   await withLanguage("cs", async () => {
     const root = new Element("div");

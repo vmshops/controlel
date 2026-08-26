@@ -53,8 +53,8 @@ function snapshot() {
   };
 }
 
-function candidate(id, role, locator, domain) {
-  return {
+function candidate(id, role, locator, domain, overrides = {}) {
+  const base = {
     candidate_id: id,
     role,
     native_id: `${domain}-registry-id`,
@@ -67,6 +67,7 @@ function candidate(id, role, locator, domain) {
     reason_codes: [`heating.candidate.${domain}`],
     evidence: { domain, area_id: "living" },
   };
+  return { ...base, ...overrides, evidence: { ...base.evidence, ...(overrides.evidence || {}) } };
 }
 
 function recommendations() {
@@ -125,6 +126,7 @@ function memoryStorage(initial = {}) {
 
 function fakeClient({
   failDiscovery = false,
+  failReopen = null,
   failUpdate = false,
   failValidation = false,
   reopenOverrides = {},
@@ -148,6 +150,7 @@ function fakeClient({
     },
     reopenDraft(request) {
       calls.push(["reopen", request]);
+      if (failReopen) return Promise.reject(failReopen);
       return Promise.resolve(session({ draft_id: request.draft_id, ...reopenOverrides }));
     },
     updateDraft(request) {
@@ -236,6 +239,7 @@ test("wizard saves an updated draft and validates without activation or runtime 
   await wizard.saveDraft();
   const update = client.calls.find(([operation]) => operation === "update")[1];
   assert.equal(update.expected_revision, 1);
+  assert.equal(update.preferred_area_id, "living");
   assert.deepEqual(update.settings, {
     zone_id: "living",
     zone_name: "living",
@@ -250,6 +254,7 @@ test("wizard saves an updated draft and validates without activation or runtime 
   assert.deepEqual(client.calls.map(([operation]) => operation), [
     "discovery", "recommendations", "start", "update", "validate",
   ]);
+  assert.equal(client.calls.find(([operation]) => operation === "validate")[1].preferred_area_id, "living");
   assert.equal(client.calls.some(([operation]) => operation === "activate" || operation === "canonicalize"), false);
   assert.equal(client.calls.some(([operation]) => operation.startsWith("runtime") || operation.startsWith("service")), false);
 });
@@ -267,6 +272,99 @@ test("wizard reopens the stored backend draft after real discovery", async () =>
   assert.equal(wizard.state.session.draft_id, "draft-existing");
   assert.equal(wizard.state.step, 4, "a resumed draft opens on its backend validation report");
   assert.equal(client.calls.some(([operation]) => operation === "start"), false, "resume never creates a duplicate draft");
+});
+
+test("wizard replaces a stale local draft pointer with a fresh backend draft", async () => {
+  const missing = new Error("draft not found");
+  missing.code = "not_found";
+  const client = fakeClient({ failReopen: missing });
+  const storage = memoryStorage({ "controlel.setup.draft.v1.entry-real": "draft-missing" });
+  const { wizard } = create(client, storage);
+
+  await wizard.startDiscovery();
+
+  assert.equal(wizard.state.status, "loaded");
+  assert.deepEqual(client.calls.map(([operation]) => operation), [
+    "discovery", "recommendations", "reopen", "start",
+  ]);
+  assert.notEqual(wizard.state.session.draft_id, "draft-missing");
+  assert.equal(storage.values.get("controlel.setup.draft.v1.entry-real"), wizard.state.session.draft_id);
+  assert.equal(wizard.state.step, 1, "a replacement draft restarts the guided flow");
+});
+
+test("wizard candidate compatibility excludes diagnostics and unsupported domains", () => {
+  const temperatureRole = W.PRIMARY_TEMPERATURE_ROLE;
+  const sourceRole = W.SOURCE_ENABLE_TARGET_ROLE;
+  const temperature = candidate("1".repeat(64), temperatureRole, "sensor.room_temperature", "sensor");
+  const namedOnly = candidate("2".repeat(64), temperatureRole, "sensor.room_temp", "sensor", {
+    capabilities: ["measurement.temperature.unverified"],
+  });
+  const own = candidate("3".repeat(64), temperatureRole, "sensor.controlel_zone_temperature", "sensor", {
+    evidence: { platform: "controlel" },
+  });
+  const weather = candidate("4".repeat(64), sourceRole, "weather.home", "weather", {
+    capabilities: ["command.custom_service_target.unverified"],
+  });
+  const source = candidate("5".repeat(64), sourceRole, "switch.boiler", "switch");
+
+  assert.equal(W.isWizardCandidateCompatible(temperatureRole, temperature), true);
+  assert.equal(W.isWizardCandidateCompatible(temperatureRole, namedOnly), false);
+  assert.equal(W.isWizardCandidateCompatible(temperatureRole, own), false);
+  assert.equal(W.isWizardCandidateCompatible(sourceRole, weather), false);
+  assert.equal(W.isWizardCandidateCompatible(sourceRole, source), true);
+});
+
+test("selected room constrains the initial top three candidates and Show more reveals the rest", async () => {
+  const client = fakeClient();
+  const { panel, wizard } = create(client);
+  await wizard.startDiscovery();
+  const role = W.PRIMARY_TEMPERATURE_ROLE;
+  const sensors = [
+    candidate("1".repeat(64), role, "sensor.living_one", "sensor"),
+    candidate("2".repeat(64), role, "sensor.office_one", "sensor", { area_id: "office", evidence: { area_id: "office" } }),
+    candidate("3".repeat(64), role, "sensor.living_two", "sensor"),
+    candidate("4".repeat(64), role, "sensor.living_three", "sensor"),
+    candidate("5".repeat(64), role, "sensor.living_four", "sensor"),
+  ];
+  wizard.state.recommendations = [
+    { role, recommended: sensors[1], alternatives: [sensors[2], sensors[0], sensors[3], sensors[4]], explicit_confirmation_required: true },
+    ...recommendations().filter((item) => item.role !== role),
+  ];
+  wizard.state.draft.areaId = "living";
+  wizard.goToStep(3);
+
+  let sensorPanel = panel.findAll("panel")[0];
+  assert.equal(sensorPanel.findAll("candidate").length, 3, "the initial list is capped at three local candidates");
+  assert.equal(sensorPanel.textContent.includes("sensor.office_one"), false, "other-room candidates stay behind disclosure");
+  assert.ok(sensorPanel.findButton("Show more (2)"));
+
+  sensorPanel.findButton("Show more (2)").dispatch("click");
+  sensorPanel = panel.findAll("panel")[0];
+  assert.equal(sensorPanel.findAll("candidate").length, 5);
+  assert.equal(sensorPanel.findAll("candidate").slice(0, 4).every((item) => item.textContent.includes("sensor.living_")), true);
+  assert.ok(sensorPanel.findButton("Show fewer"));
+});
+
+test("one simple-switch selection derives and confirms both source bindings", async () => {
+  const { panel, wizard } = create(fakeClient());
+  await wizard.startDiscovery();
+  wizard.goToStep(3);
+
+  let sourcePanel = panel.findAll("panel")[1];
+  const radio = Array.from(sourcePanel.walk()).find(
+    (item) => item.tagName === "INPUT" && item.getAttribute("type") === "radio"
+  );
+  radio.dispatch("change");
+
+  assert.equal(wizard.state.draft.selections[W.SOURCE_ENABLE_TARGET_ROLE], IDS.enable);
+  assert.equal(wizard.state.draft.selections[W.SOURCE_DISABLE_TARGET_ROLE], IDS.disable);
+  sourcePanel = panel.findAll("panel")[1];
+  const confirmation = Array.from(sourcePanel.walk()).find(
+    (item) => item.tagName === "INPUT" && item.getAttribute("type") === "checkbox"
+  );
+  confirmation.dispatch("change", { target: { checked: true } });
+  assert.equal(wizard.state.draft.confirmations[W.SOURCE_ENABLE_TARGET_ROLE], true);
+  assert.equal(wizard.state.draft.confirmations[W.SOURCE_DISABLE_TARGET_ROLE], true);
 });
 
 test("wizard entry reflects Ready and incomplete backend setup states without treating unknown as false", () => {
@@ -463,6 +561,22 @@ test("wizard shows draft update errors without replacing them with mock state", 
   assert.ok(panel.textContent.includes("draft validation failed"));
   assert.equal(panel.textContent.includes("Living Room"), false);
   assert.equal(client.calls.filter(([operation]) => operation === "update").length, 1, "no silent fallback request is made");
+});
+
+test("returning to Discovery clears a stale update error without corrupting the draft", async () => {
+  const client = fakeClient({ failUpdate: true });
+  const { panel, wizard } = create(client);
+  await wizard.startDiscovery();
+  wizard.state.draft.areaId = "living";
+  wizard.state.dirty = true;
+  await wizard.saveDraft();
+
+  wizard.goToStep(1);
+
+  assert.equal(wizard.state.status, "loaded");
+  assert.equal(wizard.state.session.draft_id.length > 0, true);
+  assert.ok(panel.textContent.includes("Home Assistant discovery summary"));
+  assert.equal(panel.textContent.includes("draft validation failed"), false);
 });
 
 test("wizard keeps backend validation failures visible", async () => {
