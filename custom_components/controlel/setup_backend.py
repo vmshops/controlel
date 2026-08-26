@@ -6,11 +6,17 @@ import asyncio
 from collections.abc import Coroutine, Mapping
 from dataclasses import dataclass
 from datetime import datetime
+from enum import Enum
 from functools import partial
 from importlib import import_module
 from typing import Any, cast
 
-from controlel.application.configuration.heating_setup_adapter import HEATING_SETUP_SCHEMA_VERSION
+from pydantic import BaseModel
+
+from controlel.application.configuration.heating_setup_adapter import (
+    HEATING_SETUP_SCHEMA_VERSION,
+    HeatingSetupPayload,
+)
 from controlel.application.setup import (
     ActivationAttempt,
     ActivationCoordinator,
@@ -32,10 +38,57 @@ from controlel.infrastructure.home_assistant import (
     LegacyConfigurationStatusDTO,
 )
 
-from .const import DOMAIN
+from .const import (
+    DEFAULT_HEAT_DEMAND_CONFIRMATION_DURATION,
+    DEFAULT_HEATING_TURN_OFF_DIFFERENTIAL,
+    DEFAULT_HEATING_TURN_ON_DIFFERENTIAL,
+    DEFAULT_INDETERMINATE_GRACE_PERIOD,
+    DEFAULT_INDETERMINATE_TIMEOUT_ACTION,
+    DEFAULT_MAX_FUTURE_SKEW,
+    DEFAULT_MINIMUM_HEATING_OFF_TIME,
+    DEFAULT_MINIMUM_HEATING_ON_TIME,
+    DEFAULT_PRIMARY_MEASUREMENT_MAX_AGE,
+    DEFAULT_TARGET_TEMPERATURE,
+    DOMAIN,
+)
 
 _SETUP_CACHE_KEY = f"{DOMAIN}_setup_backend"
 _LIFECYCLE_DATA_KEYS = frozenset({ACTIVE_REFERENCE_KEY})
+
+
+def _json_default(value: object) -> object:
+    """Convert a Core model default into its public JSON representation."""
+
+    if isinstance(value, BaseModel):
+        return value.model_dump(mode="json")
+    if isinstance(value, Enum):
+        return value.value
+    return value
+
+
+def canonical_heating_setup_defaults() -> dict[str, object]:
+    """Return complete Core defaults plus the native HA recommendations."""
+
+    defaults = {
+        name: _json_default(field.get_default(call_default_factory=True))
+        for name, field in HeatingSetupPayload.model_fields.items()
+        if not field.is_required()
+    }
+    defaults.update(
+        {
+            "target_temperature_celsius": DEFAULT_TARGET_TEMPERATURE,
+            "primary_measurement_max_age_seconds": DEFAULT_PRIMARY_MEASUREMENT_MAX_AGE,
+            "maximum_future_skew_seconds": DEFAULT_MAX_FUTURE_SKEW,
+            "indeterminate_grace_period_seconds": DEFAULT_INDETERMINATE_GRACE_PERIOD,
+            "indeterminate_timeout_action": DEFAULT_INDETERMINATE_TIMEOUT_ACTION,
+            "heating_turn_on_differential_celsius": DEFAULT_HEATING_TURN_ON_DIFFERENTIAL,
+            "heating_turn_off_differential_celsius": DEFAULT_HEATING_TURN_OFF_DIFFERENTIAL,
+            "heat_demand_confirmation_seconds": DEFAULT_HEAT_DEMAND_CONFIRMATION_DURATION,
+            "minimum_heating_on_seconds": DEFAULT_MINIMUM_HEATING_ON_TIME,
+            "minimum_heating_off_seconds": DEFAULT_MINIMUM_HEATING_OFF_TIME,
+        }
+    )
+    return defaults
 
 
 class _SynchronousRepositoryBridge:

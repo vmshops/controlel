@@ -10,6 +10,10 @@ import voluptuous as vol
 from homeassistant.components import websocket_api
 from pydantic import ValidationError
 
+from controlel.application.configuration.heating_setup_adapter import (
+    SOURCE_DISABLE_TARGET_ROLE,
+    SOURCE_ENABLE_TARGET_ROLE,
+)
 from controlel.application.setup import SetupConflictError, SetupNotFoundError
 from controlel.infrastructure.home_assistant import (
     HeatingBindingSelectionRequest,
@@ -18,10 +22,15 @@ from controlel.infrastructure.home_assistant import (
 )
 
 from .const import DOMAIN
-from .setup_backend import async_get_setup_service
+from .setup_backend import (
+    async_get_setup_backend,
+    async_get_setup_service,
+    canonical_heating_setup_defaults,
+)
 
 SETUP_WRITE_API_VERSION = 1
 SETUP_WRITE_V1_DISCOVERY = f"{DOMAIN}/setup/write/v1/discovery"
+SETUP_WRITE_V1_DEFAULTS = f"{DOMAIN}/setup/write/v1/defaults"
 SETUP_WRITE_V1_RECOMMENDATIONS = f"{DOMAIN}/setup/write/v1/recommendations"
 SETUP_WRITE_V1_START = f"{DOMAIN}/setup/write/v1/start"
 SETUP_WRITE_V1_REOPEN = f"{DOMAIN}/setup/write/v1/reopen"
@@ -29,6 +38,7 @@ SETUP_WRITE_V1_UPDATE = f"{DOMAIN}/setup/write/v1/update"
 SETUP_WRITE_V1_VALIDATE = f"{DOMAIN}/setup/write/v1/validate"
 SETUP_WRITE_V1_CANONICALIZE = f"{DOMAIN}/setup/write/v1/canonicalize"
 SETUP_WRITE_V1_ACTIVATE = f"{DOMAIN}/setup/write/v1/activate"
+SETUP_WRITE_V1_DELETE = f"{DOMAIN}/setup/write/v1/delete"
 
 ERR_SETUP_CONFLICT = "setup_conflict"
 ERR_SETUP_STORAGE_INTEGRITY = "setup_storage_integrity"
@@ -47,6 +57,7 @@ def async_register_setup_write_api_v1(hass: Any) -> None:
         return
     for handler in (
         _discovery,
+        _defaults,
         _recommendations,
         _start,
         _reopen,
@@ -54,6 +65,7 @@ def async_register_setup_write_api_v1(hass: Any) -> None:
         _validate,
         _canonicalize,
         _activate,
+        _delete,
     ):
         websocket_api.async_register_command(hass, handler)
     hass.data[_TRANSPORT_KEY] = True
@@ -184,6 +196,25 @@ async def _get_discovery(service: HeatingSetupHostService, msg: dict[str, Any]) 
     )
 
 
+async def _get_defaults(_service: HeatingSetupHostService, _msg: dict[str, Any]) -> object:
+    return {
+        "settings": canonical_heating_setup_defaults(),
+        "simple_switch": {
+            "source_control_mode": "simple",
+            "source_enable": {
+                "domain": "switch",
+                "service": "turn_on",
+                "target_binding_role": SOURCE_ENABLE_TARGET_ROLE,
+            },
+            "source_disable": {
+                "domain": "switch",
+                "service": "turn_off",
+                "target_binding_role": SOURCE_DISABLE_TARGET_ROLE,
+            },
+        },
+    }
+
+
 async def _get_recommendations(service: HeatingSetupHostService, msg: dict[str, Any]) -> object:
     return await service.get_recommendations(
         snapshot_id=msg["snapshot_id"],
@@ -283,6 +314,13 @@ async def _canonicalize_draft(service: HeatingSetupHostService, msg: dict[str, A
 @websocket_api.async_response
 async def _discovery(hass: Any, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
     await _send(hass, connection, msg, "discovery", _get_discovery)
+
+
+@websocket_api.websocket_command(_schema(SETUP_WRITE_V1_DEFAULTS, {}))
+@websocket_api.require_admin
+@websocket_api.async_response
+async def _defaults(hass: Any, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    await _send(hass, connection, msg, "defaults", _get_defaults)
 
 
 @websocket_api.websocket_command(
@@ -466,5 +504,59 @@ async def _activate(hass: Any, connection: websocket_api.ActiveConnection, msg: 
             "setup_write_api_version": SETUP_WRITE_API_VERSION,
             "operation": "activate",
             "result": _json_result(result),
+        },
+    )
+
+
+@websocket_api.websocket_command(
+    _schema(
+        SETUP_WRITE_V1_DELETE,
+        {
+            vol.Required("draft_id"): _NON_EMPTY_STRING,
+            vol.Required("expected_revision"): _positive_integer,
+        },
+    )
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def _delete(hass: Any, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """Delete one persisted draft after explicit wizard confirmation."""
+
+    entry = hass.config_entries.async_get_entry(msg["config_entry_id"])
+    if entry is None or entry.domain != DOMAIN:
+        connection.send_error(
+            msg["id"],
+            websocket_api.ERR_NOT_FOUND,
+            "Controlel setup config entry was not found",
+        )
+        return
+    try:
+        backend = await async_get_setup_backend(hass, entry)
+        await backend.repository.delete_draft(
+            msg["draft_id"],
+            expected_revision=msg["expected_revision"],
+        )
+    except SetupNotFoundError:
+        connection.send_error(msg["id"], websocket_api.ERR_NOT_FOUND, "Controlel setup draft was not found")
+        return
+    except SetupConflictError:
+        connection.send_error(msg["id"], ERR_SETUP_CONFLICT, "Controlel setup request conflicts with current state")
+        return
+    except SetupStorageIntegrityError:
+        connection.send_error(
+            msg["id"],
+            ERR_SETUP_STORAGE_INTEGRITY,
+            "Controlel setup storage failed integrity validation",
+        )
+        return
+    connection.send_result(
+        msg["id"],
+        {
+            "setup_write_api_version": SETUP_WRITE_API_VERSION,
+            "operation": "delete",
+            "result": {
+                "draft_id": msg["draft_id"],
+                "deleted_revision": msg["expected_revision"],
+            },
         },
     )

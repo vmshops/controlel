@@ -506,7 +506,7 @@ test("setup write client exposes draft lifecycle only and preserves backend erro
   const client = CA_API.createSetupWriteClient({ connection, configEntryId: "entry-setup" });
 
   assert.deepEqual(Object.keys(client).sort(), [
-    "discover", "recommendations", "reopenDraft", "startDraft", "updateDraft", "validateDraft",
+    "defaults", "deleteDraft", "discover", "recommendations", "reopenDraft", "startDraft", "updateDraft", "validateDraft",
   ]);
   assert.equal(client.activate, undefined);
   assert.equal(client.canonicalize, undefined);
@@ -515,6 +515,33 @@ test("setup write client exposes draft lifecycle only and preserves backend erro
     (error) => error instanceof CA_API.ApiError && error.code === "setup_conflict" && error.message === "draft revision conflict"
   );
   assert.equal(connection.sent.length, 1, "no fallback or retry request is sent");
+});
+
+test("setup write client loads canonical defaults and deletes one exact draft revision", async () => {
+  const connection = setupWriteConnection((message) => {
+    const operation = message.type.endsWith("/defaults") ? "defaults" : "delete";
+    return Promise.resolve({
+      setup_write_api_version: 1,
+      operation,
+      result: operation === "defaults"
+        ? {
+            settings: { target_temperature_celsius: 21 },
+            simple_switch: { source_control_mode: "simple" },
+          }
+        : { draft_id: message.draft_id, deleted_revision: message.expected_revision },
+    });
+  });
+  const client = CA_API.createSetupWriteClient({ connection, configEntryId: "entry-setup" });
+
+  const defaults = await client.defaults();
+  const deleted = await client.deleteDraft({ draft_id: "draft-real", expected_revision: 2 });
+
+  assert.equal(defaults.settings.target_temperature_celsius, 21);
+  assert.equal(defaults.simple_switch.source_control_mode, "simple");
+  assert.deepEqual(deleted, { draft_id: "draft-real", deleted_revision: 2 });
+  assert.equal(connection.sent[0].type, "controlel/setup/write/v1/defaults");
+  assert.equal(connection.sent[1].type, "controlel/setup/write/v1/delete");
+  assert.equal(connection.sent[1].expected_revision, 2);
 });
 
 test("setup write client sends draft creation and optimistic update requests", async () => {

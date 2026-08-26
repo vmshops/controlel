@@ -8,15 +8,25 @@ from unittest.mock import AsyncMock
 
 import pytest
 from homeassistant.const import ATTR_UNIT_OF_MEASUREMENT, UnitOfTemperature
+from homeassistant.helpers import area_registry as ar
+from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 import custom_components.controlel as component
 import custom_components.controlel.setup_write_websocket as setup_transport
+from controlel.application.configuration.heating_setup_adapter import (
+    PRIMARY_TEMPERATURE_ROLE,
+    SOURCE_DISABLE_TARGET_ROLE,
+    SOURCE_ENABLE_TARGET_ROLE,
+    HeatingSetupPayload,
+)
 from controlel.infrastructure.home_assistant import ACTIVE_REFERENCE_KEY
 from custom_components.controlel.const import CONF_TEMPERATURE_ENTITY_ID, DOMAIN
 from custom_components.controlel.setup_write_websocket import (
     ERR_SETUP_CONFLICT,
     SETUP_WRITE_V1_CANONICALIZE,
+    SETUP_WRITE_V1_DEFAULTS,
+    SETUP_WRITE_V1_DELETE,
     SETUP_WRITE_V1_DISCOVERY,
     SETUP_WRITE_V1_RECOMMENDATIONS,
     SETUP_WRITE_V1_REOPEN,
@@ -336,3 +346,169 @@ async def test_stale_draft_identity_returns_structured_conflict(
 
     assert conflict["success"] is False
     assert conflict["error"]["code"] == ERR_SETUP_CONFLICT
+
+
+@pytest.mark.asyncio
+async def test_simple_switch_setup_persists_complete_canonical_heating_and_reaches_ready(
+    hass,
+    hass_ws_client,
+) -> None:
+    """A normal HA area, temperature sensor, and switch can reach READY."""
+
+    area = ar.async_get(hass).async_create("Printing room")
+    registry = er.async_get(hass)
+    temperature = registry.async_get_or_create(
+        "sensor",
+        "setup-ready-test",
+        "printing-room-temperature",
+        suggested_object_id="printing_room_temperature",
+        original_device_class="temperature",
+        unit_of_measurement=UnitOfTemperature.CELSIUS,
+    )
+    temperature = registry.async_update_entity(temperature.entity_id, area_id=area.id)
+    source = registry.async_get_or_create(
+        "switch",
+        "setup-ready-test",
+        "boiler-permission",
+        suggested_object_id="boiler_permission",
+    )
+    source = registry.async_update_entity(source.entity_id, area_id=area.id)
+    entry = MockConfigEntry(domain=DOMAIN, data={})
+    entry.add_to_hass(hass)
+    assert await component.async_setup(hass, {})
+    client = await hass_ws_client(hass)
+
+    await client.send_json_auto_id({"type": SETUP_WRITE_V1_DEFAULTS, "config_entry_id": entry.entry_id})
+    defaults_response = await client.receive_json()
+    assert defaults_response["success"] is True
+    defaults = defaults_response["result"]["result"]
+    assert defaults["settings"]["target_temperature_celsius"] == 21.0
+    assert defaults["settings"]["primary_measurement_max_age_seconds"] == 900.0
+    assert defaults["settings"]["maximum_future_skew_seconds"] == 30.0
+    assert defaults["settings"]["indeterminate_grace_period_seconds"] == 120.0
+
+    await client.send_json_auto_id(
+        {
+            "type": SETUP_WRITE_V1_START,
+            "config_entry_id": entry.entry_id,
+            "draft_id": "draft-simple-switch-ready",
+            "module_instance_id": "main-heating",
+            "created_at": NOW,
+            "snapshot_id": "snapshot-ready-1",
+            "report_id": "report-ready-1",
+            "settings": defaults["settings"],
+        }
+    )
+    started_response = await client.receive_json()
+    assert started_response["success"] is True
+    started = started_response["result"]["result"]
+
+    candidates_by_role = {
+        recommendation["role"]: [
+            candidate
+            for candidate in [recommendation["recommended"], *recommendation["alternatives"]]
+            if candidate is not None
+        ]
+        for recommendation in started["recommendations"]
+    }
+
+    def candidate_for(role: str, locator: str) -> dict[str, object]:
+        return next(candidate for candidate in candidates_by_role[role] if candidate["current_locator"] == locator)
+
+    selected = {
+        PRIMARY_TEMPERATURE_ROLE: candidate_for(PRIMARY_TEMPERATURE_ROLE, temperature.entity_id),
+        SOURCE_ENABLE_TARGET_ROLE: candidate_for(SOURCE_ENABLE_TARGET_ROLE, source.entity_id),
+        SOURCE_DISABLE_TARGET_ROLE: candidate_for(SOURCE_DISABLE_TARGET_ROLE, source.entity_id),
+    }
+    settings = {
+        **defaults["settings"],
+        **defaults["simple_switch"],
+        "zone_id": area.id,
+        "zone_name": area.id,
+        "sensor_id": temperature.id,
+        "sensor_name": temperature.entity_id,
+    }
+    selections = [
+        {"role": role, "candidate_id": candidate["candidate_id"], "user_confirmed": True}
+        for role, candidate in selected.items()
+    ]
+
+    await client.send_json_auto_id(
+        {
+            "type": SETUP_WRITE_V1_UPDATE,
+            "config_entry_id": entry.entry_id,
+            "draft_id": started["draft_id"],
+            "expected_revision": started["draft_revision"],
+            "updated_at": NOW,
+            "snapshot_id": "snapshot-ready-1",
+            "report_id": "report-ready-2",
+            "settings": settings,
+            "selections": selections,
+            "preferred_area_id": area.id,
+        }
+    )
+    saved_response = await client.receive_json()
+    assert saved_response["success"] is True
+    saved = saved_response["result"]["result"]
+    assert saved["draft_revision"] == 2
+    assert set(saved["settings"]) == set(HeatingSetupPayload.model_fields)
+    assert saved["settings"]["source_enable"] == {
+        "domain": "switch",
+        "service": "turn_on",
+        "target_binding_role": SOURCE_ENABLE_TARGET_ROLE,
+    }
+    assert saved["settings"]["source_disable"] == {
+        "domain": "switch",
+        "service": "turn_off",
+        "target_binding_role": SOURCE_DISABLE_TARGET_ROLE,
+    }
+
+    await client.send_json_auto_id(
+        {
+            "type": SETUP_WRITE_V1_REOPEN,
+            "config_entry_id": entry.entry_id,
+            "draft_id": saved["draft_id"],
+            "snapshot_id": "snapshot-ready-2",
+            "captured_at": NOW,
+            "preferred_area_id": area.id,
+        }
+    )
+    reopened_response = await client.receive_json()
+    assert reopened_response["success"] is True
+    reopened = reopened_response["result"]["result"]
+    assert reopened["draft_revision"] == 2
+    assert reopened["settings"] == saved["settings"]
+
+    await client.send_json_auto_id(
+        {
+            "type": SETUP_WRITE_V1_VALIDATE,
+            "config_entry_id": entry.entry_id,
+            "draft_id": reopened["draft_id"],
+            "snapshot_id": "snapshot-ready-3",
+            "evaluated_at": NOW,
+            "report_id": "report-ready-3",
+            "preferred_area_id": area.id,
+        }
+    )
+    validated_response = await client.receive_json()
+    assert validated_response["success"] is True
+    validated = validated_response["result"]["result"]
+    assert validated["validation_status"] == "CURRENT"
+    assert validated["incomplete"] is False
+    assert validated["activation_ready"] is True
+    assert validated["blocking_issue_count"] == 0
+
+    await client.send_json_auto_id(
+        {
+            "type": SETUP_WRITE_V1_DELETE,
+            "config_entry_id": entry.entry_id,
+            "draft_id": validated["draft_id"],
+            "expected_revision": validated["draft_revision"],
+        }
+    )
+    deleted_response = await client.receive_json()
+    assert deleted_response["success"] is True
+    assert deleted_response["result"]["result"] == {
+        "draft_id": validated["draft_id"],
+        "deleted_revision": validated["draft_revision"],
+    }

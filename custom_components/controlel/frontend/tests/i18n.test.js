@@ -500,7 +500,7 @@ test("wizard renders in Czech with truthful binding semantics", async () => {
     });
 
     assert.ok(panel.textContent.includes("Souhrn objevu v Home Assistant"), "Czech discovery title");
-    assert.ok(footer.findButton("Uložit a dokončit později"), "Czech save-later action");
+    assert.ok(footer.findButton("Uložit koncept"), "Czech save-draft action");
     assert.ok(footer.findButton("Pokračovat"), "Czech continue action");
     assert.ok(panel.textContent.includes("Spustit objev"), "real discovery action is explicit and translated");
     assert.equal(panel.textContent.includes("Living Room"), false, "mock discovery data is not rendered");

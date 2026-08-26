@@ -85,6 +85,37 @@ function recommendations() {
   }));
 }
 
+function configurationDefaults() {
+  return {
+    settings: {
+      target_temperature_celsius: 21,
+      primary_measurement_max_age_seconds: 900,
+      maximum_future_skew_seconds: 30,
+      indeterminate_grace_period_seconds: 120,
+      indeterminate_timeout_action: "disable_heating",
+      heating_turn_on_differential_celsius: 0.3,
+      heating_turn_off_differential_celsius: 0.1,
+      heat_demand_confirmation_seconds: 120,
+      minimum_heating_on_seconds: 600,
+      minimum_heating_off_seconds: 300,
+      source_control_mode: "custom",
+    },
+    simple_switch: {
+      source_control_mode: "simple",
+      source_enable: {
+        domain: "switch",
+        service: "turn_on",
+        target_binding_role: W.SOURCE_ENABLE_TARGET_ROLE,
+      },
+      source_disable: {
+        domain: "switch",
+        service: "turn_off",
+        target_binding_role: W.SOURCE_DISABLE_TARGET_ROLE,
+      },
+    },
+  };
+}
+
 function session(overrides = {}) {
   return Object.assign({
     draft_id: "draft-real",
@@ -146,9 +177,13 @@ function fakeClient({
       calls.push(["recommendations", request]);
       return Promise.resolve(recommendations());
     },
+    defaults() {
+      calls.push(["defaults", {}]);
+      return Promise.resolve(configurationDefaults());
+    },
     startDraft(request) {
       calls.push(["start", request]);
-      return Promise.resolve(session({ draft_id: request.draft_id }));
+      return Promise.resolve(session({ draft_id: request.draft_id, settings: request.settings }));
     },
     reopenDraft(request) {
       calls.push(["reopen", request]);
@@ -178,10 +213,14 @@ function fakeClient({
       if (failValidation) return Promise.reject(new Error("validation backend unavailable"));
       return Promise.resolve(session({ draft_revision: 2, ...validateOverrides }));
     },
+    deleteDraft(request) {
+      calls.push(["delete", request]);
+      return Promise.resolve({ draft_id: request.draft_id, deleted_revision: request.expected_revision });
+    },
   };
 }
 
-function create(client, storage = memoryStorage()) {
+function create(client, storage = memoryStorage(), overrides = {}) {
   const dom = roots();
   let sequence = 0;
   const wizard = W.createSetupWizard({
@@ -191,6 +230,7 @@ function create(client, storage = memoryStorage()) {
     storage,
     now: () => "2026-08-24T12:00:00Z",
     idFactory: (prefix) => `${prefix}-${++sequence}`,
+    ...overrides,
   });
   return { ...dom, wizard, storage };
 }
@@ -204,14 +244,14 @@ test("wizard starts real discovery and creates a persisted backend draft", async
   const client = fakeClient();
   const { panel, stepper, footer, wizard, storage } = create(client);
 
-  assert.equal(stepper.findAll("stepper__step").length, 4);
+  assert.equal(stepper.findAll("stepper__step").length, 5);
   assert.ok(panel.findButton("Start discovery"));
   assert.equal(panel.textContent.includes("Living Room"), false, "mock candidates are absent before discovery");
 
   panel.findButton("Start discovery").dispatch("click");
   await settle();
 
-  assert.deepEqual(client.calls.map(([operation]) => operation), ["discovery", "recommendations", "start"]);
+  assert.deepEqual(client.calls.map(([operation]) => operation), ["discovery", "recommendations", "defaults", "start"]);
   assert.equal(wizard.state.status, "loaded");
   assert.ok(panel.textContent.includes("ha-real-instance"), "real discovery response is rendered");
   assert.ok(panel.textContent.includes("snapshot-real"));
@@ -242,19 +282,23 @@ test("wizard saves an updated draft and validates without activation or runtime 
   const update = client.calls.find(([operation]) => operation === "update")[1];
   assert.equal(update.expected_revision, 1);
   assert.equal(update.preferred_area_id, "living");
-  assert.deepEqual(update.settings, {
-    zone_id: "living",
-    zone_name: "living",
-    sensor_id: "sensor-registry-id",
-    sensor_name: "sensor.living_temperature",
-  });
+  assert.equal(update.settings.zone_id, "living");
+  assert.equal(update.settings.zone_name, "living");
+  assert.equal(update.settings.sensor_id, "sensor-registry-id");
+  assert.equal(update.settings.sensor_name, "sensor.living_temperature");
+  assert.equal(update.settings.target_temperature_celsius, 21);
+  assert.equal(update.settings.primary_measurement_max_age_seconds, 900);
+  assert.equal(update.settings.maximum_future_skew_seconds, 30);
+  assert.equal(update.settings.indeterminate_grace_period_seconds, 120);
   assert.equal(update.selections.length, 3);
   assert.ok(update.selections.every((item) => item.user_confirmed));
-  assert.equal(update.settings.source_enable, undefined, "frontend does not invent service settings");
+  assert.deepEqual(update.settings.source_enable, configurationDefaults().simple_switch.source_enable);
+  assert.deepEqual(update.settings.source_disable, configurationDefaults().simple_switch.source_disable);
+  assert.equal(update.settings.source_control_mode, "simple");
 
   await wizard.validateDraft();
   assert.deepEqual(client.calls.map(([operation]) => operation), [
-    "discovery", "recommendations", "start", "update", "validate",
+    "discovery", "recommendations", "defaults", "start", "update", "validate",
   ]);
   assert.equal(client.calls.find(([operation]) => operation === "validate")[1].preferred_area_id, "living");
   assert.equal(client.calls.some(([operation]) => operation === "activate" || operation === "canonicalize"), false);
@@ -270,9 +314,9 @@ test("wizard reopens the stored backend draft after real discovery", async () =>
   panel.findButton("Resume draft").dispatch("click");
   await settle();
 
-  assert.deepEqual(client.calls.map(([operation]) => operation), ["discovery", "recommendations", "reopen"]);
+  assert.deepEqual(client.calls.map(([operation]) => operation), ["discovery", "recommendations", "defaults", "reopen"]);
   assert.equal(wizard.state.session.draft_id, "draft-existing");
-  assert.equal(wizard.state.step, 4, "a resumed draft opens on its backend validation report");
+  assert.equal(wizard.state.step, 5, "a resumed draft opens on its backend validation report");
   assert.equal(client.calls.some(([operation]) => operation === "start"), false, "resume never creates a duplicate draft");
 });
 
@@ -287,7 +331,7 @@ test("wizard replaces a stale local draft pointer with a fresh backend draft", a
 
   assert.equal(wizard.state.status, "loaded");
   assert.deepEqual(client.calls.map(([operation]) => operation), [
-    "discovery", "recommendations", "reopen", "start",
+    "discovery", "recommendations", "defaults", "reopen", "start",
   ]);
   assert.notEqual(wizard.state.session.draft_id, "draft-missing");
   assert.equal(storage.values.get("controlel.setup.draft.v1.entry-real"), wizard.state.session.draft_id);
@@ -433,13 +477,13 @@ test("large realistic payload stays compact, safe, and navigable", async () => {
   const back = footer.findButton("Back");
   assert.ok(back);
   assert.equal(back.disabled, false);
-  assert.ok(back.className.includes("btn--ghost"));
-  assert.ok(footer.findButton("Save and finish later"));
+  assert.ok(back.className.includes("btn--secondary"));
+  assert.ok(footer.findButton("Save draft"));
+  assert.ok(footer.findButton("Delete draft / Start over"));
   assert.ok(footer.findButton("Continue"));
   const styles = fs.readFileSync(path.join(__dirname, "..", "styles.css"), "utf8");
   assert.match(styles, /\.wizard-footer\s*\{[^}]*position:\s*sticky;/s);
-  assert.match(styles, /\.wizard-footer\s*\{[^}]*bottom:\s*0;/s);
-  assert.match(styles, /\.btn--ghost\s*\{[^}]*color:/s);
+  assert.match(styles, /\.wizard-footer\s*\{[^}]*top:\s*0;/s);
 });
 
 test("one simple-switch selection derives and confirms both source bindings", async () => {
@@ -462,6 +506,49 @@ test("one simple-switch selection derives and confirms both source bindings", as
   confirmation.dispatch("change", { target: { checked: true } });
   assert.equal(wizard.state.draft.confirmations[W.SOURCE_ENABLE_TARGET_ROLE], true);
   assert.equal(wizard.state.draft.confirmations[W.SOURCE_DISABLE_TARGET_ROLE], true);
+});
+
+test("required canonical settings use recommendations and remain editable", async () => {
+  const client = fakeClient();
+  const { panel, wizard } = create(client);
+  await wizard.startDiscovery();
+  wizard.goToStep(4);
+
+  const inputs = Array.from(panel.walk()).filter(
+    (item) => item.tagName === "INPUT" && item.getAttribute("type") === "number"
+  );
+  assert.equal(inputs.length, 9);
+  assert.equal(inputs[0].getAttribute("value"), "21");
+  assert.ok(panel.textContent.includes("Advanced control timings"));
+
+  inputs[0].dispatch("input", { target: { value: "22.5" } });
+  await wizard.saveDraft();
+  const update = client.calls.find(([operation]) => operation === "update")[1];
+  assert.equal(update.settings.target_temperature_celsius, 22.5);
+  assert.equal(update.settings.primary_measurement_max_age_seconds, 900);
+});
+
+test("delete draft start-over requires confirmation and deletes the persisted revision", async () => {
+  const client = fakeClient();
+  const storage = memoryStorage();
+  const confirmations = [];
+  const { footer, wizard } = create(client, storage, {
+    confirm(message) {
+      confirmations.push(message);
+      return true;
+    },
+  });
+  await wizard.startDiscovery();
+  const oldDraftId = wizard.state.session.draft_id;
+
+  footer.findButton("Delete draft / Start over").dispatch("click");
+  await settle();
+
+  assert.equal(confirmations.length, 1);
+  const deletion = client.calls.find(([operation]) => operation === "delete")[1];
+  assert.deepEqual(deletion, { draft_id: oldDraftId, expected_revision: 1 });
+  assert.notEqual(wizard.state.session.draft_id, oldDraftId);
+  assert.equal(storage.values.get("controlel.setup.draft.v1.entry-real"), wizard.state.session.draft_id);
 });
 
 test("wizard entry reflects Ready and incomplete backend setup states without treating unknown as false", () => {
@@ -496,7 +583,7 @@ test("wizard entry reflects Ready and incomplete backend setup states without tr
 test("wizard renders blocking backend validation as a clear Not Ready state", async () => {
   const { panel, wizard } = create(fakeClient());
   await wizard.startDiscovery();
-  wizard.goToStep(4);
+  wizard.goToStep(5);
 
   assert.ok(panel.textContent.includes("Not Ready"));
   assert.ok(panel.textContent.includes("Blocking issues"));
@@ -528,7 +615,7 @@ test("warning-only backend validation is Ready while warnings remain distinct", 
   });
   const { panel, wizard } = create(client);
   await wizard.startDiscovery();
-  wizard.goToStep(4);
+  wizard.goToStep(5);
   await wizard.validateDraft();
 
   assert.ok(panel.textContent.includes("Ready"));
@@ -550,7 +637,7 @@ test("Ready backend validation is explicit and remains non-activating", async ()
   });
   const { panel, footer, wizard } = create(client);
   await wizard.startDiscovery();
-  wizard.goToStep(4);
+  wizard.goToStep(5);
   await wizard.validateDraft();
 
   assert.ok(panel.textContent.includes("Ready"));
@@ -564,7 +651,7 @@ test("supported backend validation messages render in the selected language", as
   try {
     const { panel, wizard } = create(fakeClient());
     await wizard.startDiscovery();
-    wizard.goToStep(4);
+    wizard.goToStep(5);
 
     assert.ok(panel.textContent.includes("Nastavení „target_temperature_celsius“ chybí nebo je neplatné."));
     assert.equal(panel.textContent.includes("setup.heating.invalid_setting"), false);
@@ -600,11 +687,10 @@ test("wizard preserves authoritative settings outside the edited wizard fields",
   await wizard.saveDraft();
 
   const update = client.calls.find(([operation]) => operation === "update")[1];
-  assert.deepEqual(update.settings, {
-    ...existingSettings,
-    zone_id: "living",
-    zone_name: "living",
-  });
+  assert.equal(update.settings.zone_id, "living");
+  assert.equal(update.settings.zone_name, "living");
+  assert.equal(update.settings.target_temperature_celsius, existingSettings.target_temperature_celsius);
+  assert.equal(update.settings.primary_measurement_max_age_seconds, 900);
   assert.deepEqual(update.settings.source_enable, existingSettings.source_enable);
   assert.deepEqual(update.settings.future_boiler_optimization, existingSettings.future_boiler_optimization);
   assert.equal(update.settings.sensor_id, existingSettings.sensor_id);
@@ -647,7 +733,7 @@ test("wizard shows draft update errors without replacing them with mock state", 
   const client = fakeClient({ failUpdate: true });
   const { panel, wizard } = create(client);
   await wizard.startDiscovery();
-  wizard.goToStep(4);
+  wizard.goToStep(5);
   wizard.state.draft.areaId = "living";
   wizard.state.dirty = true;
 
@@ -680,7 +766,7 @@ test("wizard keeps backend validation failures visible", async () => {
   const client = fakeClient({ failValidation: true });
   const { panel, wizard } = create(client);
   await wizard.startDiscovery();
-  wizard.goToStep(4);
+  wizard.goToStep(5);
 
   await wizard.validateDraft();
 

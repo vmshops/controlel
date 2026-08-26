@@ -35,11 +35,13 @@
 
   const SETUP_WRITE_COMMANDS = {
     discovery: "controlel/setup/write/v1/discovery",
+    defaults: "controlel/setup/write/v1/defaults",
     recommendations: "controlel/setup/write/v1/recommendations",
     start: "controlel/setup/write/v1/start",
     reopen: "controlel/setup/write/v1/reopen",
     update: "controlel/setup/write/v1/update",
     validate: "controlel/setup/write/v1/validate",
+    delete: "controlel/setup/write/v1/delete",
   };
 
   const DOMAINS = Object.keys(COMMANDS);
@@ -386,6 +388,19 @@
     });
   }
 
+  function normalizeSetupDefaults(raw) {
+    const r = _obj(raw, "setup defaults");
+    return {
+      settings: { ..._obj(r.settings, "setup defaults.settings") },
+      simple_switch: { ..._obj(r.simple_switch, "setup defaults.simple_switch") },
+    };
+  }
+
+  function normalizeDeletedDraft(raw) {
+    const r = _obj(raw, "deleted setup draft");
+    return { draft_id: r.draft_id, deleted_revision: r.deleted_revision };
+  }
+
   function normalizeSetupSession(raw) {
     const r = _obj(raw, "setup session");
     return {
@@ -408,11 +423,13 @@
 
   const SETUP_RESULT_NORMALIZERS = {
     discovery: normalizeDiscoverySnapshot,
+    defaults: normalizeSetupDefaults,
     recommendations: normalizeRecommendations,
     start: normalizeSetupSession,
     reopen: normalizeSetupSession,
     update: normalizeSetupSession,
     validate: normalizeSetupSession,
+    delete: normalizeDeletedDraft,
   };
 
   /**
@@ -485,11 +502,13 @@
 
     return {
       discover: (request) => call("discovery", request),
+      defaults: () => call("defaults", {}),
       recommendations: (request) => call("recommendations", request),
       startDraft: (request) => call("start", request),
       reopenDraft: (request) => call("reopen", request),
       updateDraft: (request) => call("update", request),
       validateDraft: (request) => call("validate", request),
+      deleteDraft: (request) => call("delete", request),
     };
   }
 

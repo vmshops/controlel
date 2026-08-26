@@ -97,9 +97,9 @@ function _buildShellDOM() {
 
       <div id="wizard-view" class="app__content app__content--wizard" hidden>
         <div id="draft-status" class="draft-status" hidden></div>
+        <footer id="wizard-footer" class="wizard-footer"></footer>
         <nav id="stepper" class="stepper" aria-label="Setup steps"></nav>
         <section id="step-panel" class="step-panel" aria-live="polite"></section>
-        <footer id="wizard-footer" class="wizard-footer"></footer>
       </div>
 
     </div>

@@ -17,7 +17,8 @@
     { id: 1, key: "wizard.step_discovery" },
     { id: 2, key: "wizard.step_zone" },
     { id: 3, key: "wizard.step_sensor" },
-    { id: 4, key: "wizard.step_review" },
+    { id: 4, key: "wizard.step_settings" },
+    { id: 5, key: "wizard.step_review" },
   ];
   let idSequence = 0;
 
@@ -106,6 +107,9 @@
 
     const now = typeof opts.now === "function" ? opts.now : () => new Date().toISOString();
     const makeId = typeof opts.idFactory === "function" ? opts.idFactory : defaultId;
+    const confirmAction = typeof opts.confirm === "function"
+      ? opts.confirm
+      : (message) => typeof global.confirm === "function" && global.confirm(message);
     const storage = opts.storage || null;
     const storageKey = `controlel.setup.draft.v1.${opts.configEntryId || "unknown"}`;
     const state = {
@@ -116,11 +120,12 @@
       errorOperation: null,
       snapshot: null,
       recommendations: [],
+      configurationDefaults: { settings: {}, simple_switch: {} },
       session: null,
       dirty: false,
       lastSavedAt: null,
       expandedRoles: {},
-      draft: { areaId: null, selections: {}, confirmations: {} },
+      draft: { areaId: null, selections: {}, confirmations: {}, settings: {} },
     };
 
     function storedDraftId() {
@@ -163,6 +168,10 @@
       state.session = session;
       state.snapshot = session.discovery;
       state.recommendations = session.recommendations;
+      state.draft.settings = {
+        ...state.configurationDefaults.settings,
+        ...session.settings,
+      };
       state.draft.areaId = typeof session.settings.zone_id === "string" ? session.settings.zone_id : null;
       state.draft.selections = {};
       state.draft.confirmations = {};
@@ -235,12 +244,14 @@
       render();
       const context = requestContext();
       try {
-        const [snapshot, recommendations] = await Promise.all([
+        const [snapshot, recommendations, configurationDefaults] = await Promise.all([
           client.discover(context),
           client.recommendations(context),
+          client.defaults(),
         ]);
         state.snapshot = snapshot;
         state.recommendations = recommendations;
+        state.configurationDefaults = configurationDefaults;
         const existingDraftId = forceNewDraft ? null : storedDraftId();
         let session;
         if (existingDraftId) {
@@ -259,13 +270,13 @@
             created_at: context.captured_at,
             snapshot_id: context.snapshot_id,
             report_id: makeId("report"),
-            settings: {},
+            settings: { ...configurationDefaults.settings },
             selections: [],
           });
           storeDraftId(session.draft_id);
         }
         applySession(session);
-        if (existingDraftId && storedDraftId() === existingDraftId) state.step = 4;
+        if (existingDraftId && storedDraftId() === existingDraftId) state.step = 5;
         state.status = "loaded";
       } catch (error) {
         state.status = "error";
@@ -278,8 +289,35 @@
     function startNewDraft() {
       clearStoredDraftId();
       state.session = null;
-      state.draft = { areaId: null, selections: {}, confirmations: {} };
+      state.draft = { areaId: null, selections: {}, confirmations: {}, settings: {} };
       return startDiscovery({ forceNewDraft: true });
+    }
+
+    async function deleteDraft() {
+      if (!state.session || state.status !== "loaded") return null;
+      if (!confirmAction(t("wizard.delete_draft_confirm"))) return null;
+      state.status = "saving";
+      state.error = null;
+      state.errorOperation = null;
+      render();
+      try {
+        const deleted = await client.deleteDraft({
+          draft_id: state.session.draft_id,
+          expected_revision: state.session.draft_revision,
+        });
+        clearStoredDraftId();
+        state.session = null;
+        state.draft = { areaId: null, selections: {}, confirmations: {}, settings: {} };
+        state.step = 1;
+        await startDiscovery({ forceNewDraft: true });
+        return deleted;
+      } catch (error) {
+        state.status = "error";
+        state.error = error;
+        state.errorOperation = "delete";
+        render();
+        return null;
+      }
     }
 
     function selectArea(areaId) {
@@ -341,7 +379,11 @@
     }
 
     function draftSettings() {
-      const settings = { ...state.session.settings };
+      const settings = {
+        ...state.configurationDefaults.settings,
+        ...state.session.settings,
+        ...state.draft.settings,
+      };
       const area = areas().find((item) => item.native_id === state.draft.areaId);
       if (area && area.native_id) {
         settings.zone_id = area.native_id;
@@ -353,7 +395,34 @@
         if (identity) settings.sensor_id = identity;
         if (sensor.current_locator || sensor.native_id) settings.sensor_name = sensor.current_locator || sensor.native_id;
       }
+      const sourceEnable = candidate(
+        SOURCE_ENABLE_TARGET_ROLE,
+        state.draft.selections[SOURCE_ENABLE_TARGET_ROLE]
+      );
+      const sourceDisable = candidate(
+        SOURCE_DISABLE_TARGET_ROLE,
+        state.draft.selections[SOURCE_DISABLE_TARGET_ROLE]
+      );
+      if (
+        sourceEnable &&
+        sourceDisable &&
+        sameCandidateIdentity(sourceEnable, sourceDisable) &&
+        isWizardCandidateCompatible(SOURCE_ENABLE_TARGET_ROLE, sourceEnable) &&
+        isWizardCandidateCompatible(SOURCE_DISABLE_TARGET_ROLE, sourceDisable) &&
+        state.draft.confirmations[SOURCE_ENABLE_TARGET_ROLE] &&
+        state.draft.confirmations[SOURCE_DISABLE_TARGET_ROLE]
+      ) {
+        Object.assign(settings, state.configurationDefaults.simple_switch);
+      }
       return settings;
+    }
+
+    function setNumericSetting(name, rawValue) {
+      const value = Number(rawValue);
+      if (!Number.isFinite(value)) return;
+      state.draft.settings[name] = value;
+      state.dirty = true;
+      renderDraftStatus();
     }
 
     function draftSelections() {
@@ -652,6 +721,51 @@
       );
     }
 
+    function numericSetting(name, label, { min = 0, step = "any", unit = "" } = {}) {
+      const value = state.draft.settings[name];
+      return el("label", { class: "settings-field" },
+        el("span", { class: "settings-field__label" }, label),
+        el("span", { class: "settings-field__control" },
+          el("input", {
+            class: "settings-field__input",
+            type: "number",
+            min,
+            step,
+            value,
+            oninput: (event) => setNumericSetting(name, event.target.value),
+          }),
+          unit ? el("span", { class: "settings-field__unit" }, unit) : null
+        )
+      );
+    }
+
+    function renderSettings() {
+      return el("div", { class: "step" },
+        el("h2", { class: "step__title" }, t("wizard.settings_title")),
+        el("p", { class: "step__lead" }, t("wizard.settings_lead")),
+        noteBox(t("wizard.settings_defaults_note"), "info"),
+        el("div", { class: "panel settings-panel" },
+          el("div", { class: "settings-grid" },
+            numericSetting("target_temperature_celsius", t("wizard.target_temperature"), { step: "0.1", unit: "°C" }),
+            numericSetting("primary_measurement_max_age_seconds", t("wizard.measurement_max_age"), { min: 1, step: "1", unit: t("wizard.seconds") }),
+            numericSetting("maximum_future_skew_seconds", t("wizard.maximum_future_skew"), { step: "1", unit: t("wizard.seconds") }),
+            numericSetting("indeterminate_grace_period_seconds", t("wizard.indeterminate_grace"), { step: "1", unit: t("wizard.seconds") })
+          ),
+          el("details", { class: "settings-advanced" },
+            el("summary", { class: "settings-advanced__summary" }, t("wizard.advanced_control_settings")),
+            el("p", { class: "panel__lead" }, t("wizard.advanced_control_lead")),
+            el("div", { class: "settings-grid" },
+              numericSetting("heating_turn_on_differential_celsius", t("wizard.turn_on_differential"), { step: "0.1", unit: "°C" }),
+              numericSetting("heating_turn_off_differential_celsius", t("wizard.turn_off_differential"), { step: "0.1", unit: "°C" }),
+              numericSetting("heat_demand_confirmation_seconds", t("wizard.demand_confirmation"), { step: "1", unit: t("wizard.seconds") }),
+              numericSetting("minimum_heating_on_seconds", t("wizard.minimum_on_time"), { step: "1", unit: t("wizard.seconds") }),
+              numericSetting("minimum_heating_off_seconds", t("wizard.minimum_off_time"), { step: "1", unit: t("wizard.seconds") })
+            )
+          )
+        )
+      );
+    }
+
     function reviewSelection(role, label) {
       const selected = candidate(role, state.draft.selections[role]);
       return el("div", { class: `review-row ${selected ? "" : "review-row--missing"}` },
@@ -699,6 +813,18 @@
           reviewSelection(PRIMARY_TEMPERATURE_ROLE, t("wizard.role_sensor")),
           reviewSelection(SOURCE_ENABLE_TARGET_ROLE, t("wizard.source_enable_target")),
           reviewSelection(SOURCE_DISABLE_TARGET_ROLE, t("wizard.source_disable_target")),
+          el("div", { class: "review-row" },
+            el("span", { class: "review-row__label" }, t("wizard.target_temperature")),
+            `${state.draft.settings.target_temperature_celsius} °C`
+          ),
+          el("div", { class: "review-row" },
+            el("span", { class: "review-row__label" }, t("wizard.required_timing_settings")),
+            t("wizard.required_timing_summary", {
+              age: state.draft.settings.primary_measurement_max_age_seconds,
+              skew: state.draft.settings.maximum_future_skew_seconds,
+              grace: state.draft.settings.indeterminate_grace_period_seconds,
+            })
+          ),
           state.dirty ? noteBox(t("wizard.unsaved_report"), "warning") : null
         ),
         el("div", { class: "panel" },
@@ -755,7 +881,7 @@
     function renderFooter() {
       const loaded = state.status === "loaded";
       const back = el("button", {
-        class: "btn btn--ghost",
+        class: "btn btn--secondary btn--back",
         disabled: state.step === 1 || !loaded,
         onclick: () => goToStep(state.step - 1),
       }, t("wizard.back"));
@@ -764,12 +890,17 @@
         disabled: !loaded || !state.session,
         onclick: saveDraft,
       }, state.status === "saving" ? t("wizard.saving") : t("wizard.save_later"));
+      const remove = el("button", {
+        class: "btn btn--danger",
+        disabled: !loaded || !state.session,
+        onclick: deleteDraft,
+      }, t("wizard.delete_draft"));
       const next = el("button", {
         class: "btn btn--primary",
         disabled: !loaded || !state.session,
-        onclick: state.step < 4 ? () => goToStep(state.step + 1) : validateDraft,
-      }, state.step < 4 ? t("wizard.continue") : t("wizard.validate_draft"));
-      footer.replaceChildren(back, save, next);
+        onclick: state.step < 5 ? () => goToStep(state.step + 1) : validateDraft,
+      }, state.step < 5 ? t("wizard.continue") : t("wizard.validate_draft"));
+      footer.replaceChildren(back, remove, save, next);
     }
 
     function render() {
@@ -778,6 +909,7 @@
       if (state.step === 1) content = renderDiscovery();
       else if (state.step === 2) content = renderZone();
       else if (state.step === 3) content = renderBindings();
+      else if (state.step === 4) content = renderSettings();
       else content = renderReview();
       if (state.status === "error" && state.step !== 1) {
         panel.replaceChildren(
@@ -786,7 +918,11 @@
             el("p", { class: "state-panel__message" }, state.error && state.error.message ? state.error.message : "The setup request failed."),
             el("button", {
               class: "btn btn--secondary",
-              onclick: state.errorOperation === "validate" ? validateDraft : saveDraft,
+              onclick: state.errorOperation === "validate"
+                ? validateDraft
+                : state.errorOperation === "delete"
+                  ? deleteDraft
+                  : saveDraft,
             }, t("common.retry"))
           ),
           content
@@ -806,6 +942,7 @@
       },
       startDiscovery,
       startNewDraft,
+      deleteDraft,
       saveDraft,
       validateDraft,
       goToStep,
