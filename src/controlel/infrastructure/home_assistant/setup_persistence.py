@@ -10,6 +10,7 @@ from controlel.application.configuration import (
     CanonicalConfigurationDraftV3,
     CanonicalConfigurationRevisionV3,
     CanonicalConfigurationValidationV3,
+    CanonicalDraftRevisionConflict,
 )
 from controlel.application.setup import (
     ActivationAttempt,
@@ -189,7 +190,7 @@ class HomeAssistantSetupRepository:
                 raise SetupConflictError("canonical v3 draft revision is immutable")
             expected_revision = max(revisions, default=0) + 1
             if draft.revision != expected_revision:
-                raise SetupConflictError(
+                raise CanonicalDraftRevisionConflict(
                     f"expected canonical v3 draft revision {expected_revision}, got {draft.revision}"
                 )
             if revisions and _canonical_draft_v3_identity(revisions[expected_revision - 1]) != (
@@ -213,6 +214,38 @@ class HomeAssistantSetupRepository:
             if not drafts:
                 raise SetupNotFoundError(f"canonical v3 draft not found: {draft_id}")
             return max(drafts, key=lambda item: item.revision)
+
+    async def list_canonical_drafts_v3(self) -> tuple[CanonicalConfigurationDraftV3, ...]:
+        async with self._lock:
+            latest: dict[str, CanonicalConfigurationDraftV3] = {}
+            for draft in self._canonical_drafts_v3(await self._load()):
+                current = latest.get(draft.draft_id)
+                if current is None or draft.revision > current.revision:
+                    latest[draft.draft_id] = draft
+            return tuple(sorted(latest.values(), key=lambda item: (item.updated_at, item.draft_id)))
+
+    async def delete_canonical_draft_v3(self, draft_id: str, *, expected_revision: int) -> None:
+        async with self._lock:
+            document = await self._load()
+            drafts = self._canonical_drafts_v3(document)
+            matching = [item for item in drafts if item.draft_id == draft_id]
+            if not matching:
+                raise SetupNotFoundError(f"canonical v3 draft not found: {draft_id}")
+            current_revision = max(item.revision for item in matching)
+            if current_revision != expected_revision:
+                raise CanonicalDraftRevisionConflict(
+                    "canonical v3 draft changed before deletion: "
+                    f"expected {expected_revision}, found {current_revision}"
+                )
+            document["canonical_v3_drafts"] = _dump_models(
+                [item for item in drafts if item.draft_id != draft_id],
+                key=lambda item: (item.draft_id, item.revision),
+            )
+            document["canonical_v3_validations"] = _dump_models(
+                [item for item in self._canonical_validations_v3(document) if item.draft_id != draft_id],
+                key=lambda item: item.report_id,
+            )
+            await self._store.async_save(document)
 
     async def save_canonical_validation_v3(self, report: CanonicalConfigurationValidationV3) -> None:
         async with self._lock:

@@ -14,24 +14,29 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 import custom_components.controlel as component
 from controlel.application.configuration import migrate_heating_v2_revision_to_v3
 from controlel.application.configuration.heating_setup_adapter import HeatingSetupAdapter
-from controlel.application.setup import ActivationState, DraftRevision, SetupNotFoundError
+from controlel.application.setup import ActivationState, DraftRevision, SetupConflictError, SetupNotFoundError
 from controlel.domain.value_objects.temperature import Temperature
 from controlel.infrastructure.home_assistant import ACTIVE_REFERENCE_KEY, HomeAssistantDiscoveryAdapter
+from custom_components.controlel.activation_backend import async_activate_canonical_revision
 from custom_components.controlel.canonical_runtime import async_compile_canonical_runtime
 from custom_components.controlel.config import integration_config_from_entry
 from custom_components.controlel.const import CONF_TARGET_TEMPERATURE, CONF_TEMPERATURE_ENTITY_ID, DOMAIN
 from custom_components.controlel.legacy_config_converter import convert_legacy_heating_config
 from custom_components.controlel.setup_backend import async_get_setup_backend
 from custom_components.controlel.setup_write_websocket import (
+    CONFIGURATION_V3_ABANDON,
     CONFIGURATION_V3_ACTIVATE,
     CONFIGURATION_V3_ACTIVE,
     CONFIGURATION_V3_CANONICALIZE,
     CONFIGURATION_V3_CONVERT_LEGACY,
     CONFIGURATION_V3_CONVERT_V2,
+    CONFIGURATION_V3_DRAFT,
+    CONFIGURATION_V3_DRAFTS,
     CONFIGURATION_V3_EDIT,
     CONFIGURATION_V3_START,
     CONFIGURATION_V3_UPDATE,
     CONFIGURATION_V3_VALIDATE,
+    ERR_CANONICAL_V3_DRAFT_STALE,
     SETUP_WRITE_V1_ACTIVATE,
     SETUP_WRITE_V1_START,
 )
@@ -185,21 +190,15 @@ async def test_explicit_activation_starts_canonical_authority_and_hands_over_saf
     )
     prepared = await async_compile_canonical_runtime(hass, first_candidate, activation_attempt_id="preflight")
     assert prepared.config.target_temperature == Temperature(22.0)
-    client = await hass_ws_client(hass)
-
-    await client.send_json_auto_id(
-        {
-            "type": SETUP_WRITE_V1_ACTIVATE,
-            "config_entry_id": entry.entry_id,
-            "revision_id": first_candidate.revision_id,
-            "semantic_configuration_fingerprint": first_candidate.semantic_configuration_fingerprint,
-            "expected_active_revision_id": None,
-            "expected_active_generation": 0,
-            "attempt_id": "attempt-1",
-        }
+    await async_activate_canonical_revision(
+        hass,
+        entry,
+        revision_id=first_candidate.revision_id,
+        semantic_configuration_fingerprint=first_candidate.semantic_configuration_fingerprint,
+        expected_active_revision_id=None,
+        expected_active_generation=0,
+        attempt_id="attempt-1",
     )
-    first_response = await client.receive_json()
-    assert first_response["success"] is True, first_response
     first_host = entry.runtime_data.host
     assert first_host is not None
 
@@ -211,22 +210,17 @@ async def test_explicit_activation_starts_canonical_authority_and_hands_over_saf
         target_temperature=23.0,
     )
 
-    await client.send_json_auto_id(
-        {
-            "type": SETUP_WRITE_V1_ACTIVATE,
-            "config_entry_id": entry.entry_id,
-            "revision_id": candidate.revision_id,
-            "semantic_configuration_fingerprint": candidate.semantic_configuration_fingerprint,
-            "expected_active_revision_id": first_candidate.revision_id,
-            "expected_active_generation": 1,
-            "attempt_id": "attempt-2",
-        }
+    result = await async_activate_canonical_revision(
+        hass,
+        entry,
+        revision_id=candidate.revision_id,
+        semantic_configuration_fingerprint=candidate.semantic_configuration_fingerprint,
+        expected_active_revision_id=first_candidate.revision_id,
+        expected_active_generation=1,
+        attempt_id="attempt-2",
     )
-    response = await client.receive_json()
 
-    assert response["success"] is True, response
-    assert response["result"]["operation"] == "activate"
-    assert response["result"]["result"]["state"] == ActivationState.COMMITTED.value
+    assert result.state is ActivationState.COMMITTED
     assert first_host.stopped is True
     assert entry.runtime_data.host is not first_host
     assert entry.runtime_data.config.target_temperature == Temperature(23.0)
@@ -263,23 +257,16 @@ async def test_invalid_candidate_never_creates_runtime_authority(
         target_temperature=23.0,
         environment_id="another-home-assistant-instance",
     )
-    client = await hass_ws_client(hass)
-
-    await client.send_json_auto_id(
-        {
-            "type": SETUP_WRITE_V1_ACTIVATE,
-            "config_entry_id": entry.entry_id,
-            "revision_id": candidate.revision_id,
-            "semantic_configuration_fingerprint": candidate.semantic_configuration_fingerprint,
-            "expected_active_revision_id": None,
-            "expected_active_generation": 0,
-            "attempt_id": "attempt-invalid",
-        }
-    )
-    response = await client.receive_json()
-
-    assert response["success"] is False
-    assert response["error"]["code"] == "invalid_format"
+    with pytest.raises(ValueError, match="Home Assistant instance"):
+        await async_activate_canonical_revision(
+            hass,
+            entry,
+            revision_id=candidate.revision_id,
+            semantic_configuration_fingerprint=candidate.semantic_configuration_fingerprint,
+            expected_active_revision_id=None,
+            expected_active_generation=0,
+            attempt_id="attempt-invalid",
+        )
     assert not hasattr(entry, "runtime_data")
     assert ACTIVE_REFERENCE_KEY not in entry.data
     assert await backend.repository.list_non_terminal_attempts() == ()
@@ -302,23 +289,16 @@ async def test_activation_never_auto_migrates_or_stops_a_legacy_runtime(
         revision_id="canonical-inactive",
         target_temperature=23.0,
     )
-    client = await hass_ws_client(hass)
-
-    await client.send_json_auto_id(
-        {
-            "type": SETUP_WRITE_V1_ACTIVATE,
-            "config_entry_id": entry.entry_id,
-            "revision_id": candidate.revision_id,
-            "semantic_configuration_fingerprint": candidate.semantic_configuration_fingerprint,
-            "expected_active_revision_id": None,
-            "expected_active_generation": 0,
-            "attempt_id": "attempt-legacy",
-        }
-    )
-    response = await client.receive_json()
-
-    assert response["success"] is False
-    assert response["error"]["code"] == "setup_conflict"
+    with pytest.raises(SetupConflictError):
+        await async_activate_canonical_revision(
+            hass,
+            entry,
+            revision_id=candidate.revision_id,
+            semantic_configuration_fingerprint=candidate.semantic_configuration_fingerprint,
+            expected_active_revision_id=None,
+            expected_active_generation=0,
+            attempt_id="attempt-legacy",
+        )
     assert entry.runtime_data.host is legacy_host
     assert legacy_host.stopped is False
     assert ACTIVE_REFERENCE_KEY not in entry.data
@@ -326,7 +306,7 @@ async def test_activation_never_auto_migrates_or_stops_a_legacy_runtime(
 
 
 @pytest.mark.asyncio
-async def test_activation_command_is_admin_only_and_entry_scoped(
+async def test_v1_activation_rejection_is_admin_only_and_requires_v3(
     hass,
     hass_ws_client,
     hass_read_only_access_token,
@@ -355,7 +335,7 @@ async def test_activation_command_is_admin_only_and_entry_scoped(
     await admin.send_json_auto_id({**message, "config_entry_id": "not-this-entry"})
     wrong_entry = await admin.receive_json()
     assert wrong_entry["success"] is False
-    assert wrong_entry["error"]["code"] == "not_found"
+    assert wrong_entry["error"]["code"] == "canonical_v3_required"
 
 
 @pytest.mark.asyncio
@@ -405,7 +385,7 @@ async def test_canonical_v3_edit_activate_read_and_restart_lifecycle(
     )
     default_start = await client.receive_json()
     assert default_start["success"] is False
-    assert default_start["error"]["code"] == "setup_conflict"
+    assert default_start["error"]["code"] == "canonical_v3_required"
 
     await client.send_json_auto_id(
         {
@@ -483,6 +463,7 @@ async def test_canonical_v3_edit_activate_read_and_restart_lifecycle(
             "draft_id": draft["draft_id"],
             "validation_report_id": validation["report_id"],
             "revision_id": "canonical-v3-edited",
+            "snapshot_id": "canonicalize-v3-edit",
             "created_at": NOW.isoformat(),
             "actor": "test:admin",
             "source": "configuration_v3_api",
@@ -552,6 +533,233 @@ async def test_canonical_v3_edit_activate_read_and_restart_lifecycle(
     assert await hass.config_entries.async_setup(entry.entry_id)
     assert entry.runtime_data.loaded_configuration.canonical_revision_id == candidate["revision_id"]
     assert entry.runtime_data.config.target_temperature == Temperature(23.5)
+
+
+@pytest.mark.asyncio
+async def test_v3_draft_reopens_after_restart_and_abandon_preserves_active_authority(
+    hass,
+    hass_ws_client,
+    hass_read_only_access_token,
+    entry_data,
+) -> None:
+    entry = MockConfigEntry(domain=DOMAIN, title="Durable v3 draft", data={})
+    entry.add_to_hass(hass)
+    assert await component.async_setup(hass, {})
+    active_v3, backend = await _canonical_v3_candidate(
+        hass,
+        entry,
+        entry_data,
+        revision_id="canonical-v3-draft-base",
+        target_temperature=22.0,
+    )
+    client = await hass_ws_client(hass)
+    await client.send_json_auto_id(
+        {
+            "type": CONFIGURATION_V3_ACTIVATE,
+            "config_entry_id": entry.entry_id,
+            "revision_id": active_v3.revision_id,
+            "semantic_configuration_fingerprint": active_v3.semantic_configuration_fingerprint,
+            "expected_active_revision_id": None,
+            "expected_active_generation": 0,
+            "attempt_id": "activate-v3-draft-base",
+        }
+    )
+    assert (await client.receive_json())["success"] is True
+    await client.send_json_auto_id(
+        {
+            "type": CONFIGURATION_V3_EDIT,
+            "config_entry_id": entry.entry_id,
+            "draft_id": "durable-v3-draft",
+            "created_at": NOW.isoformat(),
+            "expected_active_generation": 1,
+        }
+    )
+    created_response = await client.receive_json()
+    assert created_response["success"] is True, created_response
+    created = created_response["result"]["result"]
+    scopes = {
+        "heating": created["heating"],
+        "diagnostics": created["diagnostics"],
+        "notifications": created["notifications"],
+    }
+    scopes["heating"]["zones"][0]["demand_policy"]["target_temperature_celsius"] = 22.25
+    await client.send_json_auto_id(
+        {
+            "type": CONFIGURATION_V3_UPDATE,
+            "config_entry_id": entry.entry_id,
+            "draft_id": created["draft_id"],
+            "expected_revision": created["revision"],
+            "updated_at": NOW.isoformat(),
+            "configuration_scopes": scopes,
+        }
+    )
+    updated_response = await client.receive_json()
+    assert updated_response["success"] is True, updated_response
+    created = updated_response["result"]["result"]
+    assert created["revision"] == 2
+    active_data_before = dict(entry.data)
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    hass.data.pop(f"{DOMAIN}_setup_backend", None)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+
+    await client.send_json_auto_id(
+        {
+            "type": CONFIGURATION_V3_DRAFT,
+            "config_entry_id": entry.entry_id,
+            "draft_id": created["draft_id"],
+        }
+    )
+    reopened_response = await client.receive_json()
+    assert reopened_response["success"] is True, reopened_response
+    assert reopened_response["result"]["result"] == created
+
+    await client.send_json_auto_id({"type": CONFIGURATION_V3_DRAFTS, "config_entry_id": entry.entry_id})
+    listed_response = await client.receive_json()
+    assert listed_response["success"] is True, listed_response
+    assert listed_response["result"]["result"] == [created]
+
+    read_only = await hass_ws_client(hass, hass_read_only_access_token)
+    for unauthorized_message in (
+        {
+            "type": CONFIGURATION_V3_DRAFT,
+            "config_entry_id": entry.entry_id,
+            "draft_id": created["draft_id"],
+        },
+        {"type": CONFIGURATION_V3_DRAFTS, "config_entry_id": entry.entry_id},
+        {
+            "type": CONFIGURATION_V3_ABANDON,
+            "config_entry_id": entry.entry_id,
+            "draft_id": created["draft_id"],
+            "expected_revision": created["revision"],
+        },
+    ):
+        await read_only.send_json_auto_id(unauthorized_message)
+        unauthorized = await read_only.receive_json()
+        assert unauthorized["success"] is False
+        assert unauthorized["error"]["code"] == "unauthorized"
+
+    abandon = {
+        "type": CONFIGURATION_V3_ABANDON,
+        "config_entry_id": entry.entry_id,
+        "draft_id": created["draft_id"],
+    }
+    await client.send_json_auto_id({**abandon, "expected_revision": created["revision"] + 1})
+    stale = await client.receive_json()
+    assert stale["success"] is False
+    assert stale["error"]["code"] == ERR_CANONICAL_V3_DRAFT_STALE
+
+    await client.send_json_auto_id({**abandon, "expected_revision": created["revision"]})
+    abandoned = await client.receive_json()
+    assert abandoned["success"] is True, abandoned
+    assert abandoned["result"]["result"] == {
+        "draft_id": created["draft_id"],
+        "abandoned_revision": created["revision"],
+    }
+    assert dict(entry.data) == active_data_before
+    active = await backend.repository.get_active_reference(active_v3.scope_key)
+    assert active is not None
+    assert active.canonical_revision_id == active_v3.revision_id
+
+    await client.send_json_auto_id(
+        {
+            "type": CONFIGURATION_V3_DRAFT,
+            "config_entry_id": entry.entry_id,
+            "draft_id": created["draft_id"],
+        }
+    )
+    missing = await client.receive_json()
+    assert missing["success"] is False
+    assert missing["error"]["code"] == "not_found"
+
+
+@pytest.mark.asyncio
+async def test_v3_canonicalization_revalidates_live_reference_health(
+    hass,
+    hass_ws_client,
+    entry_data,
+) -> None:
+    entry = MockConfigEntry(domain=DOMAIN, title="Fresh v3 validation", data={})
+    entry.add_to_hass(hass)
+    assert await component.async_setup(hass, {})
+    active_v3, backend = await _canonical_v3_candidate(
+        hass,
+        entry,
+        entry_data,
+        revision_id="canonical-v3-freshness-base",
+        target_temperature=22.0,
+    )
+    client = await hass_ws_client(hass)
+    await client.send_json_auto_id(
+        {
+            "type": CONFIGURATION_V3_ACTIVATE,
+            "config_entry_id": entry.entry_id,
+            "revision_id": active_v3.revision_id,
+            "semantic_configuration_fingerprint": active_v3.semantic_configuration_fingerprint,
+            "expected_active_revision_id": None,
+            "expected_active_generation": 0,
+            "attempt_id": "activate-v3-freshness-base",
+        }
+    )
+    assert (await client.receive_json())["success"] is True
+    await client.send_json_auto_id(
+        {
+            "type": CONFIGURATION_V3_EDIT,
+            "config_entry_id": entry.entry_id,
+            "draft_id": "freshness-v3-draft",
+            "created_at": NOW.isoformat(),
+            "expected_active_generation": 1,
+        }
+    )
+    draft_response = await client.receive_json()
+    assert draft_response["success"] is True, draft_response
+    draft = draft_response["result"]["result"]
+    await client.send_json_auto_id(
+        {
+            "type": CONFIGURATION_V3_VALIDATE,
+            "config_entry_id": entry.entry_id,
+            "draft_id": draft["draft_id"],
+            "report_id": "freshness-ready-report",
+            "snapshot_id": "freshness-ready-snapshot",
+            "evaluated_at": NOW.isoformat(),
+        }
+    )
+    validation_response = await client.receive_json()
+    assert validation_response["success"] is True, validation_response
+    validation = validation_response["result"]["result"]
+    assert validation["activation_ready"] is True
+
+    registry = er.async_get(hass)
+    sensor_entity_id = registry.async_get_entity_id(
+        "sensor",
+        "canonical-test",
+        "living-temperature",
+    )
+    assert sensor_entity_id is not None
+    registry.async_remove(sensor_entity_id)
+
+    await client.send_json_auto_id(
+        {
+            "type": CONFIGURATION_V3_CANONICALIZE,
+            "config_entry_id": entry.entry_id,
+            "draft_id": draft["draft_id"],
+            "validation_report_id": validation["report_id"],
+            "revision_id": "must-not-canonicalize-stale-health",
+            "snapshot_id": "freshness-final-snapshot",
+            "created_at": NOW.isoformat(),
+            "actor": "test:admin",
+            "source": "configuration_v3_api",
+            "change_kind": "UPDATE",
+            "reason": "reference_removed_after_validation",
+            "core_version": "0.15.0",
+            "integration_version": "0.13.0",
+        }
+    )
+    canonicalize_response = await client.receive_json()
+    assert canonicalize_response["success"] is False
+    assert canonicalize_response["error"]["code"] == "setup_conflict"
+    with pytest.raises(SetupNotFoundError):
+        await backend.repository.get_canonical_revision_v3("must-not-canonicalize-stale-health")
 
 
 @pytest.mark.asyncio
@@ -661,6 +869,7 @@ async def test_greenfield_v3_authoring_validates_canonicalizes_activates_and_res
             "draft_id": draft["draft_id"],
             "validation_report_id": validation["report_id"],
             "revision_id": "greenfield-v3-canonical",
+            "snapshot_id": "greenfield-v3-canonicalize",
             "created_at": NOW.isoformat(),
             "actor": "test:admin",
             "source": "configuration_v3_api",
@@ -723,19 +932,16 @@ async def test_active_v2_conversion_is_idempotent_and_switches_wholly_on_explici
         target_temperature=19.5,
     )
     client = await hass_ws_client(hass)
-    await client.send_json_auto_id(
-        {
-            "type": SETUP_WRITE_V1_ACTIVATE,
-            "config_entry_id": entry.entry_id,
-            "revision_id": source.revision_id,
-            "semantic_configuration_fingerprint": source.semantic_configuration_fingerprint,
-            "expected_active_revision_id": None,
-            "expected_active_generation": 0,
-            "attempt_id": "activate-v2-conversion-source",
-        }
+    source_activation = await async_activate_canonical_revision(
+        hass,
+        entry,
+        revision_id=source.revision_id,
+        semantic_configuration_fingerprint=source.semantic_configuration_fingerprint,
+        expected_active_revision_id=None,
+        expected_active_generation=0,
+        attempt_id="activate-v2-conversion-source",
     )
-    source_activation = await client.receive_json()
-    assert source_activation["success"] is True, source_activation
+    assert source_activation.state is ActivationState.COMMITTED
     await hass.async_block_till_done()
     source_runtime = entry.runtime_data
     assert source_runtime.config.target_temperature == Temperature(19.5)
@@ -796,6 +1002,7 @@ async def test_active_v2_conversion_is_idempotent_and_switches_wholly_on_explici
             "draft_id": draft["draft_id"],
             "validation_report_id": validation["report_id"],
             "revision_id": "active-v2-to-v3-canonical",
+            "snapshot_id": "active-v2-to-v3-canonicalize",
             "created_at": NOW.isoformat(),
             "actor": "test:admin",
             "source": "canonical_v2_conversion_api",
@@ -927,6 +1134,7 @@ async def test_explicit_legacy_to_v2_to_v3_conversion_preserves_runtime_until_ac
             "draft_id": draft["draft_id"],
             "validation_report_id": validation["report_id"],
             "revision_id": "legacy-v3-canonical",
+            "snapshot_id": "legacy-v3-canonicalize",
             "created_at": NOW.isoformat(),
             "actor": "test:admin",
             "source": "legacy_conversion_api",

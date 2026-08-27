@@ -388,6 +388,21 @@ class HomeAssistantCanonicalConfigurationV3Service:
             runtime_evidence=await self._runtime_evidence(active),
         )
 
+    async def reopen_draft(self, draft_id: str) -> CanonicalConfigurationDraftV3:
+        """Resume the exact latest persisted draft revision after any client restart."""
+
+        return await self._lifecycle.reopen_draft(draft_id)
+
+    async def list_drafts(self) -> tuple[CanonicalConfigurationDraftV3, ...]:
+        """List the latest persisted revision of every v3 draft for this entry."""
+
+        return await self._lifecycle.list_drafts()
+
+    async def abandon_draft(self, draft_id: str, *, expected_revision: int) -> None:
+        """Abandon editable v3 state without changing canonical or active authority."""
+
+        await self._lifecycle.abandon_draft(draft_id, expected_revision=expected_revision)
+
     async def edit_from_active(
         self,
         *,
@@ -446,6 +461,7 @@ class HomeAssistantCanonicalConfigurationV3Service:
         *,
         validation_report_id: str,
         revision_id: str,
+        snapshot_id: str,
         created_at: datetime,
         actor: str,
         source: str,
@@ -454,6 +470,12 @@ class HomeAssistantCanonicalConfigurationV3Service:
         core_version: str,
         integration_version: str | None = None,
     ) -> CanonicalConfigurationRevisionV3:
+        draft = await self._repository.get_canonical_draft_v3(draft_id)
+        fresh_reference_health = await self._reference_health(
+            draft,
+            snapshot_id=snapshot_id,
+            captured_at=created_at,
+        )
         return await self._lifecycle.canonicalize_draft(
             draft_id,
             validation_report_id=validation_report_id,
@@ -464,6 +486,7 @@ class HomeAssistantCanonicalConfigurationV3Service:
             change_kind=change_kind,
             reason=reason,
             core_version=core_version,
+            fresh_reference_health=fresh_reference_health,
             integration_version=integration_version,
         )
 

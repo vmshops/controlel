@@ -110,6 +110,7 @@ class ConfigurationEditabilityV3(StrEnum):
     EDITABLE = "editable"
     IMMUTABLE_IDENTITY = "immutable_identity"
     EDITABLE_PROVIDER_BINDING = "editable_provider_binding"
+    DEFERRED_NON_EDITABLE = "deferred_non_editable"
 
 
 class ConfigurationDefaultPolicyV3(StrEnum):
@@ -125,12 +126,16 @@ def _metadata(
     unit: str | None = None,
     editability: ConfigurationEditabilityV3 = ConfigurationEditabilityV3.EDITABLE,
     default_policy: ConfigurationDefaultPolicyV3,
+    deferred_reason: str | None = None,
 ) -> JsonDict:
+    if (editability is ConfigurationEditabilityV3.DEFERRED_NON_EDITABLE) != (deferred_reason is not None):
+        raise ValueError("deferred configuration metadata requires exactly one explicit rationale")
     return {
         "configuration_owner": owner.value,
         "configuration_unit": unit,
         "configuration_editability": editability.value,
         "configuration_default_policy": default_policy.value,
+        "configuration_deferred_reason": deferred_reason,
     }
 
 
@@ -400,8 +405,12 @@ class HeatSourceObservationBindingsV3(_CanonicalConfigurationModelV3):
         default=None,
         json_schema_extra=_metadata(
             ConfigurationOwnerV3.HEAT_SOURCE,
-            editability=ConfigurationEditabilityV3.EDITABLE_PROVIDER_BINDING,
+            editability=ConfigurationEditabilityV3.DEFERRED_NON_EDITABLE,
             default_policy=ConfigurationDefaultPolicyV3.OPTIONAL_NONE,
+            deferred_reason=(
+                "Single-Zone Heating v1 has no trustworthy physical-operation evidence adapter; "
+                "command and reported actuator state cannot prove physical heat-source operation."
+            ),
         ),
     )
 
@@ -629,7 +638,12 @@ class DiagnosticDebugPolicyV3(_CanonicalConfigurationModelV3):
         strict=True,
         json_schema_extra=_metadata(
             ConfigurationOwnerV3.DIAGNOSTICS,
+            editability=ConfigurationEditabilityV3.DEFERRED_NON_EDITABLE,
             default_policy=ConfigurationDefaultPolicyV3.RECOMMENDED_NEW_CONFIGURATION,
+            deferred_reason=(
+                "Single-Zone Heating v1 keeps active Debug lifecycle in operational state and does not "
+                "compile an until-changed configuration policy."
+            ),
         ),
     )
 
@@ -914,6 +928,7 @@ class CanonicalFieldMetadataV3:
     unit: str | None
     editability: ConfigurationEditabilityV3
     default_policy: ConfigurationDefaultPolicyV3
+    deferred_reason: str | None
 
 
 def canonical_field_registry_v3() -> tuple[CanonicalFieldMetadataV3, ...]:
@@ -956,6 +971,7 @@ def _field_metadata(
                     unit=_optional_metadata_string(extra.get("configuration_unit")),
                     editability=ConfigurationEditabilityV3(str(extra["configuration_editability"])),
                     default_policy=ConfigurationDefaultPolicyV3(str(extra["configuration_default_policy"])),
+                    deferred_reason=_optional_metadata_string(extra.get("configuration_deferred_reason")),
                 )
             )
         except KeyError as error:

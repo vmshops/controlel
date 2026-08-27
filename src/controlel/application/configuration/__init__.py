@@ -42,6 +42,7 @@ from controlel.application.configuration.canonical_v3_lifecycle import (
     CanonicalConfigurationDraftV3,
     CanonicalConfigurationLifecycleV3,
     CanonicalConfigurationValidationV3,
+    CanonicalDraftRevisionConflict,
     CanonicalReferenceBindingV3,
     CanonicalReferenceHealthV3,
     ConfigurationScopesV3,
@@ -55,6 +56,7 @@ from controlel.application.configuration.canonical_v3_migration import (
 __all__ = [
     "CANONICAL_CONFIGURATION_SCHEMA_VERSION_V3",
     "ActiveCanonicalConfigurationV3",
+    "CanonicalDraftRevisionConflict",
     "CanonicalConfigurationDraftV3",
     "CanonicalConfigurationConversionReviewV3",
     "CanonicalConfigurationLifecycleV3",

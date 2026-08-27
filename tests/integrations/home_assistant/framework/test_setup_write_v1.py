@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -20,10 +21,12 @@ from controlel.application.configuration.heating_setup_adapter import (
     SOURCE_ENABLE_TARGET_ROLE,
     HeatingSetupPayload,
 )
-from controlel.infrastructure.home_assistant import ACTIVE_REFERENCE_KEY
+from controlel.infrastructure.home_assistant import ACTIVE_REFERENCE_KEY, HeatingBindingSelectionRequest
 from custom_components.controlel.const import CONF_TEMPERATURE_ENTITY_ID, DOMAIN
+from custom_components.controlel.setup_backend import async_get_setup_service
 from custom_components.controlel.setup_write_websocket import (
-    ERR_SETUP_CONFLICT,
+    ERR_CANONICAL_V3_REQUIRED,
+    SETUP_WRITE_V1_ACTIVATE,
     SETUP_WRITE_V1_CANONICALIZE,
     SETUP_WRITE_V1_DEFAULTS,
     SETUP_WRITE_V1_DELETE,
@@ -59,23 +62,6 @@ def _contract_messages(entry_id: str) -> tuple[tuple[str, str, dict[str, object]
             },
         ),
         (
-            "start_new_heating_setup",
-            "start",
-            {
-                **common,
-                **preferences,
-                "type": SETUP_WRITE_V1_START,
-                "draft_id": "draft-1",
-                "module_instance_id": "main-heating",
-                "created_at": NOW,
-                "snapshot_id": "snapshot-1",
-                "report_id": "report-1",
-                "settings": {},
-                "selections": [],
-                "base_active_revision_id": None,
-            },
-        ),
-        (
             "reopen_heating_setup",
             "reopen",
             {
@@ -85,22 +71,6 @@ def _contract_messages(entry_id: str) -> tuple[tuple[str, str, dict[str, object]
                 "draft_id": "draft-1",
                 "snapshot_id": "snapshot-1",
                 "captured_at": NOW,
-            },
-        ),
-        (
-            "update_heating_draft",
-            "update",
-            {
-                **common,
-                **preferences,
-                "type": SETUP_WRITE_V1_UPDATE,
-                "draft_id": "draft-1",
-                "expected_revision": 1,
-                "updated_at": NOW,
-                "snapshot_id": "snapshot-1",
-                "report_id": "report-2",
-                "settings": {},
-                "selections": [],
             },
         ),
         (
@@ -114,29 +84,6 @@ def _contract_messages(entry_id: str) -> tuple[tuple[str, str, dict[str, object]
                 "snapshot_id": "snapshot-1",
                 "evaluated_at": NOW,
                 "report_id": "report-3",
-            },
-        ),
-        (
-            "canonicalize_heating_draft",
-            "canonicalize",
-            {
-                **common,
-                **preferences,
-                "type": SETUP_WRITE_V1_CANONICALIZE,
-                "draft_id": "draft-1",
-                "snapshot_id": "snapshot-1",
-                "created_at": NOW,
-                "validation_report_id": "report-4",
-                "configuration_id": "configuration-1",
-                "revision_id": "canonical-1",
-                "revision": 1,
-                "actor": "user:owner",
-                "source": "setup_write_v1",
-                "change_kind": "CREATE",
-                "reason": "initial_setup",
-                "core_version": "0.12.0",
-                "integration_version": None,
-                "parent_revision_id": None,
             },
         ),
     )
@@ -180,7 +127,7 @@ async def test_contract_routes_every_operation_to_existing_host_service(
 
 
 @pytest.mark.asyncio
-async def test_valid_start_is_config_entry_scoped_and_never_changes_runtime_control(
+async def test_v1_start_is_rejected_without_changing_runtime_control(
     hass,
     hass_ws_client,
     entry_data,
@@ -218,22 +165,8 @@ async def test_valid_start_is_config_entry_scoped_and_never_changes_runtime_cont
     )
     response = await client.receive_json()
 
-    assert response["success"] is True
-    assert response["result"]["setup_write_api_version"] == 1
-    assert response["result"]["operation"] == "start"
-    session = response["result"]["result"]
-    assert session["draft_id"] == "draft-1"
-    assert session["draft_revision"] == 1
-    assert session["canonical_revision_id"] is None
-    assert session["active_revision_id"] is None
-    candidates = [
-        candidate
-        for recommendation in session["recommendations"]
-        for candidate in ([recommendation["recommended"]] + recommendation["alternatives"])
-        if candidate is not None
-    ]
-    assert all(candidate["evidence"].get("platform") != DOMAIN for candidate in candidates)
-    assert all(".controlel_" not in (candidate["current_locator"] or "") for candidate in candidates)
+    assert response["success"] is False
+    assert response["error"]["code"] == ERR_CANONICAL_V3_REQUIRED
     assert ACTIVE_REFERENCE_KEY not in entry.data
     assert dict(entry.data) == data_before
     assert dict(entry.options) == options_before
@@ -315,41 +248,72 @@ async def test_wrong_config_entry_and_missing_draft_are_deterministically_reject
 
 
 @pytest.mark.asyncio
-async def test_stale_draft_identity_returns_structured_conflict(
+@pytest.mark.parametrize(
+    "message",
+    [
+        {
+            "type": SETUP_WRITE_V1_START,
+            "draft_id": "v2-must-not-start",
+            "module_instance_id": "main-heating",
+            "created_at": NOW,
+            "snapshot_id": "snapshot-1",
+            "report_id": "report-1",
+        },
+        {
+            "type": SETUP_WRITE_V1_UPDATE,
+            "draft_id": "existing-v2-draft",
+            "expected_revision": 1,
+            "updated_at": NOW,
+            "snapshot_id": "snapshot-1",
+            "report_id": "report-2",
+            "settings": {},
+            "selections": [],
+        },
+        {
+            "type": SETUP_WRITE_V1_CANONICALIZE,
+            "draft_id": "existing-v2-draft",
+            "snapshot_id": "snapshot-1",
+            "created_at": NOW,
+            "validation_report_id": "report-3",
+            "configuration_id": "configuration-1",
+            "revision_id": "v2-must-not-canonicalize",
+            "revision": 1,
+            "actor": "test:admin",
+            "source": "test",
+            "change_kind": "CREATE",
+            "reason": "authority_gate",
+            "core_version": "0.15.0",
+        },
+        {
+            "type": SETUP_WRITE_V1_ACTIVATE,
+            "revision_id": "existing-v2-revision",
+            "semantic_configuration_fingerprint": "a" * 64,
+            "expected_active_revision_id": None,
+            "expected_active_generation": 0,
+            "attempt_id": "v2-must-not-activate",
+        },
+    ],
+    ids=("start", "update", "canonicalize", "activate"),
+)
+async def test_v1_mutation_and_activation_routes_require_canonical_v3(
     hass,
     hass_ws_client,
+    message: dict[str, object],
 ) -> None:
     entry = MockConfigEntry(domain=DOMAIN, data={})
     entry.add_to_hass(hass)
     assert await component.async_setup(hass, {})
     client = await hass_ws_client(hass)
-    message = {
-        "type": SETUP_WRITE_V1_START,
-        "config_entry_id": entry.entry_id,
-        "draft_id": "draft-1",
-        "module_instance_id": "main-heating",
-        "created_at": NOW,
-        "snapshot_id": "snapshot-1",
-        "report_id": "report-1",
-    }
 
-    await client.send_json_auto_id(message)
-    assert (await client.receive_json())["success"] is True
-    await client.send_json_auto_id(
-        {
-            **message,
-            "created_at": "2026-08-24T12:01:00Z",
-            "report_id": "report-2",
-        }
-    )
-    conflict = await client.receive_json()
+    await client.send_json_auto_id({**message, "config_entry_id": entry.entry_id})
+    rejected = await client.receive_json()
 
-    assert conflict["success"] is False
-    assert conflict["error"]["code"] == ERR_SETUP_CONFLICT
+    assert rejected["success"] is False
+    assert rejected["error"]["code"] == ERR_CANONICAL_V3_REQUIRED
 
 
 @pytest.mark.asyncio
-async def test_simple_switch_setup_persists_complete_canonical_heating_and_reaches_ready(
+async def test_existing_v2_draft_remains_reopen_validate_delete_compatible(
     hass,
     hass_ws_client,
 ) -> None:
@@ -387,21 +351,17 @@ async def test_simple_switch_setup_persists_complete_canonical_heating_and_reach
     assert defaults["settings"]["maximum_future_skew_seconds"] == 30.0
     assert defaults["settings"]["indeterminate_grace_period_seconds"] == 120.0
 
-    await client.send_json_auto_id(
-        {
-            "type": SETUP_WRITE_V1_START,
-            "config_entry_id": entry.entry_id,
-            "draft_id": "draft-simple-switch-ready",
-            "module_instance_id": "main-heating",
-            "created_at": NOW,
-            "snapshot_id": "snapshot-ready-1",
-            "report_id": "report-ready-1",
-            "settings": defaults["settings"],
-        }
+    host_service = await async_get_setup_service(hass, entry)
+    created_at = datetime.fromisoformat(NOW)
+    started_model = await host_service.start_new_heating_setup(
+        draft_id="draft-simple-switch-ready",
+        module_instance_id="main-heating",
+        created_at=created_at,
+        snapshot_id="snapshot-ready-1",
+        report_id="report-ready-1",
+        settings=defaults["settings"],
     )
-    started_response = await client.receive_json()
-    assert started_response["success"] is True
-    started = started_response["result"]["result"]
+    started = started_model.model_dump(mode="json")
 
     candidates_by_role = {
         recommendation["role"]: [
@@ -428,28 +388,26 @@ async def test_simple_switch_setup_persists_complete_canonical_heating_and_reach
         "sensor_id": temperature.id,
         "sensor_name": temperature.entity_id,
     }
-    selections = [
-        {"role": role, "candidate_id": candidate["candidate_id"], "user_confirmed": True}
+    selections = tuple(
+        HeatingBindingSelectionRequest(
+            role=role,
+            candidate_id=str(candidate["candidate_id"]),
+            user_confirmed=True,
+        )
         for role, candidate in selected.items()
-    ]
-
-    await client.send_json_auto_id(
-        {
-            "type": SETUP_WRITE_V1_UPDATE,
-            "config_entry_id": entry.entry_id,
-            "draft_id": started["draft_id"],
-            "expected_revision": started["draft_revision"],
-            "updated_at": NOW,
-            "snapshot_id": "snapshot-ready-1",
-            "report_id": "report-ready-2",
-            "settings": settings,
-            "selections": selections,
-            "preferred_area_id": area.id,
-        }
     )
-    saved_response = await client.receive_json()
-    assert saved_response["success"] is True
-    saved = saved_response["result"]["result"]
+
+    saved_model = await host_service.update_heating_draft(
+        str(started["draft_id"]),
+        expected_revision=int(started["draft_revision"]),
+        updated_at=created_at,
+        snapshot_id="snapshot-ready-1",
+        report_id="report-ready-2",
+        settings=settings,
+        selections=selections,
+        preferred_area_id=area.id,
+    )
+    saved = saved_model.model_dump(mode="json")
     assert saved["draft_revision"] == 2
     assert set(saved["settings"]) == set(HeatingSetupPayload.model_fields)
     assert saved["settings"]["source_enable"] == {

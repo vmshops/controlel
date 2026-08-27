@@ -8,6 +8,7 @@ HA_SETUP_HOST = ROOT / "src" / "controlel" / "infrastructure" / "home_assistant"
 HA_SETUP_PERSISTENCE = ROOT / "src" / "controlel" / "infrastructure" / "home_assistant" / "setup_persistence.py"
 INTEGRATION_INIT = ROOT / "custom_components" / "controlel" / "__init__.py"
 INTEGRATION_SETUP_BACKEND = ROOT / "custom_components" / "controlel" / "setup_backend.py"
+SETUP_WRITE_TRANSPORT = ROOT / "custom_components" / "controlel" / "setup_write_websocket.py"
 CANONICAL_V3 = ROOT / "src" / "controlel" / "application" / "configuration" / "canonical_v3.py"
 CANONICAL_V3_MIGRATION = ROOT / "src" / "controlel" / "application" / "configuration" / "canonical_v3_migration.py"
 
@@ -138,3 +139,12 @@ def test_canonical_v3_runtime_wiring_stays_in_the_home_assistant_adapter() -> No
     ha_runtime = (ROOT / "custom_components" / "controlel" / "canonical_runtime.py").read_text(encoding="utf-8")
     assert "CanonicalConfigurationRevisionV3" in ha_runtime
     assert "compile_canonical_heating_config_v3" in ha_runtime
+
+
+def test_public_write_transport_makes_v3_the_sole_new_authoring_and_activation_authority() -> None:
+    tree = ast.parse(SETUP_WRITE_TRANSPORT.read_text(encoding="utf-8"), filename=str(SETUP_WRITE_TRANSPORT))
+    functions = {node.name: ast.unparse(node) for node in tree.body if isinstance(node, ast.AsyncFunctionDef)}
+
+    for handler in ("_start", "_update", "_canonicalize", "_activate"):
+        assert "_reject_v2_write" in functions[handler]
+    assert "get_canonical_revision_v3" in functions["_configuration_v3_activate"]

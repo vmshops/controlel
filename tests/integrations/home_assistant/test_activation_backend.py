@@ -10,6 +10,7 @@ from typing import Any
 
 import pytest
 
+from controlel.application.configuration import migrate_heating_v2_revision_to_v3
 from controlel.application.configuration.heating_setup_adapter import HeatingSetupAdapter
 from controlel.application.setup import (
     ActivationAttempt,
@@ -27,12 +28,12 @@ NOW = datetime(2026, 8, 26, 12, 0, tzinfo=UTC)
 PREVIOUS_FINGERPRINT = "b" * 64
 
 
-@pytest.fixture
-def canonical_revision():
+@pytest.fixture(params=("v2", "v3"))
+def canonical_revision(request: pytest.FixtureRequest):
     draft = complete_draft()
     adapter = HeatingSetupAdapter()
     report = adapter.validate(draft, report_id="report-activation-backend", evaluated_at=NOW)
-    return adapter.canonicalize(
+    v2 = adapter.canonicalize(
         draft,
         report,
         configuration_id="configuration-1",
@@ -47,6 +48,16 @@ def canonical_revision():
         reason="activation_backend_test",
         core_version="0.14.0",
         integration_version="0.13.0",
+    )
+    if request.param == "v2":
+        return v2
+    return migrate_heating_v2_revision_to_v3(
+        v2,
+        revision_id="canonical-candidate-v3",
+        created_at=NOW,
+        actor="test:admin",
+        source="test",
+        reason="activation_backend_v3_regression",
     )
 
 

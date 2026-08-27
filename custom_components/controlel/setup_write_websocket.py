@@ -10,13 +10,13 @@ import voluptuous as vol
 from homeassistant.components import websocket_api
 from pydantic import ValidationError
 
+from controlel.application.configuration import CanonicalDraftRevisionConflict
 from controlel.application.configuration.heating_setup_adapter import (
     SOURCE_DISABLE_TARGET_ROLE,
     SOURCE_ENABLE_TARGET_ROLE,
 )
 from controlel.application.setup import SetupConflictError, SetupNotFoundError
 from controlel.infrastructure.home_assistant import (
-    ACTIVE_REFERENCE_KEY,
     HeatingBindingSelectionRequest,
     HeatingSetupHostService,
     SetupStorageIntegrityError,
@@ -47,6 +47,9 @@ CONFIGURATION_V3_CONVERT_V2 = f"{DOMAIN}/configuration/v3/convert-v2"
 CONFIGURATION_V3_CONVERT_LEGACY = f"{DOMAIN}/configuration/v3/convert-legacy"
 CONFIGURATION_V3_ACTIVE = f"{DOMAIN}/configuration/v3/active"
 CONFIGURATION_V3_EDIT = f"{DOMAIN}/configuration/v3/edit"
+CONFIGURATION_V3_DRAFT = f"{DOMAIN}/configuration/v3/draft"
+CONFIGURATION_V3_DRAFTS = f"{DOMAIN}/configuration/v3/drafts"
+CONFIGURATION_V3_ABANDON = f"{DOMAIN}/configuration/v3/abandon"
 CONFIGURATION_V3_UPDATE = f"{DOMAIN}/configuration/v3/update"
 CONFIGURATION_V3_VALIDATE = f"{DOMAIN}/configuration/v3/validate"
 CONFIGURATION_V3_CANONICALIZE = f"{DOMAIN}/configuration/v3/canonicalize"
@@ -54,6 +57,8 @@ CONFIGURATION_V3_ACTIVATE = f"{DOMAIN}/configuration/v3/activate"
 
 ERR_SETUP_CONFLICT = "setup_conflict"
 ERR_SETUP_STORAGE_INTEGRITY = "setup_storage_integrity"
+ERR_CANONICAL_V3_REQUIRED = "canonical_v3_required"
+ERR_CANONICAL_V3_DRAFT_STALE = "canonical_v3_draft_stale"
 
 _TRANSPORT_KEY = f"{DOMAIN}_setup_write_v1_transport_registered"
 _NON_EMPTY_STRING = vol.All(str, vol.Length(min=1, max=256))
@@ -83,6 +88,9 @@ def async_register_setup_write_api_v1(hass: Any) -> None:
         _configuration_v3_convert_legacy,
         _configuration_v3_active,
         _configuration_v3_edit,
+        _configuration_v3_draft,
+        _configuration_v3_drafts,
+        _configuration_v3_abandon,
         _configuration_v3_update,
         _configuration_v3_validate,
         _configuration_v3_canonicalize,
@@ -241,6 +249,13 @@ async def _send_configuration_v3(
     except SetupNotFoundError:
         connection.send_error(msg["id"], websocket_api.ERR_NOT_FOUND, "Canonical v3 resource was not found")
         return
+    except CanonicalDraftRevisionConflict:
+        connection.send_error(
+            msg["id"],
+            ERR_CANONICAL_V3_DRAFT_STALE,
+            "Canonical v3 draft changed before the requested operation",
+        )
+        return
     except SetupConflictError:
         connection.send_error(
             msg["id"],
@@ -315,6 +330,25 @@ async def _edit_configuration_v3(service: Any, msg: dict[str, Any]) -> object:
     )
 
 
+async def _reopen_configuration_v3(service: Any, msg: dict[str, Any]) -> object:
+    return await service.reopen_draft(msg["draft_id"])
+
+
+async def _list_configuration_v3_drafts(service: Any, _msg: dict[str, Any]) -> object:
+    return await service.list_drafts()
+
+
+async def _abandon_configuration_v3(service: Any, msg: dict[str, Any]) -> object:
+    await service.abandon_draft(
+        msg["draft_id"],
+        expected_revision=msg["expected_revision"],
+    )
+    return {
+        "draft_id": msg["draft_id"],
+        "abandoned_revision": msg["expected_revision"],
+    }
+
+
 async def _update_configuration_v3(service: Any, msg: dict[str, Any]) -> object:
     return await service.update_draft(
         msg["draft_id"],
@@ -338,6 +372,7 @@ async def _canonicalize_configuration_v3(service: Any, msg: dict[str, Any]) -> o
         msg["draft_id"],
         validation_report_id=msg["validation_report_id"],
         revision_id=msg["revision_id"],
+        snapshot_id=msg["snapshot_id"],
         created_at=msg["created_at"],
         actor=msg["actor"],
         source=msg["source"],
@@ -517,15 +552,7 @@ async def _recommendations(hass: Any, connection: websocket_api.ActiveConnection
 @websocket_api.require_admin
 @websocket_api.async_response
 async def _start(hass: Any, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
-    entry = hass.config_entries.async_get_entry(msg["config_entry_id"])
-    if entry is not None and ACTIVE_REFERENCE_KEY in entry.data:
-        connection.send_error(
-            msg["id"],
-            ERR_SETUP_CONFLICT,
-            "Active canonical configuration must be edited by cloning its active revision",
-        )
-        return
-    await _send(hass, connection, msg, "start", _start_draft)
+    _reject_v2_write(connection, msg, "start")
 
 
 @websocket_api.websocket_command(
@@ -563,7 +590,7 @@ async def _reopen(hass: Any, connection: websocket_api.ActiveConnection, msg: di
 @websocket_api.require_admin
 @websocket_api.async_response
 async def _update(hass: Any, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
-    await _send(hass, connection, msg, "update", _update_draft)
+    _reject_v2_write(connection, msg, "update")
 
 
 @websocket_api.websocket_command(
@@ -609,7 +636,7 @@ async def _validate(hass: Any, connection: websocket_api.ActiveConnection, msg: 
 @websocket_api.require_admin
 @websocket_api.async_response
 async def _canonicalize(hass: Any, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
-    await _send(hass, connection, msg, "canonicalize", _canonicalize_draft)
+    _reject_v2_write(connection, msg, "canonicalize")
 
 
 @websocket_api.websocket_command(
@@ -627,51 +654,20 @@ async def _canonicalize(hass: Any, connection: websocket_api.ActiveConnection, m
 @websocket_api.require_admin
 @websocket_api.async_response
 async def _activate(hass: Any, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
-    """Activate one inactive canonical revision within the addressed config entry."""
+    """Reject v2 activation; schema v3 has the sole public activation route."""
 
-    entry = hass.config_entries.async_get_entry(msg["config_entry_id"])
-    if entry is None or entry.domain != DOMAIN:
-        connection.send_error(
-            msg["id"],
-            websocket_api.ERR_NOT_FOUND,
-            "Controlel setup config entry was not found",
-        )
-        return
-    try:
-        from .activation_backend import async_activate_canonical_revision
+    _reject_v2_write(connection, msg, "activate")
 
-        result = await async_activate_canonical_revision(
-            hass,
-            entry,
-            revision_id=msg["revision_id"],
-            semantic_configuration_fingerprint=msg["semantic_configuration_fingerprint"],
-            expected_active_revision_id=msg["expected_active_revision_id"],
-            expected_active_generation=msg["expected_active_generation"],
-            attempt_id=msg["attempt_id"],
-        )
-    except SetupNotFoundError:
-        connection.send_error(msg["id"], websocket_api.ERR_NOT_FOUND, "Canonical revision was not found")
-        return
-    except SetupConflictError:
-        connection.send_error(msg["id"], ERR_SETUP_CONFLICT, "Canonical activation conflicts with current state")
-        return
-    except SetupStorageIntegrityError:
-        connection.send_error(
-            msg["id"],
-            ERR_SETUP_STORAGE_INTEGRITY,
-            "Controlel setup storage failed integrity validation",
-        )
-        return
-    except (TypeError, ValueError, ValidationError):
-        connection.send_error(msg["id"], websocket_api.ERR_INVALID_FORMAT, "Canonical activation request is invalid")
-        return
-    connection.send_result(
+
+def _reject_v2_write(
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+    operation: str,
+) -> None:
+    connection.send_error(
         msg["id"],
-        {
-            "setup_write_api_version": SETUP_WRITE_API_VERSION,
-            "operation": "activate",
-            "result": _json_result(result),
-        },
+        ERR_CANONICAL_V3_REQUIRED,
+        f"Setup Write v1 {operation} is compatibility-only; use Canonical configuration v3",
     )
 
 
@@ -793,6 +789,52 @@ async def _configuration_v3_edit(
 
 @websocket_api.websocket_command(
     _schema(
+        CONFIGURATION_V3_DRAFT,
+        {vol.Required("draft_id"): _NON_EMPTY_STRING},
+    )
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def _configuration_v3_draft(
+    hass: Any,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    await _send_configuration_v3(hass, connection, msg, "draft", _reopen_configuration_v3)
+
+
+@websocket_api.websocket_command(_schema(CONFIGURATION_V3_DRAFTS, {}))
+@websocket_api.require_admin
+@websocket_api.async_response
+async def _configuration_v3_drafts(
+    hass: Any,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    await _send_configuration_v3(hass, connection, msg, "drafts", _list_configuration_v3_drafts)
+
+
+@websocket_api.websocket_command(
+    _schema(
+        CONFIGURATION_V3_ABANDON,
+        {
+            vol.Required("draft_id"): _NON_EMPTY_STRING,
+            vol.Required("expected_revision"): _positive_integer,
+        },
+    )
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def _configuration_v3_abandon(
+    hass: Any,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    await _send_configuration_v3(hass, connection, msg, "abandon", _abandon_configuration_v3)
+
+
+@websocket_api.websocket_command(
+    _schema(
         CONFIGURATION_V3_UPDATE,
         {
             vol.Required("draft_id"): _NON_EMPTY_STRING,
@@ -840,6 +882,7 @@ async def _configuration_v3_validate(
             vol.Required("draft_id"): _NON_EMPTY_STRING,
             vol.Required("validation_report_id"): _NON_EMPTY_STRING,
             vol.Required("revision_id"): _NON_EMPTY_STRING,
+            vol.Required("snapshot_id"): _NON_EMPTY_STRING,
             **dict((_required_time("created_at"),)),
             vol.Required("actor"): _NON_EMPTY_STRING,
             vol.Required("source"): _NON_EMPTY_STRING,

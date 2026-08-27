@@ -26,6 +26,7 @@ from controlel.application.configuration.canonical_v3 import (
     CANONICAL_CONFIGURATION_SCHEMA_VERSION_V3,
     CanonicalConfigurationRevisionV3,
     ConfigurationDefaultPolicyV3,
+    ConfigurationEditabilityV3,
     ConfigurationOwnerV3,
     DiagnosticsConfigurationV3,
     HeatingGlobalConfigurationV3,
@@ -578,6 +579,21 @@ def test_field_registry_is_schema_derived_complete_and_contains_no_default_value
     assert "notifications.recipients[].target" in paths
 
     by_path = {item.canonical_path: item for item in registry}
+    deferred = {
+        item.canonical_path: item
+        for item in registry
+        if item.editability is ConfigurationEditabilityV3.DEFERRED_NON_EDITABLE
+    }
+    assert set(deferred) == {
+        "heating.heat_sources[].observations.physical_operation_reference",
+        "diagnostics.debug_policy.until_changed",
+    }
+    assert all(item.deferred_reason for item in deferred.values())
+    assert all(
+        item.deferred_reason is None
+        for item in registry
+        if item.editability is not ConfigurationEditabilityV3.DEFERRED_NON_EDITABLE
+    )
     assert (
         by_path["heating.zones[].demand_policy.target_temperature_celsius"].default_policy
         is ConfigurationDefaultPolicyV3.RECOMMENDED_NEW_CONFIGURATION
@@ -594,6 +610,23 @@ def test_field_registry_is_schema_derived_complete_and_contains_no_default_value
         "delivery_results",
     }
     assert not forbidden_leaf_names & {path.rsplit(".", 1)[-1] for path in paths}
+
+
+def test_every_v3_field_without_effective_v1_semantics_is_deferred_non_editable() -> None:
+    fields = {item.canonical_path: item for item in canonical_field_registry_v3()}
+    without_effective_v1_semantics = {
+        "heating.heat_sources[].observations.physical_operation_reference",
+        "diagnostics.debug_policy.until_changed",
+    }
+
+    assert {
+        path for path, field in fields.items() if field.editability is ConfigurationEditabilityV3.DEFERRED_NON_EDITABLE
+    } == without_effective_v1_semantics
+    assert all(
+        fields[path].editability is not ConfigurationEditabilityV3.EDITABLE
+        and fields[path].editability is not ConfigurationEditabilityV3.EDITABLE_PROVIDER_BINDING
+        for path in without_effective_v1_semantics
+    )
 
 
 def canonical_field_registry_v3_paths() -> tuple[str, ...]:

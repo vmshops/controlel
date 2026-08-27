@@ -14,6 +14,7 @@ from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from controlel.application.configuration.canonical_defaults import NEW_CONFIGURATION_DEBUG_UNTIL_CHANGED
 from controlel.application.configuration.canonical_v3 import (
     CANONICAL_CONFIGURATION_SCHEMA_VERSION_V3,
     CanonicalConfigurationRevisionV3,
@@ -36,6 +37,10 @@ from controlel.application.setup.model import (
 from controlel.application.setup.repository import SetupConflictError
 
 _HASH_PATTERN = r"^[0-9a-f]{64}$"
+
+
+class CanonicalDraftRevisionConflict(SetupConflictError):
+    """A persisted v3 draft changed before the requested mutation."""
 
 
 class ConfigurationScopesV3(BaseModel):
@@ -120,7 +125,7 @@ class CanonicalConfigurationDraftV3(BaseModel):
         scopes: ConfigurationScopesV3,
     ) -> CanonicalConfigurationDraftV3:
         if self.revision != expected_revision:
-            raise SetupConflictError(
+            raise CanonicalDraftRevisionConflict(
                 f"canonical v3 draft changed before update: expected {expected_revision}, found {self.revision}"
             )
         values = self.model_dump(mode="python")
@@ -362,6 +367,10 @@ class CanonicalConfigurationRepositoryV3(Protocol):
 
     async def get_canonical_draft_v3(self, draft_id: str) -> CanonicalConfigurationDraftV3: ...
 
+    async def list_canonical_drafts_v3(self) -> tuple[CanonicalConfigurationDraftV3, ...]: ...
+
+    async def delete_canonical_draft_v3(self, draft_id: str, *, expected_revision: int) -> None: ...
+
     async def save_canonical_validation_v3(self, report: CanonicalConfigurationValidationV3) -> None: ...
 
     async def get_canonical_validation_v3(self, report_id: str) -> CanonicalConfigurationValidationV3: ...
@@ -372,6 +381,24 @@ class CanonicalConfigurationLifecycleV3:
 
     def __init__(self, repository: CanonicalConfigurationRepositoryV3) -> None:
         self._repository = repository
+
+    async def reopen_draft(self, draft_id: str) -> CanonicalConfigurationDraftV3:
+        """Return the exact latest persisted revision of one v3 draft."""
+
+        return await self._repository.get_canonical_draft_v3(draft_id)
+
+    async def list_drafts(self) -> tuple[CanonicalConfigurationDraftV3, ...]:
+        """List each persisted v3 draft at its latest immutable revision."""
+
+        return await self._repository.list_canonical_drafts_v3()
+
+    async def abandon_draft(self, draft_id: str, *, expected_revision: int) -> None:
+        """Delete only editable draft state, never canonical or active authority."""
+
+        await self._repository.delete_canonical_draft_v3(
+            draft_id,
+            expected_revision=expected_revision,
+        )
 
     async def read_active(
         self,
@@ -459,6 +486,7 @@ class CanonicalConfigurationLifecycleV3:
     ) -> CanonicalConfigurationDraftV3:
         """Persist the first editable v3 authority candidate without activation."""
 
+        _require_new_v1_deferred_defaults(scopes)
         scope = (environment_id, "heating", configuration_id)
         if await self._repository.get_active_reference(scope) is not None:
             raise SetupConflictError("greenfield canonical v3 scope already has active authority")
@@ -538,6 +566,7 @@ class CanonicalConfigurationLifecycleV3:
         scopes: ConfigurationScopesV3,
     ) -> CanonicalConfigurationDraftV3:
         current = await self._repository.get_canonical_draft_v3(draft_id)
+        _require_deferred_fields_unchanged(current.scopes, scopes)
         updated = current.next_revision(
             expected_revision=expected_revision,
             updated_at=updated_at,
@@ -555,6 +584,7 @@ class CanonicalConfigurationLifecycleV3:
         reference_health: tuple[CanonicalReferenceHealthV3, ...],
     ) -> CanonicalConfigurationValidationV3:
         draft = await self._repository.get_canonical_draft_v3(draft_id)
+        _require_complete_reference_health(draft, reference_health)
         unresolved = tuple(item for item in reference_health if item.activation_required and not item.runtime_ready)
         report = CanonicalConfigurationValidationV3(
             report_id=report_id,
@@ -581,6 +611,7 @@ class CanonicalConfigurationLifecycleV3:
         change_kind: str,
         reason: str,
         core_version: str,
+        fresh_reference_health: tuple[CanonicalReferenceHealthV3, ...],
         integration_version: str | None = None,
     ) -> CanonicalConfigurationRevisionV3:
         draft = await self._repository.get_canonical_draft_v3(draft_id)
@@ -589,6 +620,15 @@ class CanonicalConfigurationLifecycleV3:
             raise SetupConflictError("canonical v3 validation does not assess the current draft revision")
         if not report.activation_ready:
             raise SetupConflictError("canonical v3 draft is not activation-ready")
+        _require_complete_reference_health(draft, fresh_reference_health)
+        unresolved = tuple(
+            item for item in fresh_reference_health if item.activation_required and not item.runtime_ready
+        )
+        if unresolved:
+            issue_codes = ", ".join(
+                sorted({f"canonical_v3.reference.{item.status.value.lower()}" for item in unresolved})
+            )
+            raise SetupConflictError(f"canonical v3 reference health changed before canonicalization: {issue_codes}")
         scope = (draft.environment_id, "heating", draft.configuration_id)
         active = await self._repository.get_active_reference(scope)
         active_revision_id = None if active is None else active.canonical_revision_id
@@ -649,6 +689,53 @@ class CanonicalConfigurationLifecycleV3:
         )
         await self._repository.add_canonical_revision_v3(canonical)
         return canonical
+
+
+def _require_complete_reference_health(
+    configuration: CanonicalConfigurationDraftV3,
+    reference_health: tuple[CanonicalReferenceHealthV3, ...],
+) -> None:
+    expected = {item.canonical_path: item for item in canonical_reference_bindings_v3(configuration)}
+    actual = {item.canonical_path: item for item in reference_health}
+    if len(actual) != len(reference_health):
+        raise SetupConflictError("canonical v3 reference health contains duplicate paths")
+    if set(actual) != set(expected):
+        raise SetupConflictError("canonical v3 reference health does not cover the current draft bindings")
+    for path, binding in expected.items():
+        health = actual[path]
+        if (
+            health.activation_required != binding.activation_required
+            or health.reference.semantic_data() != binding.reference.semantic_data()
+        ):
+            raise SetupConflictError(f"canonical v3 reference health does not assess current binding: {path}")
+
+
+def _require_new_v1_deferred_defaults(scopes: ConfigurationScopesV3) -> None:
+    source = scopes.heating.heat_sources[0]
+    if source.observations.physical_operation_reference is not None:
+        raise SetupConflictError(
+            "physical heat-source operation evidence is deferred and cannot be authored in Single-Zone Heating v1"
+        )
+    if scopes.diagnostics.debug_policy.until_changed is not NEW_CONFIGURATION_DEBUG_UNTIL_CHANGED:
+        raise SetupConflictError(
+            "until-changed Debug policy is deferred and cannot be authored in Single-Zone Heating v1"
+        )
+
+
+def _require_deferred_fields_unchanged(
+    current: ConfigurationScopesV3,
+    proposed: ConfigurationScopesV3,
+) -> None:
+    current_physical = current.heating.heat_sources[0].observations.physical_operation_reference
+    proposed_physical = proposed.heating.heat_sources[0].observations.physical_operation_reference
+    if current_physical != proposed_physical:
+        raise SetupConflictError(
+            "physical heat-source operation evidence is deferred and cannot be edited in Single-Zone Heating v1"
+        )
+    if current.diagnostics.debug_policy.until_changed != proposed.diagnostics.debug_policy.until_changed:
+        raise SetupConflictError(
+            "until-changed Debug policy is deferred and cannot be edited in Single-Zone Heating v1"
+        )
 
 
 def _require_active_revision_v3(
