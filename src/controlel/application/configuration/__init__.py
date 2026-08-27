@@ -25,6 +25,16 @@ from controlel.application.configuration.canonical_v3 import (
     ZoneTopologyV3,
     canonical_field_registry_v3,
 )
+from controlel.application.configuration.canonical_v3_lifecycle import (
+    ActiveCanonicalConfigurationV3,
+    CanonicalConfigurationDraftV3,
+    CanonicalConfigurationLifecycleV3,
+    CanonicalConfigurationValidationV3,
+    CanonicalReferenceBindingV3,
+    CanonicalReferenceHealthV3,
+    ConfigurationScopesV3,
+    canonical_reference_bindings_v3,
+)
 from controlel.application.configuration.canonical_v3_migration import (
     CanonicalV2ToV3MigrationError,
     migrate_heating_v2_revision_to_v3,
@@ -32,12 +42,19 @@ from controlel.application.configuration.canonical_v3_migration import (
 
 __all__ = [
     "CANONICAL_CONFIGURATION_SCHEMA_VERSION_V3",
+    "ActiveCanonicalConfigurationV3",
+    "CanonicalConfigurationDraftV3",
+    "CanonicalConfigurationLifecycleV3",
     "CanonicalConfigurationRevisionV3",
+    "CanonicalConfigurationValidationV3",
     "CanonicalFieldMetadataV3",
+    "CanonicalReferenceBindingV3",
+    "CanonicalReferenceHealthV3",
     "CanonicalV2ToV3MigrationError",
     "ConfigurationDefaultPolicyV3",
     "ConfigurationEditabilityV3",
     "ConfigurationOwnerV3",
+    "ConfigurationScopesV3",
     "DiagnosticDebugPolicyV3",
     "DiagnosticsConfigurationV3",
     "HeatingConfigurationV3",
@@ -55,5 +72,6 @@ __all__ = [
     "ZoneHeatDeliveryConfigurationV3",
     "ZoneTopologyV3",
     "canonical_field_registry_v3",
+    "canonical_reference_bindings_v3",
     "migrate_heating_v2_revision_to_v3",
 ]

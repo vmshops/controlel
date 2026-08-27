@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from datetime import datetime
 
 from controlel.application.setup.model import (
@@ -28,11 +28,14 @@ class ActivationCoordinator:
         configurations: ConfigurationAuthorityRepository,
         attempts: ActivationAttemptRepository,
         *,
-        supported_module_schema_versions: Mapping[str, int],
+        supported_module_schema_versions: Mapping[str, int | Collection[int]],
     ) -> None:
         self._configurations = configurations
         self._attempts = attempts
-        self._supported_module_schema_versions = dict(supported_module_schema_versions)
+        self._supported_module_schema_versions = {
+            key: frozenset((value,)) if isinstance(value, int) else frozenset(value)
+            for key, value in supported_module_schema_versions.items()
+        }
 
     def prepare(self, revision_id: str, *, attempt_id: str, prepared_at: datetime) -> ActivationAttempt:
         candidate = self._configurations.get_canonical_revision(revision_id)
@@ -202,13 +205,20 @@ class ActivationCoordinator:
         )
 
     def _require_supported_module_contract(self, candidate: CanonicalConfigurationRevision) -> None:
-        required_version = self._supported_module_schema_versions.get(candidate.module_key)
-        if required_version is None:
+        supported_versions = self._supported_module_schema_versions.get(candidate.module_key)
+        if supported_versions is None:
             raise SetupConflictError(f"activation module contract is not registered: {candidate.module_key}")
-        if candidate.module_schema_version != required_version:
+        if candidate.module_schema_version not in supported_versions:
+            if len(supported_versions) == 1:
+                required = next(iter(supported_versions))
+                raise SetupConflictError(
+                    "activation candidate uses an unsupported module schema version: "
+                    f"{candidate.module_key} requires {required}, got {candidate.module_schema_version}"
+                )
+            versions = ", ".join(str(item) for item in sorted(supported_versions))
             raise SetupConflictError(
                 "activation candidate uses an unsupported module schema version: "
-                f"{candidate.module_key} requires {required_version}, got {candidate.module_schema_version}"
+                f"{candidate.module_key} requires one of [{versions}], got {candidate.module_schema_version}"
             )
 
 

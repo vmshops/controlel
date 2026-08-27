@@ -6,6 +6,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from controlel.application.configuration import (
+    CanonicalConfigurationRevisionV3,
+    canonical_reference_bindings_v3,
+)
 from controlel.application.configuration.heating_setup_adapter import (
     HEAT_DELIVERY_ACTUATOR_ROLE,
     HEATING_SETUP_SCHEMA_VERSION,
@@ -117,11 +121,18 @@ async def async_select_runtime_configuration(
 
 async def async_compile_canonical_runtime(
     hass: Any,
-    revision: CanonicalConfigurationRevision,
+    revision: CanonicalConfigurationRevision | CanonicalConfigurationRevisionV3,
     *,
     activation_attempt_id: str | None = None,
 ) -> RuntimeConfigurationSelection:
     """Freshly validate, resolve, and compile one immutable Heating revision."""
+
+    if isinstance(revision, CanonicalConfigurationRevisionV3):
+        return await _async_compile_canonical_runtime_v3(
+            hass,
+            revision,
+            activation_attempt_id=activation_attempt_id,
+        )
 
     if revision.module_key != HeatingSetupAdapter.module_key:
         raise HomeAssistantConfigurationError("canonical revision is not a Heating configuration")
@@ -190,6 +201,147 @@ async def async_compile_canonical_runtime(
             module_instance_id=revision.module_instance_id,
         ),
         activation_attempt_id=activation_attempt_id,
+    )
+
+
+async def _async_compile_canonical_runtime_v3(
+    hass: Any,
+    revision: CanonicalConfigurationRevisionV3,
+    *,
+    activation_attempt_id: str | None,
+) -> RuntimeConfigurationSelection:
+    """Resolve and compile wholly from one scoped canonical v3 revision."""
+
+    if revision.provider != "home_assistant":
+        raise HomeAssistantConfigurationError("canonical v3 revision uses a non-Home-Assistant provider")
+    captured_at = datetime.now(UTC)
+    snapshot = await HomeAssistantDiscoveryAdapter.async_snapshot_from_hass(
+        hass,
+        snapshot_id=f"runtime:v3:{revision.revision_id}:{captured_at.isoformat()}",
+        captured_at=captured_at,
+    )
+    if (
+        revision.environment_id != snapshot.provider_instance_id
+        or revision.provider_instance_id != snapshot.provider_instance_id
+    ):
+        raise HomeAssistantConfigurationError("canonical v3 revision belongs to another Home Assistant instance")
+
+    resolver = HomeAssistantReferenceResolver()
+    resolved_locators: dict[str, str] = {}
+    for binding in canonical_reference_bindings_v3(revision):
+        resolution = resolver.resolve(binding.reference, snapshot)
+        if not binding.activation_required:
+            continue
+        if resolution.status not in {ReferenceResolutionStatus.RESOLVED, ReferenceResolutionStatus.EPHEMERAL}:
+            raise HomeAssistantConfigurationError(
+                f"canonical v3 reference {binding.canonical_path} is not resolvable: {resolution.status.value}"
+            )
+        resolved = resolution.resolved_reference
+        if resolved is None or resolved.current_locator is None:
+            raise HomeAssistantConfigurationError(
+                f"canonical v3 reference {binding.canonical_path} has no runtime locator"
+            )
+        resolved_locators[binding.canonical_path] = resolved.current_locator
+
+    return RuntimeConfigurationSelection(
+        config=compile_canonical_heating_config_v3(revision, resolved_locators),
+        loaded_configuration=LoadedRuntimeConfiguration(
+            canonical_revision_id=revision.revision_id,
+            semantic_configuration_fingerprint=revision.semantic_configuration_fingerprint,
+            environment_id=revision.environment_id,
+            module_key=revision.module_key,
+            module_instance_id=revision.module_instance_id,
+        ),
+        activation_attempt_id=activation_attempt_id,
+    )
+
+
+def compile_canonical_heating_config_v3(
+    revision: CanonicalConfigurationRevisionV3,
+    resolved_locators: dict[str, str],
+) -> HomeAssistantIntegrationConfig:
+    """Compile every runtime field from v3, without consulting entry options."""
+
+    zone = revision.heating.zones[0]
+    source = revision.heating.heat_sources[0]
+    delivery = revision.heating.heat_delivery[0]
+    demand = zone.demand_policy
+    protection = source.protection
+    diagnostics = revision.diagnostics
+    notifications = revision.notifications
+
+    def locator(path: str) -> str:
+        try:
+            return resolved_locators[path]
+        except KeyError as error:
+            raise HomeAssistantConfigurationError(f"canonical v3 runtime reference {path} was not resolved") from error
+
+    prefix = "heating.heat_sources[0]"
+    reported_path = f"{prefix}.observations.reported_actuator_state_reference"
+    delivery_path = "heating.heat_delivery[0].actuator_reference"
+    return HomeAssistantIntegrationConfig(
+        sensor_id=SensorId(zone.primary_temperature_sensor.sensor_id),
+        sensor_name=zone.primary_temperature_sensor.display_name,
+        temperature_entity_id=locator("heating.zones[0].primary_temperature_sensor.provider_reference"),
+        zone_id=ZoneId(zone.zone_id),
+        zone_name=zone.display_name,
+        target_temperature=Temperature(demand.target_temperature_celsius),
+        heating_turn_on_differential=demand.heating_turn_on_differential_celsius,
+        heating_turn_off_differential=demand.heating_turn_off_differential_celsius,
+        minimum_heating_on_time=timedelta(seconds=protection.minimum_heating_on_seconds),
+        minimum_heating_off_time=timedelta(seconds=protection.minimum_heating_off_seconds),
+        primary_measurement_max_age=timedelta(seconds=demand.primary_measurement_max_age_seconds),
+        max_future_skew=timedelta(seconds=revision.heating.global_configuration.maximum_future_skew_seconds),
+        indeterminate_grace_period=timedelta(seconds=protection.indeterminate_grace_period_seconds),
+        indeterminate_timeout_action=protection.indeterminate_timeout_action,
+        heat_source=HomeAssistantHeatSourceBinding(
+            enable_heating=HomeAssistantServiceCall(
+                source.command_strategy.enable_permission.domain,
+                source.command_strategy.enable_permission.service,
+                locator(f"{prefix}.command_strategy.enable_permission.command_target_reference"),
+            ),
+            disable_heating=HomeAssistantServiceCall(
+                source.command_strategy.disable_permission.domain,
+                source.command_strategy.disable_permission.service,
+                locator(f"{prefix}.command_strategy.disable_permission.command_target_reference"),
+            ),
+        ),
+        heat_source_control_mode={
+            "simple": CONTROL_MODE_SIMPLE,
+            "custom": CONTROL_MODE_CUSTOM,
+        }[source.command_strategy.mode],
+        controlled_entity_id=(
+            None if source.observations.reported_actuator_state_reference is None else locator(reported_path)
+        ),
+        diagnostic_profile=diagnostics.steady_profile,
+        debug_duration=None,
+        configured_debug_duration=timedelta(seconds=diagnostics.debug_policy.configured_duration_seconds),
+        diagnostic_profile_before_debug=diagnostics.steady_profile,
+        heat_demand_confirmation_duration=timedelta(seconds=demand.heat_demand_confirmation_seconds),
+        heat_delivery_mode=delivery.mode,
+        heat_delivery_actuator_entity_id=(None if delivery.actuator_reference is None else locator(delivery_path)),
+        heat_delivery_ownership=delivery.ownership,
+        heat_delivery_assist_policy=delivery.assist_policy,
+        heat_delivery_assist_target=delivery.assist_target_celsius,
+        notification_policy=NotificationPolicy(
+            enabled=notifications.enabled,
+            recipients=tuple(
+                NotificationRecipient(
+                    recipient.recipient_id,
+                    recipient.transport,
+                    recipient.target,
+                    enabled=recipient.enabled,
+                    minimum_level=recipient.minimum_level,
+                    categories=recipient.categories,
+                )
+                for recipient in notifications.recipients
+            ),
+            maximum_per_window=notifications.maximum_per_window,
+            rate_window=timedelta(seconds=notifications.rate_window_seconds),
+            critical_maximum_per_window=notifications.critical_maximum_per_window,
+            critical_rate_window=timedelta(seconds=notifications.critical_rate_window_seconds),
+            history_capacity=notifications.history_capacity,
+        ),
     )
 
 
@@ -334,7 +486,7 @@ def _required_locator(bindings: dict[str, str | None], role: str) -> str:
 
 def _require_active_revision(
     active: ActiveReference,
-    revision: CanonicalConfigurationRevision,
+    revision: CanonicalConfigurationRevision | CanonicalConfigurationRevisionV3,
 ) -> None:
     if active.scope_key != (revision.environment_id, revision.module_key, revision.module_instance_id):
         raise HomeAssistantConfigurationError("canonical active reference scope does not match its revision")

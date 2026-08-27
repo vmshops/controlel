@@ -1,9 +1,9 @@
 """Scoped canonical configuration schema v3.
 
-This additive contract is deliberately not wired to runtime activation yet.
-It separates zone demand, shared heat-source protection, diagnostics, and
-notifications while truthfully retaining provider identity and observation
-boundaries.
+The immutable document separates zone demand, shared heat-source protection,
+diagnostics, and notifications while truthfully retaining provider identity
+and observation boundaries.  Runtime adapters consume the document as one
+whole authority; the schema itself remains provider and runtime neutral.
 """
 
 from __future__ import annotations
@@ -819,6 +819,28 @@ class CanonicalConfigurationRevisionV3(_CanonicalConfigurationModelV3):
     migration_provenance: ImmutableJsonMapping = Field(default_factory=lambda: FrozenJsonMapping({}))
     semantic_configuration_fingerprint: str = Field(default="", pattern=_HASH_PATTERN)
     document_hash: str = Field(default="", pattern=_HASH_PATTERN)
+
+    @property
+    def module_key(self) -> Literal["heating"]:
+        """Return the shared activation scope key for this configuration."""
+
+        return "heating"
+
+    @property
+    def module_instance_id(self) -> str:
+        """Use the stable configuration identity as the activation instance."""
+
+        return self.configuration_id
+
+    @property
+    def module_schema_version(self) -> Literal[3]:
+        """Expose v3 through the existing generation/CAS activation contract."""
+
+        return self.schema_version
+
+    @property
+    def scope_key(self) -> tuple[str, str, str]:
+        return self.environment_id, self.module_key, self.module_instance_id
 
     @field_validator("created_at")
     @classmethod

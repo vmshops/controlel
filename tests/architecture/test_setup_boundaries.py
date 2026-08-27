@@ -118,7 +118,7 @@ def test_canonical_v3_contract_has_no_runtime_or_provider_adapter_dependency() -
         ), f"{path.relative_to(ROOT)} imports runtime or provider composition"
 
 
-def test_canonical_v3_is_not_wired_to_runtime_activation() -> None:
+def test_canonical_v3_runtime_wiring_stays_in_the_home_assistant_adapter() -> None:
     forbidden_modules = {
         "controlel.application.configuration.canonical_v3",
         "controlel.application.configuration.canonical_v3_migration",
@@ -126,7 +126,6 @@ def test_canonical_v3_is_not_wired_to_runtime_activation() -> None:
     roots = (
         ROOT / "src" / "controlel" / "application" / "runtime",
         ROOT / "src" / "controlel" / "application" / "services",
-        ROOT / "custom_components" / "controlel",
     )
     for root in roots:
         for path in sorted(root.rglob("*.py")):
@@ -134,4 +133,8 @@ def test_canonical_v3_is_not_wired_to_runtime_activation() -> None:
             imports = {
                 node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom) and node.module is not None
             }
-            assert imports.isdisjoint(forbidden_modules), f"{path.relative_to(ROOT)} activates canonical v3"
+            assert imports.isdisjoint(forbidden_modules), f"{path.relative_to(ROOT)} owns canonical v3 composition"
+
+    ha_runtime = (ROOT / "custom_components" / "controlel" / "canonical_runtime.py").read_text(encoding="utf-8")
+    assert "CanonicalConfigurationRevisionV3" in ha_runtime
+    assert "compile_canonical_heating_config_v3" in ha_runtime

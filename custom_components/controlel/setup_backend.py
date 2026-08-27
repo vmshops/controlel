@@ -38,6 +38,7 @@ from controlel.infrastructure.home_assistant import (
     LegacyConfigurationStatusDTO,
 )
 
+from .canonical_v3_service import HomeAssistantCanonicalConfigurationV3Service
 from .const import (
     DEFAULT_HEAT_DEMAND_CONFIRMATION_DURATION,
     DEFAULT_HEATING_TURN_OFF_DIFFERENTIAL,
@@ -105,7 +106,10 @@ class _SynchronousRepositoryBridge:
         self._run(self._repository.add_canonical_revision(revision))
 
     def get_canonical_revision(self, revision_id: str) -> CanonicalConfigurationRevision:
-        return self._run(self._repository.get_canonical_revision(revision_id))
+        return cast(
+            CanonicalConfigurationRevision,
+            self._run(self._repository.get_canonical_revision(revision_id)),
+        )
 
     def get_active_reference(self, scope: ScopeKey) -> ActiveReference | None:
         return self._run(self._repository.get_active_reference(scope))
@@ -161,7 +165,7 @@ class HomeAssistantActivationCoordinator:
         self._coordinator = ActivationCoordinator(
             bridge,
             bridge,
-            supported_module_schema_versions={"heating": HEATING_SETUP_SCHEMA_VERSION},
+            supported_module_schema_versions={"heating": {HEATING_SETUP_SCHEMA_VERSION, 3}},
         )
 
     async def _call(self, operation: Any, *args: Any, **kwargs: Any) -> Any:
@@ -244,6 +248,7 @@ class HomeAssistantActivationCoordinator:
 @dataclass(frozen=True)
 class SetupBackend:
     service: HeatingSetupHostService
+    configuration_v3: HomeAssistantCanonicalConfigurationV3Service
     repository: HomeAssistantSetupRepository
     activation: HomeAssistantActivationCoordinator
     activation_lock: asyncio.Lock
@@ -290,6 +295,7 @@ async def async_get_setup_backend(hass: Any, entry: Any) -> SetupBackend:
     )
     backend = SetupBackend(
         service=service,
+        configuration_v3=HomeAssistantCanonicalConfigurationV3Service(hass, entry, repository),
         repository=repository,
         activation=HomeAssistantActivationCoordinator(hass, repository),
         activation_lock=asyncio.Lock(),

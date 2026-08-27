@@ -6,6 +6,11 @@ from asyncio import Lock
 from collections.abc import Callable, Mapping
 from typing import Any, Protocol, cast
 
+from controlel.application.configuration import (
+    CanonicalConfigurationDraftV3,
+    CanonicalConfigurationRevisionV3,
+    CanonicalConfigurationValidationV3,
+)
 from controlel.application.setup import (
     ActivationAttempt,
     ActivationState,
@@ -20,6 +25,7 @@ from controlel.application.setup.repository import ScopeKey
 
 SETUP_STORAGE_VERSION = 1
 ACTIVE_REFERENCE_KEY = "setup_active_reference"
+type StoredCanonicalRevision = CanonicalConfigurationRevision | CanonicalConfigurationRevisionV3
 
 
 class HomeAssistantStorePort(Protocol):
@@ -140,7 +146,7 @@ class HomeAssistantSetupRepository:
             )
             await self._store.async_save(document)
 
-    async def add_canonical_revision(self, revision: CanonicalConfigurationRevision) -> None:
+    async def add_canonical_revision(self, revision: StoredCanonicalRevision) -> None:
         async with self._lock:
             document = await self._load()
             revisions = self._canonical_revisions(document)
@@ -153,7 +159,7 @@ class HomeAssistantSetupRepository:
             document["canonical_revisions"] = _dump_models(revisions, key=lambda item: item.revision_id)
             await self._store.async_save(document)
 
-    async def get_canonical_revision(self, revision_id: str) -> CanonicalConfigurationRevision:
+    async def get_canonical_revision(self, revision_id: str) -> StoredCanonicalRevision:
         async with self._lock:
             revision = next(
                 (item for item in self._canonical_revisions(await self._load()) if item.revision_id == revision_id),
@@ -162,6 +168,75 @@ class HomeAssistantSetupRepository:
             if revision is None:
                 raise SetupNotFoundError(f"canonical revision not found: {revision_id}")
             return revision
+
+    async def add_canonical_revision_v3(self, revision: CanonicalConfigurationRevisionV3) -> None:
+        await self.add_canonical_revision(revision)
+
+    async def get_canonical_revision_v3(self, revision_id: str) -> CanonicalConfigurationRevisionV3:
+        revision = await self.get_canonical_revision(revision_id)
+        if not isinstance(revision, CanonicalConfigurationRevisionV3):
+            raise SetupConflictError("canonical revision is not configuration schema v3")
+        return revision
+
+    async def save_canonical_draft_v3(self, draft: CanonicalConfigurationDraftV3) -> None:
+        async with self._lock:
+            document = await self._load()
+            drafts = self._canonical_drafts_v3(document)
+            revisions = {item.revision: item for item in drafts if item.draft_id == draft.draft_id}
+            current = revisions.get(draft.revision)
+            if current is not None:
+                if current == draft:
+                    return
+                raise SetupConflictError("canonical v3 draft revision is immutable")
+            expected_revision = max(revisions, default=0) + 1
+            if draft.revision != expected_revision:
+                raise SetupConflictError(
+                    f"expected canonical v3 draft revision {expected_revision}, got {draft.revision}"
+                )
+            if revisions and _canonical_draft_v3_identity(revisions[expected_revision - 1]) != (
+                draft.configuration_id,
+                draft.base_active_revision_id,
+                draft.base_active_generation,
+                draft.environment_id,
+                draft.created_at,
+            ):
+                raise SetupConflictError("canonical v3 draft identity cannot change between revisions")
+            drafts.append(draft)
+            document["canonical_v3_drafts"] = _dump_models(
+                drafts,
+                key=lambda item: (item.draft_id, item.revision),
+            )
+            await self._store.async_save(document)
+
+    async def get_canonical_draft_v3(self, draft_id: str) -> CanonicalConfigurationDraftV3:
+        async with self._lock:
+            drafts = [item for item in self._canonical_drafts_v3(await self._load()) if item.draft_id == draft_id]
+            if not drafts:
+                raise SetupNotFoundError(f"canonical v3 draft not found: {draft_id}")
+            return max(drafts, key=lambda item: item.revision)
+
+    async def save_canonical_validation_v3(self, report: CanonicalConfigurationValidationV3) -> None:
+        async with self._lock:
+            document = await self._load()
+            reports = self._canonical_validations_v3(document)
+            current = next((item for item in reports if item.report_id == report.report_id), None)
+            if current is not None:
+                if current == report:
+                    return
+                raise SetupConflictError("canonical v3 validation report IDs are immutable")
+            reports.append(report)
+            document["canonical_v3_validations"] = _dump_models(reports, key=lambda item: item.report_id)
+            await self._store.async_save(document)
+
+    async def get_canonical_validation_v3(self, report_id: str) -> CanonicalConfigurationValidationV3:
+        async with self._lock:
+            report = next(
+                (item for item in self._canonical_validations_v3(await self._load()) if item.report_id == report_id),
+                None,
+            )
+            if report is None:
+                raise SetupNotFoundError(f"canonical v3 validation not found: {report_id}")
+            return report
 
     async def get_active_reference(self, scope: ScopeKey) -> ActiveReference | None:
         async with self._lock:
@@ -308,8 +383,29 @@ class HomeAssistantSetupRepository:
         return _parse_models(document, "drafts", DraftRevision)
 
     @staticmethod
-    def _canonical_revisions(document: Mapping[str, object]) -> list[CanonicalConfigurationRevision]:
-        return _parse_models(document, "canonical_revisions", CanonicalConfigurationRevision)
+    def _canonical_revisions(document: Mapping[str, object]) -> list[StoredCanonicalRevision]:
+        values = document.get("canonical_revisions", [])
+        if not isinstance(values, list):
+            raise SetupStorageIntegrityError("Setup storage field canonical_revisions must be a list")
+        try:
+            return [
+                CanonicalConfigurationRevisionV3.model_validate(item)
+                if isinstance(item, Mapping) and item.get("schema_version") == 3
+                else CanonicalConfigurationRevision.model_validate(item)
+                for item in values
+            ]
+        except (TypeError, ValueError) as error:
+            raise SetupStorageIntegrityError("Setup storage field canonical_revisions contains invalid data") from error
+
+    @staticmethod
+    def _canonical_drafts_v3(document: Mapping[str, object]) -> list[CanonicalConfigurationDraftV3]:
+        return _parse_models(document, "canonical_v3_drafts", CanonicalConfigurationDraftV3)
+
+    @staticmethod
+    def _canonical_validations_v3(
+        document: Mapping[str, object],
+    ) -> list[CanonicalConfigurationValidationV3]:
+        return _parse_models(document, "canonical_v3_validations", CanonicalConfigurationValidationV3)
 
     @staticmethod
     def _activation_attempts(document: Mapping[str, object]) -> list[ActivationAttempt]:
@@ -320,7 +416,14 @@ class HomeAssistantSetupRepository:
         return _parse_models(document, "validation_reports", ValidationReport)
 
 
-_COLLECTION_FIELDS = ("drafts", "canonical_revisions", "activation_attempts", "validation_reports")
+_COLLECTION_FIELDS = (
+    "drafts",
+    "canonical_revisions",
+    "activation_attempts",
+    "validation_reports",
+    "canonical_v3_drafts",
+    "canonical_v3_validations",
+)
 _TERMINAL_STATES = frozenset({ActivationState.COMMITTED, ActivationState.ROLLED_BACK, ActivationState.FAILED})
 
 
@@ -348,6 +451,16 @@ def _draft_identity(draft: DraftRevision) -> tuple[object, ...]:
         draft.environment_id,
         draft.module_key,
         draft.module_instance_id,
+        draft.created_at,
+    )
+
+
+def _canonical_draft_v3_identity(draft: CanonicalConfigurationDraftV3) -> tuple[object, ...]:
+    return (
+        draft.configuration_id,
+        draft.base_active_revision_id,
+        draft.base_active_generation,
+        draft.environment_id,
         draft.created_at,
     )
 
