@@ -550,6 +550,8 @@ def _basic_schema(
         ),
         vol.Required(
             CONF_HEAT_DELIVERY_ASSIST_POLICY,
+            # Historical HA form drift: v3 defaults new canonical configuration to no_assist.
+            # The explicit form value remains unchanged until UI projection work and is preserved by migration.
             default=values.get(CONF_HEAT_DELIVERY_ASSIST_POLICY, HEAT_DELIVERY_ASSIST_ALWAYS),
         ): selector.SelectSelector(
             selector.SelectSelectorConfig(

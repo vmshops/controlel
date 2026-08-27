@@ -8,6 +8,8 @@ HA_SETUP_HOST = ROOT / "src" / "controlel" / "infrastructure" / "home_assistant"
 HA_SETUP_PERSISTENCE = ROOT / "src" / "controlel" / "infrastructure" / "home_assistant" / "setup_persistence.py"
 INTEGRATION_INIT = ROOT / "custom_components" / "controlel" / "__init__.py"
 INTEGRATION_SETUP_BACKEND = ROOT / "custom_components" / "controlel" / "setup_backend.py"
+CANONICAL_V3 = ROOT / "src" / "controlel" / "application" / "configuration" / "canonical_v3.py"
+CANONICAL_V3_MIGRATION = ROOT / "src" / "controlel" / "application" / "configuration" / "canonical_v3_migration.py"
 
 
 def test_shared_setup_kernel_has_no_heating_or_runtime_domain_dependency() -> None:
@@ -95,3 +97,41 @@ def test_setup_backend_is_lazy_relative_to_released_runtime_imports() -> None:
     }
     assert "setup_backend" not in top_level_imports
     assert "async_get_setup_service" in INTEGRATION_INIT.read_text(encoding="utf-8")
+
+
+def test_canonical_v3_contract_has_no_runtime_or_provider_adapter_dependency() -> None:
+    forbidden_prefixes = (
+        "controlel.application.runtime",
+        "controlel.infrastructure",
+        "custom_components",
+        "homeassistant",
+    )
+    for path in (CANONICAL_V3, CANONICAL_V3_MIGRATION):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        imports = {
+            node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom) and node.module is not None
+        }
+        assert not any(
+            imported == prefix or imported.startswith(f"{prefix}.")
+            for imported in imports
+            for prefix in forbidden_prefixes
+        ), f"{path.relative_to(ROOT)} imports runtime or provider composition"
+
+
+def test_canonical_v3_is_not_wired_to_runtime_activation() -> None:
+    forbidden_modules = {
+        "controlel.application.configuration.canonical_v3",
+        "controlel.application.configuration.canonical_v3_migration",
+    }
+    roots = (
+        ROOT / "src" / "controlel" / "application" / "runtime",
+        ROOT / "src" / "controlel" / "application" / "services",
+        ROOT / "custom_components" / "controlel",
+    )
+    for root in roots:
+        for path in sorted(root.rglob("*.py")):
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            imports = {
+                node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom) and node.module is not None
+            }
+            assert imports.isdisjoint(forbidden_modules), f"{path.relative_to(ROOT)} activates canonical v3"
