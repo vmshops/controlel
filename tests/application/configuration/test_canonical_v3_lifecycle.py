@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from controlel.application.configuration import (
+    CanonicalConfigurationDraftV3,
     CanonicalConfigurationLifecycleV3,
     ConfigurationScopesV3,
     migrate_heating_v2_revision_to_v3,
@@ -20,24 +21,34 @@ NOW = datetime(2026, 8, 27, 8, 0, tzinfo=UTC)
 
 
 class Repository:
-    def __init__(self, revision) -> None:
-        self.revisions = {revision.revision_id: revision}
-        self.active = ActiveReference(
-            environment_id=revision.environment_id,
-            module_key=revision.module_key,
-            module_instance_id=revision.module_instance_id,
-            canonical_revision_id=revision.revision_id,
-            semantic_configuration_fingerprint=revision.semantic_configuration_fingerprint,
-            generation=4,
-            committing_operation_id="activate-v3-base",
+    def __init__(self, revision=None) -> None:
+        self.revisions = {} if revision is None else {revision.revision_id: revision}
+        self.active = (
+            None
+            if revision is None
+            else ActiveReference(
+                environment_id=revision.environment_id,
+                module_key=revision.module_key,
+                module_instance_id=revision.module_instance_id,
+                canonical_revision_id=revision.revision_id,
+                semantic_configuration_fingerprint=revision.semantic_configuration_fingerprint,
+                generation=4,
+                committing_operation_id="activate-v3-base",
+            )
         )
         self.drafts = {}
         self.validations = {}
 
     async def get_active_reference(self, scope):
-        return self.active if self.active.scope_key == scope else None
+        return self.active if self.active is not None and self.active.scope_key == scope else None
 
     async def get_canonical_revision_v3(self, revision_id):
+        try:
+            return self.revisions[revision_id]
+        except KeyError as error:
+            raise SetupNotFoundError(revision_id) from error
+
+    async def get_canonical_revision(self, revision_id):
         try:
             return self.revisions[revision_id]
         except KeyError as error:
@@ -219,6 +230,91 @@ async def _generation_and_lineage_conflicts_are_rejected(active_v3) -> None:
     assert "must-not-exist" not in repository.revisions
 
 
+async def _greenfield_draft_completes_lifecycle_without_existing_authority(active_v3) -> None:
+    repository = Repository()
+    lifecycle = CanonicalConfigurationLifecycleV3(repository)
+    scopes = ConfigurationScopesV3(
+        heating=active_v3.heating,
+        diagnostics=active_v3.diagnostics,
+        notifications=active_v3.notifications,
+    )
+
+    draft = await lifecycle.start_greenfield_draft(
+        draft_id="first-v3-draft",
+        configuration_id="new-heating-configuration",
+        environment_id=active_v3.environment_id,
+        provider=active_v3.provider,
+        provider_instance_id=active_v3.provider_instance_id,
+        created_at=NOW,
+        scopes=scopes,
+    )
+    report = await lifecycle.validate_draft(
+        draft.draft_id,
+        report_id="first-v3-validation",
+        evaluated_at=NOW,
+        reference_health=(),
+    )
+    canonical = await lifecycle.canonicalize_draft(
+        draft.draft_id,
+        validation_report_id=report.report_id,
+        revision_id="first-v3-canonical",
+        created_at=NOW,
+        actor="test:admin",
+        source="configuration_v3_api",
+        change_kind="CREATE",
+        reason="greenfield",
+        core_version="0.15.0",
+    )
+
+    assert draft.base_active_revision_id is None
+    assert draft.base_active_generation == 0
+    assert draft.canonical_revision == 1
+    assert draft.parent_revision_id is None
+    assert report.activation_ready is True
+    assert canonical.revision == 1
+    assert canonical.parent_revision_id is None
+    assert repository.active is None
+
+
+async def _pre_authoring_metadata_v3_draft_keeps_existing_edit_lineage(active_v3) -> None:
+    repository = Repository(active_v3)
+    lifecycle = CanonicalConfigurationLifecycleV3(repository)
+    draft = await lifecycle.clone_active_to_draft(
+        active_v3.scope_key,
+        draft_id="pre-authoring-metadata",
+        created_at=NOW,
+        expected_active_generation=4,
+    )
+    stored = draft.model_dump(mode="python")
+    stored.pop("canonical_revision")
+    stored.pop("parent_revision_id")
+    restored = CanonicalConfigurationDraftV3.model_validate(stored)
+    repository.drafts[draft.draft_id] = {draft.revision: restored}
+    report = await lifecycle.validate_draft(
+        draft.draft_id,
+        report_id="pre-authoring-metadata-validation",
+        evaluated_at=NOW,
+        reference_health=(),
+    )
+
+    canonical = await lifecycle.canonicalize_draft(
+        draft.draft_id,
+        validation_report_id=report.report_id,
+        revision_id="pre-authoring-metadata-canonical",
+        created_at=NOW,
+        actor="test:admin",
+        source="test",
+        change_kind="UPDATE",
+        reason="backward_compatible_draft",
+        core_version="0.15.0",
+    )
+
+    assert restored.canonical_revision == 1
+    assert restored.parent_revision_id is None
+    assert canonical.revision == active_v3.revision + 1
+    assert canonical.parent_revision_id == active_v3.revision_id
+
+
 def test_active_read_and_clone_preserve_exact_semantic_configuration(active_v3) -> None:
     asyncio.run(_active_read_and_clone_preserve_exact_semantic_configuration(active_v3))
 
@@ -229,3 +325,11 @@ def test_one_field_edit_and_unchanged_round_trip_are_semantically_exact(active_v
 
 def test_generation_and_lineage_conflicts_are_rejected(active_v3) -> None:
     asyncio.run(_generation_and_lineage_conflicts_are_rejected(active_v3))
+
+
+def test_greenfield_draft_completes_lifecycle_without_existing_authority(active_v3) -> None:
+    asyncio.run(_greenfield_draft_completes_lifecycle_without_existing_authority(active_v3))
+
+
+def test_pre_authoring_metadata_v3_draft_keeps_existing_edit_lineage(active_v3) -> None:
+    asyncio.run(_pre_authoring_metadata_v3_draft_keeps_existing_edit_lineage(active_v3))

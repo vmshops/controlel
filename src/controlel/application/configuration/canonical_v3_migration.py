@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime
 from re import fullmatch
 from typing import Literal, cast
@@ -62,6 +63,7 @@ def migrate_heating_v2_revision_to_v3(
     actor: str = "system:migration",
     source: str = "canonical_v2_to_v3",
     reason: str = "separate_canonical_configuration_ownership",
+    binding_overrides: Mapping[str, ProviderReference] | None = None,
 ) -> CanonicalConfigurationRevisionV3:
     """Build but never persist or activate one deterministic v3 successor.
 
@@ -74,7 +76,17 @@ def migrate_heating_v2_revision_to_v3(
     if revision.module_schema_version != HEATING_SETUP_SCHEMA_VERSION:
         raise CanonicalV2ToV3MigrationError("canonical v2 revision uses an unsupported Heating schema")
     payload = HeatingSetupPayload.model_validate(revision.module_payload)
-    bindings = {binding.role: binding for binding in revision.bindings}
+    overrides = dict(binding_overrides or {})
+    source_bindings = {binding.role: binding for binding in revision.bindings}
+    unknown_overrides = set(overrides) - set(source_bindings)
+    if unknown_overrides:
+        raise CanonicalV2ToV3MigrationError(
+            f"v2 binding overrides contain unknown roles: {', '.join(sorted(unknown_overrides))}"
+        )
+    bindings = {
+        role: binding.model_copy(update={"reference": overrides.get(role, binding.reference)})
+        for role, binding in source_bindings.items()
+    }
 
     primary_binding = _required_binding(bindings, PRIMARY_TEMPERATURE_ROLE)
     _require_stable(primary_binding.reference, "primary temperature sensor")
@@ -139,7 +151,10 @@ def migrate_heating_v2_revision_to_v3(
     delivery_ownership = cast(Literal["device_owned", "controlel_owned"], payload.heat_delivery_ownership)
     source_mode = cast(Literal["simple", "custom"], payload.source_control_mode)
     migrated = CanonicalConfigurationRevisionV3(
-        configuration_id=revision.configuration_id,
+        # ActiveReference CAS is scoped by the v2 module instance.  Carry that
+        # stable Controlel identity forward so an active v2 revision can be
+        # replaced atomically by its v3 successor.
+        configuration_id=revision.module_instance_id,
         revision_id=revision_id,
         revision=revision.revision + 1,
         parent_revision_id=revision.revision_id,
@@ -233,6 +248,7 @@ def migrate_heating_v2_revision_to_v3(
             **dict(revision.lineage),
             "migrated_from_revision_id": revision.revision_id,
             "migrated_from_document_hash": revision.document_hash,
+            "migrated_from_semantic_configuration_fingerprint": (revision.semantic_configuration_fingerprint),
         },
         import_provenance=revision.import_provenance,
         migration_provenance={
@@ -241,6 +257,8 @@ def migrate_heating_v2_revision_to_v3(
                 "contract": _MIGRATION_CONTRACT,
                 "policy_version": CANONICAL_CONFIGURATION_V3_MIGRATION_POLICY_VERSION,
                 "source_module_schema_version": revision.module_schema_version,
+                "source_configuration_id": revision.configuration_id,
+                "source_module_instance_id": revision.module_instance_id,
                 "historical_values_preserved": True,
                 "synthesized_heat_source_id": _HEAT_SOURCE_ID,
                 "synthesized_heat_source_display_name": _HEAT_SOURCE_DISPLAY_NAME,
@@ -260,6 +278,13 @@ def migrate_heating_v2_revision_to_v3(
                 "ha_always_assist_default_drift_preserved": (
                     payload.heat_delivery_assist_policy == "always_assist_while_heating"
                 ),
+                "binding_resolution": {
+                    role: {
+                        "source_reference": source_bindings[role].reference.document_data(),
+                        "resolved_reference": reference.document_data(),
+                    }
+                    for role, reference in sorted(overrides.items())
+                },
             },
         },
     )

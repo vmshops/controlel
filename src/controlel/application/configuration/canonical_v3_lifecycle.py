@@ -28,7 +28,11 @@ from controlel.application.setup.json_data import (
     aware_datetime,
     immutable_json_mapping,
 )
-from controlel.application.setup.model import ActiveReference, ProviderReference
+from controlel.application.setup.model import (
+    ActiveReference,
+    CanonicalConfigurationRevision,
+    ProviderReference,
+)
 from controlel.application.setup.repository import SetupConflictError
 
 _HASH_PATTERN = r"^[0-9a-f]{64}$"
@@ -51,8 +55,10 @@ class CanonicalConfigurationDraftV3(BaseModel):
     draft_id: str = Field(min_length=1)
     revision: int = Field(ge=1)
     configuration_id: str = Field(min_length=1)
-    base_active_revision_id: str = Field(min_length=1)
-    base_active_generation: int = Field(ge=1)
+    base_active_revision_id: str | None = Field(default=None, min_length=1)
+    base_active_generation: int = Field(default=0, ge=0)
+    canonical_revision: int = Field(default=1, ge=1)
+    parent_revision_id: str | None = Field(default=None, min_length=1)
     environment_id: str = Field(min_length=1)
     provider: str = Field(min_length=1)
     provider_instance_id: str = Field(min_length=1)
@@ -88,6 +94,10 @@ class CanonicalConfigurationDraftV3(BaseModel):
     def timestamps_are_monotonic(self) -> CanonicalConfigurationDraftV3:
         if self.updated_at < self.created_at:
             raise ValueError("updated_at cannot precede created_at")
+        if self.base_active_revision_id is None and self.base_active_generation != 0:
+            raise ValueError("a draft without active authority must use generation zero")
+        if self.base_active_revision_id is not None and self.base_active_generation < 1:
+            raise ValueError("a draft based on active authority requires a positive generation")
         return self
 
     @property
@@ -339,6 +349,11 @@ class ActiveCanonicalConfigurationV3(BaseModel):
 class CanonicalConfigurationRepositoryV3(Protocol):
     async def get_active_reference(self, scope: tuple[str, str, str]) -> ActiveReference | None: ...
 
+    async def get_canonical_revision(
+        self,
+        revision_id: str,
+    ) -> CanonicalConfigurationRevision | CanonicalConfigurationRevisionV3: ...
+
     async def get_canonical_revision_v3(self, revision_id: str) -> CanonicalConfigurationRevisionV3: ...
 
     async def add_canonical_revision_v3(self, revision: CanonicalConfigurationRevisionV3) -> None: ...
@@ -414,6 +429,8 @@ class CanonicalConfigurationLifecycleV3:
             configuration_id=revision.configuration_id,
             base_active_revision_id=revision.revision_id,
             base_active_generation=active.generation,
+            canonical_revision=revision.revision + 1,
+            parent_revision_id=revision.revision_id,
             environment_id=revision.environment_id,
             provider=revision.provider,
             provider_instance_id=revision.provider_instance_id,
@@ -425,6 +442,89 @@ class CanonicalConfigurationLifecycleV3:
             lineage=revision.lineage,
             import_provenance=revision.import_provenance,
             migration_provenance=revision.migration_provenance,
+        )
+        await self._repository.save_canonical_draft_v3(draft)
+        return draft
+
+    async def start_greenfield_draft(
+        self,
+        *,
+        draft_id: str,
+        configuration_id: str,
+        environment_id: str,
+        provider: str,
+        provider_instance_id: str,
+        created_at: datetime,
+        scopes: ConfigurationScopesV3,
+    ) -> CanonicalConfigurationDraftV3:
+        """Persist the first editable v3 authority candidate without activation."""
+
+        scope = (environment_id, "heating", configuration_id)
+        if await self._repository.get_active_reference(scope) is not None:
+            raise SetupConflictError("greenfield canonical v3 scope already has active authority")
+        draft = CanonicalConfigurationDraftV3(
+            draft_id=draft_id,
+            revision=1,
+            configuration_id=configuration_id,
+            base_active_revision_id=None,
+            base_active_generation=0,
+            canonical_revision=1,
+            parent_revision_id=None,
+            environment_id=environment_id,
+            provider=provider,
+            provider_instance_id=provider_instance_id,
+            created_at=created_at,
+            updated_at=created_at,
+            heating=scopes.heating,
+            diagnostics=scopes.diagnostics,
+            notifications=scopes.notifications,
+            lineage={"authoring_origin": "greenfield_v3"},
+        )
+        await self._repository.save_canonical_draft_v3(draft)
+        return draft
+
+    async def start_conversion_draft(
+        self,
+        projection: CanonicalConfigurationRevisionV3,
+        *,
+        draft_id: str,
+        created_at: datetime,
+        expected_active_revision_id: str | None,
+        expected_active_generation: int,
+    ) -> CanonicalConfigurationDraftV3:
+        """Persist a deterministic migrated projection as an inactive v3 draft."""
+
+        scope = projection.scope_key
+        active = await self._repository.get_active_reference(scope)
+        active_revision_id = None if active is None else active.canonical_revision_id
+        active_generation = 0 if active is None else active.generation
+        if active_revision_id != expected_active_revision_id or active_generation != expected_active_generation:
+            raise SetupConflictError("active authority changed before canonical v3 conversion")
+        if expected_active_revision_id is not None and projection.parent_revision_id != expected_active_revision_id:
+            raise SetupConflictError("canonical v3 conversion parent does not match active authority")
+        draft = CanonicalConfigurationDraftV3(
+            draft_id=draft_id,
+            revision=1,
+            configuration_id=projection.configuration_id,
+            base_active_revision_id=expected_active_revision_id,
+            base_active_generation=expected_active_generation,
+            canonical_revision=projection.revision,
+            parent_revision_id=projection.parent_revision_id,
+            environment_id=projection.environment_id,
+            provider=projection.provider,
+            provider_instance_id=projection.provider_instance_id,
+            created_at=created_at,
+            updated_at=created_at,
+            heating=projection.heating,
+            diagnostics=projection.diagnostics,
+            notifications=projection.notifications,
+            lineage={
+                **dict(projection.lineage),
+                "authoring_origin": "canonical_v2_conversion",
+                "conversion_projection_revision_id": projection.revision_id,
+            },
+            import_provenance=projection.import_provenance,
+            migration_provenance=projection.migration_provenance,
         )
         await self._repository.save_canonical_draft_v3(draft)
         return draft
@@ -491,26 +591,39 @@ class CanonicalConfigurationLifecycleV3:
             raise SetupConflictError("canonical v3 draft is not activation-ready")
         scope = (draft.environment_id, "heating", draft.configuration_id)
         active = await self._repository.get_active_reference(scope)
-        if (
-            active is None
-            or active.canonical_revision_id != draft.base_active_revision_id
-            or active.generation != draft.base_active_generation
-        ):
+        active_revision_id = None if active is None else active.canonical_revision_id
+        active_generation = 0 if active is None else active.generation
+        if active_revision_id != draft.base_active_revision_id or active_generation != draft.base_active_generation:
             raise SetupConflictError("active canonical v3 authority changed while the draft was edited")
-        base = await self._repository.get_canonical_revision_v3(draft.base_active_revision_id)
-        _require_active_revision_v3(active, base)
-        if (
-            draft.configuration_id != base.configuration_id
-            or draft.environment_id != base.environment_id
-            or draft.provider != base.provider
-            or draft.provider_instance_id != base.provider_instance_id
-        ):
-            raise SetupConflictError("canonical v3 draft identity does not match its base active revision")
+        canonical_revision = draft.canonical_revision
+        parent_revision_id = draft.parent_revision_id
+        if active is not None:
+            base = await self._repository.get_canonical_revision(active.canonical_revision_id)
+            if isinstance(base, CanonicalConfigurationRevisionV3):
+                _require_active_revision_v3(active, base)
+                if (
+                    draft.configuration_id != base.configuration_id
+                    or draft.environment_id != base.environment_id
+                    or draft.provider != base.provider
+                    or draft.provider_instance_id != base.provider_instance_id
+                ):
+                    raise SetupConflictError("canonical v3 draft identity does not match its base active revision")
+            elif (
+                active.scope_key != (base.environment_id, base.module_key, base.module_instance_id)
+                or active.semantic_configuration_fingerprint != base.semantic_configuration_fingerprint
+                or draft.lineage.get("authoring_origin") != "canonical_v2_conversion"
+                or draft.environment_id != base.environment_id
+                or draft.provider != base.provider
+                or draft.provider_instance_id != base.provider_instance_id
+            ):
+                raise SetupConflictError("canonical v3 conversion draft does not match its active v2 authority")
+            canonical_revision = base.revision + 1
+            parent_revision_id = base.revision_id
         canonical = CanonicalConfigurationRevisionV3(
             configuration_id=draft.configuration_id,
             revision_id=revision_id,
-            revision=base.revision + 1,
-            parent_revision_id=base.revision_id,
+            revision=canonical_revision,
+            parent_revision_id=parent_revision_id,
             environment_id=draft.environment_id,
             provider=draft.provider,
             provider_instance_id=draft.provider_instance_id,

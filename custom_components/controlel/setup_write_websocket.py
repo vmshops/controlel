@@ -42,6 +42,9 @@ SETUP_WRITE_V1_ACTIVATE = f"{DOMAIN}/setup/write/v1/activate"
 SETUP_WRITE_V1_DELETE = f"{DOMAIN}/setup/write/v1/delete"
 
 CANONICAL_CONFIGURATION_API_VERSION = 3
+CONFIGURATION_V3_START = f"{DOMAIN}/configuration/v3/start"
+CONFIGURATION_V3_CONVERT_V2 = f"{DOMAIN}/configuration/v3/convert-v2"
+CONFIGURATION_V3_CONVERT_LEGACY = f"{DOMAIN}/configuration/v3/convert-legacy"
 CONFIGURATION_V3_ACTIVE = f"{DOMAIN}/configuration/v3/active"
 CONFIGURATION_V3_EDIT = f"{DOMAIN}/configuration/v3/edit"
 CONFIGURATION_V3_UPDATE = f"{DOMAIN}/configuration/v3/update"
@@ -75,6 +78,9 @@ def async_register_setup_write_api_v1(hass: Any) -> None:
         _canonicalize,
         _activate,
         _delete,
+        _configuration_v3_start,
+        _configuration_v3_convert_v2,
+        _configuration_v3_convert_legacy,
         _configuration_v3_active,
         _configuration_v3_edit,
         _configuration_v3_update,
@@ -264,6 +270,41 @@ async def _send_configuration_v3(
 
 async def _read_configuration_v3(service: Any, msg: dict[str, Any]) -> object:
     return await service.read_active(snapshot_id=msg["snapshot_id"], captured_at=msg["captured_at"])
+
+
+async def _start_configuration_v3(service: Any, msg: dict[str, Any]) -> object:
+    return await service.start_greenfield(
+        draft_id=msg["draft_id"],
+        created_at=msg["created_at"],
+        snapshot_id=msg["snapshot_id"],
+        bindings=msg["bindings"],
+    )
+
+
+async def _convert_v2_configuration_v3(service: Any, msg: dict[str, Any]) -> object:
+    return await service.convert_v2(
+        source_revision_id=msg["source_revision_id"],
+        draft_id=msg["draft_id"],
+        projection_revision_id=msg["projection_revision_id"],
+        created_at=msg["created_at"],
+        snapshot_id=msg["snapshot_id"],
+        expected_active_revision_id=msg["expected_active_revision_id"],
+        expected_active_generation=msg["expected_active_generation"],
+        binding_overrides=msg["binding_overrides"],
+    )
+
+
+async def _convert_legacy_configuration_v3(service: Any, msg: dict[str, Any]) -> object:
+    return await service.convert_legacy(
+        draft_id=msg["draft_id"],
+        v2_revision_id=msg["v2_revision_id"],
+        projection_revision_id=msg["projection_revision_id"],
+        created_at=msg["created_at"],
+        snapshot_id=msg["snapshot_id"],
+        core_version=msg["core_version"],
+        integration_version=msg["integration_version"],
+        binding_overrides=msg["binding_overrides"],
+    )
 
 
 async def _edit_configuration_v3(service: Any, msg: dict[str, Any]) -> object:
@@ -631,6 +672,83 @@ async def _activate(hass: Any, connection: websocket_api.ActiveConnection, msg: 
             "operation": "activate",
             "result": _json_result(result),
         },
+    )
+
+
+@websocket_api.websocket_command(
+    _schema(
+        CONFIGURATION_V3_START,
+        {
+            vol.Required("draft_id"): _NON_EMPTY_STRING,
+            vol.Required("snapshot_id"): _NON_EMPTY_STRING,
+            **dict((_required_time("created_at"),)),
+            vol.Required("bindings"): dict,
+        },
+    )
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def _configuration_v3_start(
+    hass: Any,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    await _send_configuration_v3(hass, connection, msg, "start", _start_configuration_v3)
+
+
+@websocket_api.websocket_command(
+    _schema(
+        CONFIGURATION_V3_CONVERT_V2,
+        {
+            vol.Required("source_revision_id"): _NON_EMPTY_STRING,
+            vol.Required("draft_id"): _NON_EMPTY_STRING,
+            vol.Required("projection_revision_id"): _NON_EMPTY_STRING,
+            vol.Required("snapshot_id"): _NON_EMPTY_STRING,
+            **dict((_required_time("created_at"),)),
+            vol.Optional("expected_active_revision_id", default=None): _OPTIONAL_STRING,
+            vol.Required("expected_active_generation"): _non_negative_integer,
+            vol.Optional("binding_overrides", default=dict): dict,
+        },
+    )
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def _configuration_v3_convert_v2(
+    hass: Any,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    await _send_configuration_v3(hass, connection, msg, "convert-v2", _convert_v2_configuration_v3)
+
+
+@websocket_api.websocket_command(
+    _schema(
+        CONFIGURATION_V3_CONVERT_LEGACY,
+        {
+            vol.Required("draft_id"): _NON_EMPTY_STRING,
+            vol.Required("v2_revision_id"): _NON_EMPTY_STRING,
+            vol.Required("projection_revision_id"): _NON_EMPTY_STRING,
+            vol.Required("snapshot_id"): _NON_EMPTY_STRING,
+            **dict((_required_time("created_at"),)),
+            vol.Required("core_version"): _NON_EMPTY_STRING,
+            vol.Optional("integration_version", default=None): _OPTIONAL_STRING,
+            vol.Optional("binding_overrides", default=dict): dict,
+        },
+    )
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def _configuration_v3_convert_legacy(
+    hass: Any,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    await _send_configuration_v3(
+        hass,
+        connection,
+        msg,
+        "convert-legacy",
+        _convert_legacy_configuration_v3,
     )
 
 

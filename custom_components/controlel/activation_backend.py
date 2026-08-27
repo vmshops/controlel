@@ -13,7 +13,10 @@ from controlel.application.setup import (
     LoadedRuntimeConfiguration,
     SetupConflictError,
 )
-from controlel.infrastructure.home_assistant import ACTIVE_REFERENCE_KEY
+from controlel.infrastructure.home_assistant import (
+    ACTIVE_REFERENCE_KEY,
+    is_explicit_legacy_v3_conversion,
+)
 
 from .canonical_runtime import (
     RuntimeConfigurationSelection,
@@ -44,7 +47,11 @@ async def async_activate_canonical_revision(
         if candidate_revision.semantic_configuration_fingerprint != semantic_configuration_fingerprint:
             raise SetupConflictError("activation candidate fingerprint does not match the persisted revision")
         current = _entry_active_reference(entry)
-        if current is None and (entry.data or entry.options):
+        if (
+            current is None
+            and (entry.data or entry.options)
+            and not is_explicit_legacy_v3_conversion(candidate_revision)
+        ):
             raise SetupConflictError(
                 "legacy config-entry settings must be explicitly converted before canonical activation"
             )

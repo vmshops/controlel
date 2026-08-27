@@ -62,14 +62,13 @@ class ConfigEntryActiveReferenceStore:
             raise SetupStorageIntegrityError("config-entry active reference is malformed")
         return ActiveReference.model_validate(value)
 
-    def set(self, reference: ActiveReference) -> None:
+    def set(self, reference: ActiveReference, *, allow_legacy_replacement: bool = False) -> None:
         non_lifecycle_keys = set(self._entry.data) - {ACTIVE_REFERENCE_KEY}
-        if non_lifecycle_keys:
+        if non_lifecycle_keys and not allow_legacy_replacement:
             raise SetupConflictError(
                 "legacy config-entry settings must be explicitly converted before canonical activation"
             )
-        data = dict(self._entry.data)
-        data[ACTIVE_REFERENCE_KEY] = reference.model_dump(mode="json")
+        data = {ACTIVE_REFERENCE_KEY: reference.model_dump(mode="json")}
         self._update_data(data)
 
 
@@ -278,7 +277,10 @@ class HomeAssistantSetupRepository:
                 raise SetupConflictError("active reference canonical revision belongs to another scope")
             if candidate.semantic_configuration_fingerprint != replacement.semantic_configuration_fingerprint:
                 raise SetupConflictError("active reference fingerprint does not match canonical revision")
-            self._active_references.set(replacement)
+            self._active_references.set(
+                replacement,
+                allow_legacy_replacement=is_explicit_legacy_v3_conversion(candidate),
+            )
 
     async def reserve_activation_attempt(self, attempt: ActivationAttempt) -> None:
         async with self._lock:
@@ -462,6 +464,20 @@ def _canonical_draft_v3_identity(draft: CanonicalConfigurationDraftV3) -> tuple[
         draft.base_active_generation,
         draft.environment_id,
         draft.created_at,
+    )
+
+
+def is_explicit_legacy_v3_conversion(candidate: object) -> bool:
+    """Recognize only the approved HA legacy→v2→v3 provenance composition."""
+
+    if not isinstance(candidate, CanonicalConfigurationRevisionV3):
+        return False
+    provenance = candidate.migration_provenance
+    v2_to_v3 = provenance.get("v2_to_v3")
+    return bool(
+        provenance.get("conversion_contract") == "home_assistant_integration_config_to_heating_v2"
+        and isinstance(v2_to_v3, Mapping)
+        and v2_to_v3.get("contract") == "canonical_heating_v2_to_scoped_configuration_v3"
     )
 
 

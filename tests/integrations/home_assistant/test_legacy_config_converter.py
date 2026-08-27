@@ -4,6 +4,9 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from controlel.application.configuration.canonical_v3_migration import (
+    migrate_heating_v2_revision_to_v3,
+)
 from controlel.application.configuration.heating_setup_adapter import (
     HEAT_DELIVERY_ACTUATOR_ROLE,
     HEATING_SETUP_SCHEMA_VERSION,
@@ -14,7 +17,9 @@ from controlel.application.configuration.heating_setup_adapter import (
 )
 from controlel.application.setup import (
     ActiveReference,
+    IdentityQuality,
     InMemorySetupRepository,
+    ProviderReference,
     SelectionOrigin,
     SetupNotFoundError,
 )
@@ -360,6 +365,71 @@ def test_repeated_conversion_has_the_same_semantic_fingerprint() -> None:
     assert first.revision_id != second.revision_id
     assert first.document_hash != second.document_hash
     assert first.semantic_configuration_fingerprint == second.semantic_configuration_fingerprint
+
+
+def test_lossless_legacy_to_v2_to_v3_composition_is_deterministic_and_preserves_zero_detailed_values() -> None:
+    configured_debug_duration = timedelta(minutes=41, microseconds=11)
+    legacy = replace(
+        _custom_legacy_config(),
+        heating_turn_on_differential=0.0,
+        heating_turn_off_differential=0.0,
+        minimum_heating_on_time=timedelta(0),
+        minimum_heating_off_time=timedelta(0),
+        indeterminate_grace_period=timedelta(0),
+        heat_demand_confirmation_duration=timedelta(0),
+        diagnostic_profile="detailed",
+        debug_duration=configured_debug_duration,
+        configured_debug_duration=configured_debug_duration,
+        diagnostic_profile_before_debug="detailed",
+    )
+    v2 = _convert(legacy).canonical_revision
+    stable_by_locator: dict[str, ProviderReference] = {}
+    overrides: dict[str, ProviderReference] = {}
+    for binding in v2.bindings:
+        locator = binding.reference.current_locator
+        assert locator is not None
+        stable_by_locator.setdefault(
+            locator,
+            ProviderReference(
+                provider=binding.reference.provider,
+                provider_instance_id=binding.reference.provider_instance_id,
+                object_kind=binding.reference.object_kind,
+                native_id=f"registry:{locator}",
+                identity_quality=IdentityQuality.STABLE,
+                current_locator=locator,
+            ),
+        )
+        overrides[binding.role] = stable_by_locator[locator]
+
+    first = migrate_heating_v2_revision_to_v3(
+        v2,
+        revision_id="legacy-v3-projection",
+        created_at=NOW,
+        binding_overrides=overrides,
+    )
+    second = migrate_heating_v2_revision_to_v3(
+        v2,
+        revision_id="legacy-v3-projection",
+        created_at=NOW,
+        binding_overrides=overrides,
+    )
+
+    assert first == second
+    assert first.canonical_json() == second.canonical_json()
+    zone = first.heating.zones[0]
+    source = first.heating.heat_sources[0]
+    assert zone.demand_policy.heating_turn_on_differential_celsius == 0.0
+    assert zone.demand_policy.heating_turn_off_differential_celsius == 0.0
+    assert zone.demand_policy.heat_demand_confirmation_seconds == 0.0
+    assert source.protection.indeterminate_grace_period_seconds == 0.0
+    assert source.protection.minimum_heating_on_seconds == 0.0
+    assert source.protection.minimum_heating_off_seconds == 0.0
+    assert first.diagnostics.steady_profile == "detailed"
+    assert first.diagnostics.debug_policy.configured_duration_seconds == 2460.000011
+    assert first.diagnostics.debug_policy.until_changed is False
+    assert first.migration_provenance["conversion_contract"] == ("home_assistant_integration_config_to_heating_v2")
+    assert first.migration_provenance["v2_to_v3"]["historical_values_preserved"] is True
+    assert all(binding.reference.identity_quality is IdentityQuality.EPHEMERAL for binding in v2.bindings)
 
 
 def test_converted_result_is_inactive_and_existing_active_reference_is_unchanged() -> None:

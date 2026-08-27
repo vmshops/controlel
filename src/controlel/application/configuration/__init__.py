@@ -25,6 +25,18 @@ from controlel.application.configuration.canonical_v3 import (
     ZoneTopologyV3,
     canonical_field_registry_v3,
 )
+from controlel.application.configuration.canonical_v3_authoring import (
+    GREENFIELD_HEAT_SOURCE_ID_V3,
+    GREENFIELD_PRIMARY_SENSOR_ID_V3,
+    GREENFIELD_ZONE_ID_V3,
+    GreenfieldHeatingBindingsV3,
+    author_greenfield_heating_scopes_v3,
+    conversion_configuration_id_v3,
+    new_configuration_id_v3,
+)
+from controlel.application.configuration.canonical_v3_conversion import (
+    CanonicalConfigurationConversionReviewV3,
+)
 from controlel.application.configuration.canonical_v3_lifecycle import (
     ActiveCanonicalConfigurationV3,
     CanonicalConfigurationDraftV3,
@@ -44,6 +56,7 @@ __all__ = [
     "CANONICAL_CONFIGURATION_SCHEMA_VERSION_V3",
     "ActiveCanonicalConfigurationV3",
     "CanonicalConfigurationDraftV3",
+    "CanonicalConfigurationConversionReviewV3",
     "CanonicalConfigurationLifecycleV3",
     "CanonicalConfigurationRevisionV3",
     "CanonicalConfigurationValidationV3",
@@ -59,6 +72,10 @@ __all__ = [
     "DiagnosticsConfigurationV3",
     "HeatingConfigurationV3",
     "HeatingGlobalConfigurationV3",
+    "GREENFIELD_HEAT_SOURCE_ID_V3",
+    "GREENFIELD_PRIMARY_SENSOR_ID_V3",
+    "GREENFIELD_ZONE_ID_V3",
+    "GreenfieldHeatingBindingsV3",
     "HeatSourceCommandStrategyV3",
     "HeatSourceConfigurationV3",
     "HeatSourceObservationBindingsV3",
@@ -73,5 +90,8 @@ __all__ = [
     "ZoneTopologyV3",
     "canonical_field_registry_v3",
     "canonical_reference_bindings_v3",
+    "author_greenfield_heating_scopes_v3",
+    "conversion_configuration_id_v3",
     "migrate_heating_v2_revision_to_v3",
+    "new_configuration_id_v3",
 ]

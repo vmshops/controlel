@@ -19,6 +19,7 @@ from controlel.infrastructure.home_assistant.setup_persistence import (
     ConfigEntryActiveReferenceStore,
     HomeAssistantSetupRepository,
     SetupStorageIntegrityError,
+    is_explicit_legacy_v3_conversion,
 )
 
 __all__ = [
@@ -36,4 +37,5 @@ __all__ = [
     "LegacyConfigurationStatusDTO",
     "SetupStorageIntegrityError",
     "SetupValidationStatus",
+    "is_explicit_legacy_v3_conversion",
 ]

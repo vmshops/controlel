@@ -29,13 +29,23 @@ from controlel.application.configuration.canonical_v3 import (
     ConfigurationOwnerV3,
     DiagnosticsConfigurationV3,
     HeatingGlobalConfigurationV3,
+    HeatSourceCommandStrategyV3,
     HeatSourceObservationBindingsV3,
     HeatSourceProtectionPolicyV3,
     NotificationsConfigurationV3,
     PrimaryTemperatureSensorV3,
+    ProviderServiceCallV3,
     ZoneDemandPolicyV3,
     ZoneHeatDeliveryConfigurationV3,
     canonical_field_registry_v3,
+)
+from controlel.application.configuration.canonical_v3_authoring import (
+    GREENFIELD_HEAT_SOURCE_ID_V3,
+    GREENFIELD_PRIMARY_SENSOR_ID_V3,
+    GREENFIELD_ZONE_ID_V3,
+    GreenfieldHeatingBindingsV3,
+    author_greenfield_heating_scopes_v3,
+    conversion_configuration_id_v3,
 )
 from controlel.application.configuration.canonical_v3_migration import (
     CanonicalV2ToV3MigrationError,
@@ -256,6 +266,8 @@ def test_v2_to_v3_migration_is_deterministic_and_non_activating() -> None:
     assert first.parent_revision_id == source.revision_id
     assert first.source == "canonical_v2_to_v3"
     assert "active" not in first.model_dump(mode="json", by_alias=True)
+    assert first.module_instance_id == source.module_instance_id
+    assert first.scope_key == (source.environment_id, source.module_key, source.module_instance_id)
 
 
 def test_v2_migration_preserves_explicit_historical_values_and_ha_assist_drift() -> None:
@@ -346,6 +358,59 @@ def test_authoritative_new_configuration_defaults_are_consistent() -> None:
         ha_constants["DEFAULT_CRITICAL_NOTIFICATION_RATE_WINDOW_SECONDS"] == notifications.critical_rate_window_seconds
     )
     assert ha_constants["DEFAULT_NOTIFICATION_HISTORY_CAPACITY"] == notifications.history_capacity
+
+
+def test_greenfield_authoring_uses_canonical_defaults_and_provider_independent_identities() -> None:
+    sensor = _reference("registry-sensor-42", "sensor.living_temperature")
+    source = _reference("registry-source-7", "switch.boiler_relay")
+    scopes = author_greenfield_heating_scopes_v3(
+        GreenfieldHeatingBindingsV3(
+            zone_display_name="Living room",
+            primary_sensor_display_name="Room thermometer",
+            topology={"area_reference": None, "floor_reference": None},
+            primary_temperature_sensor_reference=sensor,
+            heat_source_display_name="Boiler relay",
+            heat_source_reference=source,
+            command_strategy=HeatSourceCommandStrategyV3(
+                mode="simple",
+                enable_permission=ProviderServiceCallV3(
+                    domain="switch",
+                    service="turn_on",
+                    command_target_reference=source,
+                ),
+                disable_permission=ProviderServiceCallV3(
+                    domain="switch",
+                    service="turn_off",
+                    command_target_reference=source,
+                ),
+            ),
+            observations=HeatSourceObservationBindingsV3(
+                reported_actuator_state_reference=source,
+            ),
+        )
+    )
+
+    zone = scopes.heating.zones[0]
+    heat_source = scopes.heating.heat_sources[0]
+    assert zone.zone_id == GREENFIELD_ZONE_ID_V3
+    assert zone.primary_temperature_sensor.sensor_id == GREENFIELD_PRIMARY_SENSOR_ID_V3
+    assert heat_source.heat_source_id == GREENFIELD_HEAT_SOURCE_ID_V3
+    assert zone.zone_id not in {sensor.native_id, sensor.current_locator}
+    assert heat_source.heat_source_id not in {source.native_id, source.current_locator}
+    assert zone.demand_policy == ZoneDemandPolicyV3()
+    assert scopes.heating.global_configuration == HeatingGlobalConfigurationV3()
+    assert heat_source.protection == HeatSourceProtectionPolicyV3()
+    assert scopes.heating.heat_delivery == (ZoneHeatDeliveryConfigurationV3(zone_id=zone.zone_id),)
+    assert scopes.diagnostics == DiagnosticsConfigurationV3()
+    assert scopes.notifications == NotificationsConfigurationV3()
+
+
+def test_conversion_configuration_identity_is_deterministic_and_operation_scoped() -> None:
+    first = conversion_configuration_id_v3("home_assistant:entry-1:conversion-1")
+
+    assert first == conversion_configuration_id_v3("home_assistant:entry-1:conversion-1")
+    assert first != conversion_configuration_id_v3("home_assistant:entry-1:conversion-2")
+    assert first.startswith("heating_")
 
 
 def test_stable_logical_identity_is_separate_from_provider_topology_and_locator() -> None:
