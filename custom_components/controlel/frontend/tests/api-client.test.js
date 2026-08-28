@@ -423,7 +423,7 @@ test("mockToModels keeps unknown heat source physical state unknown", () => {
   assert.equal(models.heating.building.heat_source.permission, "disabled");
 });
 
-// ------------------------------------------------------ setup write client
+// ------------------------------------------------------ setup wizard client
 
 function discoveryRaw() {
   return {
@@ -456,35 +456,26 @@ function setupWriteConnection(handler) {
   };
 }
 
-function setupSessionRaw(revision) {
+function canonicalDraftRaw(revision) {
   return {
+    schema_version: 3,
     draft_id: "draft-real",
-    draft_revision: revision,
-    module_instance_id: "main-heating",
-    incomplete: true,
-    activation_ready: false,
-    validation_status: "CURRENT",
-    validation_report_id: "report-real",
-    blocking_issue_count: 1,
-    warning_count: 0,
-    settings: {},
-    selections: [],
-    recommendations: [],
-    validation_issues: [],
-    discovery: discoveryRaw(),
-    canonical_revision_id: null,
-    active_revision_id: null,
-    legacy_configuration: { present: false, conversion_available: false, silently_merged: false, reason_code: null },
+    revision,
+    base_active_revision_id: null,
+    base_active_generation: 0,
+    heating: { global: {}, zones: [], heat_sources: [], heat_delivery: [] },
+    diagnostics: {},
+    notifications: {},
   };
 }
 
-test("setup write client sends the real discovery request and normalizes its response", async () => {
+test("setup wizard client sends read-only discovery through Setup API v1", async () => {
   const connection = setupWriteConnection((message) => Promise.resolve({
     setup_write_api_version: 1,
     operation: "discovery",
     result: discoveryRaw(),
   }));
-  const client = CA_API.createSetupWriteClient({ connection, configEntryId: "entry-setup" });
+  const client = CA_API.createSetupWizardClient({ connection, configEntryId: "entry-setup" });
 
   const snapshot = await client.discover({ snapshot_id: "snapshot-real", captured_at: "2026-08-24T12:00:00Z" });
 
@@ -498,18 +489,17 @@ test("setup write client sends the real discovery request and normalizes its res
   }]);
 });
 
-test("setup write client exposes draft lifecycle only and preserves backend errors", async () => {
+test("setup wizard client exposes the complete canonical-v3 lifecycle and preserves backend errors", async () => {
   const connection = setupWriteConnection(() => Promise.reject({
     code: "setup_conflict",
     message: "draft revision conflict",
   }));
-  const client = CA_API.createSetupWriteClient({ connection, configEntryId: "entry-setup" });
+  const client = CA_API.createSetupWizardClient({ connection, configEntryId: "entry-setup" });
 
   assert.deepEqual(Object.keys(client).sort(), [
-    "defaults", "deleteDraft", "discover", "recommendations", "reopenDraft", "startDraft", "updateDraft", "validateDraft",
+    "abandonDraft", "activateRevision", "canonicalizeDraft", "defaults", "discover", "editDraft", "listDrafts",
+    "readActive", "recommendations", "reopenDraft", "startDraft", "updateDraft", "validateDraft",
   ]);
-  assert.equal(client.activate, undefined);
-  assert.equal(client.canonicalize, undefined);
   await assert.rejects(
     client.updateDraft({ draft_id: "draft-1" }),
     (error) => error instanceof CA_API.ApiError && error.code === "setup_conflict" && error.message === "draft revision conflict"
@@ -517,68 +507,89 @@ test("setup write client exposes draft lifecycle only and preserves backend erro
   assert.equal(connection.sent.length, 1, "no fallback or retry request is sent");
 });
 
-test("setup write client loads canonical defaults and deletes one exact draft revision", async () => {
+test("setup wizard client loads provenance defaults and abandons one exact canonical-v3 draft", async () => {
   const connection = setupWriteConnection((message) => {
-    const operation = message.type.endsWith("/defaults") ? "defaults" : "delete";
+    const operation = message.type.endsWith("/defaults") ? "defaults" : "abandon";
     return Promise.resolve({
-      setup_write_api_version: 1,
+      ...(operation === "defaults"
+        ? { setup_write_api_version: 1 }
+        : { canonical_configuration_api_version: 3 }),
       operation,
       result: operation === "defaults"
         ? {
             settings: { target_temperature_celsius: 21 },
             simple_switch: { source_control_mode: "simple" },
+            core_version: "0.15.0",
+            integration_version: "0.13.0",
           }
-        : { draft_id: message.draft_id, deleted_revision: message.expected_revision },
+        : { draft_id: message.draft_id, abandoned_revision: message.expected_revision },
     });
   });
-  const client = CA_API.createSetupWriteClient({ connection, configEntryId: "entry-setup" });
+  const client = CA_API.createSetupWizardClient({ connection, configEntryId: "entry-setup" });
 
   const defaults = await client.defaults();
-  const deleted = await client.deleteDraft({ draft_id: "draft-real", expected_revision: 2 });
+  const abandoned = await client.abandonDraft({ draft_id: "draft-real", expected_revision: 2 });
 
   assert.equal(defaults.settings.target_temperature_celsius, 21);
-  assert.equal(defaults.simple_switch.source_control_mode, "simple");
-  assert.deepEqual(deleted, { draft_id: "draft-real", deleted_revision: 2 });
+  assert.equal(defaults.core_version, "0.15.0");
+  assert.deepEqual(abandoned, { draft_id: "draft-real", abandoned_revision: 2 });
   assert.equal(connection.sent[0].type, "controlel/setup/write/v1/defaults");
-  assert.equal(connection.sent[1].type, "controlel/setup/write/v1/delete");
+  assert.equal(connection.sent[1].type, "controlel/configuration/v3/abandon");
   assert.equal(connection.sent[1].expected_revision, 2);
 });
 
-test("setup write client sends draft creation and optimistic update requests", async () => {
+test("setup wizard client sends canonical-v3 start and optimistic update requests", async () => {
   const connection = setupWriteConnection((message) => {
     const operation = message.type.endsWith("/start") ? "start" : "update";
     return Promise.resolve({
-      setup_write_api_version: 1,
+      canonical_configuration_api_version: 3,
       operation,
-      result: setupSessionRaw(operation === "start" ? 1 : 2),
+      result: canonicalDraftRaw(operation === "start" ? 1 : 2),
     });
   });
-  const client = CA_API.createSetupWriteClient({ connection, configEntryId: "entry-setup" });
+  const client = CA_API.createSetupWizardClient({ connection, configEntryId: "entry-setup" });
 
   const created = await client.startDraft({
     draft_id: "draft-real",
-    module_instance_id: "main-heating",
     created_at: "2026-08-24T12:00:00Z",
     snapshot_id: "snapshot-real",
-    report_id: "report-1",
-    settings: {},
-    selections: [],
+    bindings: { topology: {} },
   });
   const updated = await client.updateDraft({
     draft_id: "draft-real",
     expected_revision: 1,
     updated_at: "2026-08-24T12:01:00Z",
-    snapshot_id: "snapshot-real",
-    report_id: "report-2",
-    settings: { zone_id: "living" },
-    selections: [],
+    configuration_scopes: { heating: {}, diagnostics: {}, notifications: {} },
   });
 
-  assert.equal(created.draft_revision, 1);
-  assert.equal(updated.draft_revision, 2);
-  assert.equal(connection.sent[0].type, "controlel/setup/write/v1/start");
-  assert.equal(connection.sent[1].type, "controlel/setup/write/v1/update");
+  assert.equal(created.revision, 1);
+  assert.equal(updated.revision, 2);
+  assert.equal(connection.sent[0].type, "controlel/configuration/v3/start");
+  assert.equal(connection.sent[1].type, "controlel/configuration/v3/update");
   assert.equal(connection.sent[1].expected_revision, 1);
-  assert.deepEqual(connection.sent[1].settings, { zone_id: "living" });
+  assert.deepEqual(connection.sent[1].configuration_scopes, { heating: {}, diagnostics: {}, notifications: {} });
   assert.ok(connection.sent.every((message) => message.config_entry_id === "entry-setup"));
+});
+
+test("canonical validation, canonicalization, and activation remain distinct requests", async () => {
+  const connection = setupWriteConnection((message) => {
+    const operation = message.type.split("/").at(-1);
+    const result = operation === "validate"
+      ? { report_id: "report-1", draft_id: "draft-real", draft_revision: 2, activation_ready: true, issue_codes: [], reference_health: [] }
+      : operation === "canonicalize"
+        ? { ...canonicalDraftRaw(1), revision_id: "canonical-1", semantic_configuration_fingerprint: "a".repeat(64) }
+        : { generation: 1, canonical_revision_id: "canonical-1" };
+    return Promise.resolve({ canonical_configuration_api_version: 3, operation, result });
+  });
+  const client = CA_API.createSetupWizardClient({ connection, configEntryId: "entry-setup" });
+
+  await client.validateDraft({ draft_id: "draft-real" });
+  await client.canonicalizeDraft({ draft_id: "draft-real" });
+  await client.activateRevision({ revision_id: "canonical-1" });
+
+  assert.deepEqual(connection.sent.map((message) => message.type), [
+    "controlel/configuration/v3/validate",
+    "controlel/configuration/v3/canonicalize",
+    "controlel/configuration/v3/activate",
+  ]);
 });

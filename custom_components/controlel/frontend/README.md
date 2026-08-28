@@ -2,8 +2,8 @@
 
 This directory contains the dependency-free Home Assistant panel and its
 development/demo harness. The production panel uses Home Assistant's
-authenticated WebSocket connection for read-only Frontend API v1 projections
-and Setup Write API v1 draft/validation operations. Mock data is never used by
+authenticated WebSocket connection for read-only Frontend API v1 projections,
+read-only setup discovery, and Canonical configuration v3 lifecycle operations. Mock data is never used by
 the setup wizard and is not packaged in the HACS release.
 
 ## Run
@@ -31,8 +31,8 @@ Navigation is hash-based (`#/route`), so deep links and back/forward work.
 
 ## Setup wizard
 
-The wizard is a 4-step flow: real discovery → zone → sensor & heat-source
-targets → review and backend validation.
+The wizard is a 5-step flow: real discovery → zone → sensor & heat-source
+targets → heating settings → review and canonical-v3 lifecycle actions.
 
 - Discovery and recommendations come from the existing `SetupHostService`
   through the authenticated HA transport.
@@ -40,24 +40,26 @@ targets → review and backend validation.
   reason codes.
 - Important bindings (primary temperature sensor, heat source) require
   explicit confirmation; switching candidates resets the confirmation.
-- **Save and finish later** creates the next persisted draft revision.
+- **Save Draft** creates or updates the same canonical-v3 draft surface used by
+  native Home Assistant Configure. A greenfield draft is first persisted only
+  after required stable bindings have been explicitly confirmed.
 - The browser stores only the draft identifier needed to request a backend
   reopen; the backend draft remains authoritative.
-- Validation messages and readiness are returned by the backend for the exact
-  persisted revision. Backend failures remain explicit errors.
-- No activate, canonicalize, runtime-control, or HA device-service action is
-  exposed by the wizard client.
+- Validation evidence applies to one exact persisted revision. Canonicalize
+  creates an immutable candidate but does not activate it; Activate remains a
+  separate protected backend transition. Backend failures remain explicit.
+- No runtime-control or HA device-service action is exposed by the wizard.
 
 An incomplete Heating module surfaces **Continue setup** actions (Overview,
 Modules, Heating, Settings) that open the wizard. Starting discovery reopens a
-known persisted draft or creates a new incomplete backend draft.
+known persisted canonical-v3 draft or clones active canonical-v3 authority for editing.
 
 ## Files
 
 | File | Purpose |
 | --- | --- |
 | `ha-panel.js` | Home Assistant panel entrypoint; loads production runtime assets only |
-| `api-client.js` | Authenticated Frontend API v1 and setup-only draft client/adapters |
+| `api-client.js` | Authenticated Frontend API v1, setup discovery, and canonical-v3 lifecycle adapters |
 | `i18n.js` | English/Czech localization foundation |
 | `index.html` | Application shell entry (all views + hosted wizard) |
 | `wizard.html` | Standalone setup wizard page (original entry point) |
@@ -83,9 +85,9 @@ node --test tests/*.test.js
 ```
 
 Covered: navigation and route fallback, module states, diagnostics filtering,
-real setup request mapping, discovery response rendering, draft
-create/reopen/update/validate, explicit backend errors, no mock fallback, and
-absence of activation/runtime calls.
+real setup request mapping, discovery response rendering, cross-client draft
+resume, canonical create/edit/update/validate/canonicalize/activate boundaries,
+explicit backend errors, and no mock fallback.
 
 ## Architecture notes
 
@@ -102,6 +104,6 @@ absence of activation/runtime calls.
 
 ## Non-goals
 
-This milestone does not activate configuration, change active configuration,
-control devices, or alter runtime heating behavior. Canonicalization and
-activation remain outside the frontend setup client.
+The Wizard supports the existing protected canonical-v3 activation lifecycle.
+It does not directly control devices, infer physical operation, implement
+multi-zone configuration, or bypass backend validation and source safety.

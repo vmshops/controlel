@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime
+from importlib import metadata
 from typing import Any
 
 import voluptuous as vol
@@ -22,7 +23,7 @@ from controlel.infrastructure.home_assistant import (
     SetupStorageIntegrityError,
 )
 
-from .const import DOMAIN
+from .const import DOMAIN, INTEGRATION_VERSION
 from .setup_backend import (
     async_get_setup_backend,
     async_get_setup_service,
@@ -392,6 +393,8 @@ async def _get_discovery(service: HeatingSetupHostService, msg: dict[str, Any]) 
 
 async def _get_defaults(_service: HeatingSetupHostService, _msg: dict[str, Any]) -> object:
     return {
+        "core_version": metadata.version("controlel"),
+        "integration_version": INTEGRATION_VERSION,
         "settings": canonical_heating_setup_defaults(),
         "simple_switch": {
             "source_control_mode": "simple",

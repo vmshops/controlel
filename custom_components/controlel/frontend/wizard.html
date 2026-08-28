@@ -12,7 +12,7 @@
       <span class="app-logo" aria-hidden="true">C</span>
       <div>
         <h1 data-i18n="page.wizard_header">Controlel Setup</h1>
-        <p class="app-subtitle">Heating module · Real backend setup drafts · No activation</p>
+        <p class="app-subtitle">Heating module · Canonical v3 lifecycle · Explicit activation</p>
       </div>
     </div>
     <div id="draft-status" class="draft-status" hidden></div>
@@ -34,21 +34,29 @@
       new window.CA_API.ApiError("disconnected", "No authenticated Home Assistant setup connection is available")
     );
     const setupClient = setupEnvironment.available
-      ? window.CA_API.createSetupWriteClient({
+      ? window.CA_API.createSetupWizardClient({
           connection: setupEnvironment.connection,
           configEntryId: setupEnvironment.configEntryId,
         })
       : {
           discover: unavailable,
+          defaults: unavailable,
           recommendations: unavailable,
+          listDrafts: unavailable,
+          readActive: unavailable,
           startDraft: unavailable,
+          editDraft: unavailable,
           reopenDraft: unavailable,
           updateDraft: unavailable,
           validateDraft: unavailable,
+          canonicalizeDraft: unavailable,
+          activateRevision: unavailable,
+          abandonDraft: unavailable,
         };
     window.CONTROLEL_SETUP_WIZARD = window.CA_WIZARD.createSetupWizard({
       client: setupClient,
       configEntryId: setupEnvironment.configEntryId || "unavailable",
+      actor: `home_assistant:${setupEnvironment.userId || "admin"}`,
       root: document,
       storage: window.localStorage,
     });

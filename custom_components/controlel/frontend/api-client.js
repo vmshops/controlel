@@ -10,8 +10,9 @@
  * Responsibilities:
  *   - send the four read-only Frontend API v1 commands
  *     (controlel/frontend_api/v1/{overview,heating,diagnostics,setup});
- *   - send the non-activating Setup Write API v1 discovery, recommendation,
- *     draft, reopen, update, and validation commands;
+ *   - use Setup Write API v1 only for read-only discovery, recommendations,
+ *     and canonical defaults;
+ *   - send every configuration mutation through Canonical configuration v3;
  *   - normalize + validate each response into a stable model shape
  *     (unknown/null backend values stay null — nothing is invented);
  *   - expose a data source with explicit per-domain states:
@@ -33,15 +34,23 @@
     setup: "controlel/frontend_api/v1/setup",
   };
 
-  const SETUP_WRITE_COMMANDS = {
+  const SETUP_READ_COMMANDS = {
     discovery: "controlel/setup/write/v1/discovery",
     defaults: "controlel/setup/write/v1/defaults",
     recommendations: "controlel/setup/write/v1/recommendations",
-    start: "controlel/setup/write/v1/start",
-    reopen: "controlel/setup/write/v1/reopen",
-    update: "controlel/setup/write/v1/update",
-    validate: "controlel/setup/write/v1/validate",
-    delete: "controlel/setup/write/v1/delete",
+  };
+
+  const CONFIGURATION_V3_COMMANDS = {
+    active: "controlel/configuration/v3/active",
+    start: "controlel/configuration/v3/start",
+    edit: "controlel/configuration/v3/edit",
+    draft: "controlel/configuration/v3/draft",
+    drafts: "controlel/configuration/v3/drafts",
+    abandon: "controlel/configuration/v3/abandon",
+    update: "controlel/configuration/v3/update",
+    validate: "controlel/configuration/v3/validate",
+    canonicalize: "controlel/configuration/v3/canonicalize",
+    activate: "controlel/configuration/v3/activate",
   };
 
   const DOMAINS = Object.keys(COMMANDS);
@@ -393,51 +402,93 @@
     return {
       settings: { ..._obj(r.settings, "setup defaults.settings") },
       simple_switch: { ..._obj(r.simple_switch, "setup defaults.simple_switch") },
+      core_version: _strOrNull(r.core_version),
+      integration_version: _strOrNull(r.integration_version),
     };
   }
 
-  function normalizeDeletedDraft(raw) {
-    const r = _obj(raw, "deleted setup draft");
-    return { draft_id: r.draft_id, deleted_revision: r.deleted_revision };
+  function normalizeCanonicalDraft(raw) {
+    const r = _obj(raw, "canonical v3 draft");
+    if (r.schema_version !== 3) {
+      throw new ApiError("invalid_response", "Canonical draft must use schema v3", "setup");
+    }
+    return {
+      ...r,
+      draft_id: r.draft_id,
+      revision: r.revision,
+      base_active_revision_id: _strOrNull(r.base_active_revision_id),
+      base_active_generation: r.base_active_generation,
+      heating: { ..._obj(r.heating, "canonical v3 draft.heating") },
+      diagnostics: { ..._obj(r.diagnostics, "canonical v3 draft.diagnostics") },
+      notifications: { ..._obj(r.notifications, "canonical v3 draft.notifications") },
+    };
   }
 
-  function normalizeSetupSession(raw) {
-    const r = _obj(raw, "setup session");
+  function normalizeCanonicalValidation(raw) {
+    const r = _obj(raw, "canonical v3 validation");
     return {
       ...r,
       draft_id: r.draft_id,
       draft_revision: r.draft_revision,
-      settings: { ..._obj(r.settings, "setup session.settings") },
-      selections: _arr(r.selections, "setup session.selections").map((item) => ({
-        ..._obj(item, "setup session selection"),
+      activation_ready: Boolean(r.activation_ready),
+      issue_codes: _arr(r.issue_codes, "canonical v3 validation.issue_codes").slice(),
+      reference_health: _arr(r.reference_health, "canonical v3 validation.reference_health").map((item) => ({
+        ..._obj(item, "canonical v3 reference health"),
       })),
-      recommendations: normalizeRecommendations(r.recommendations),
-      validation_issues: _arr(r.validation_issues, "setup session.validation_issues").map((item) => ({
-        ..._obj(item, "setup validation issue"),
-      })),
-      discovery: normalizeDiscoverySnapshot(r.discovery),
-      canonical_revision_id: _strOrNull(r.canonical_revision_id),
-      active_revision_id: _strOrNull(r.active_revision_id),
     };
   }
 
-  const SETUP_RESULT_NORMALIZERS = {
+  function normalizeCanonicalRevision(raw) {
+    const r = _obj(raw, "canonical v3 revision");
+    if (r.schema_version !== 3) {
+      throw new ApiError("invalid_response", "Canonical revision must use schema v3", "setup");
+    }
+    return { ...r };
+  }
+
+  function normalizeCanonicalActive(raw) {
+    const r = _obj(raw, "active canonical v3 configuration");
+    return {
+      ...r,
+      active_reference: { ..._obj(r.active_reference, "active canonical v3 reference") },
+      canonical_revision: normalizeCanonicalRevision(r.canonical_revision),
+      configuration_scopes: { ..._obj(r.configuration_scopes, "active canonical v3 scopes") },
+    };
+  }
+
+  function normalizeCanonicalAbandon(raw) {
+    const r = _obj(raw, "abandoned canonical v3 draft");
+    return { draft_id: r.draft_id, abandoned_revision: r.abandoned_revision };
+  }
+
+  function normalizeCanonicalActivation(raw) {
+    return { ..._obj(raw, "canonical v3 activation") };
+  }
+
+  const SETUP_READ_NORMALIZERS = {
     discovery: normalizeDiscoverySnapshot,
     defaults: normalizeSetupDefaults,
     recommendations: normalizeRecommendations,
-    start: normalizeSetupSession,
-    reopen: normalizeSetupSession,
-    update: normalizeSetupSession,
-    validate: normalizeSetupSession,
-    delete: normalizeDeletedDraft,
+  };
+
+  const CONFIGURATION_V3_NORMALIZERS = {
+    active: normalizeCanonicalActive,
+    start: normalizeCanonicalDraft,
+    edit: normalizeCanonicalDraft,
+    draft: normalizeCanonicalDraft,
+    drafts: (raw) => _arr(raw, "canonical v3 drafts").map(normalizeCanonicalDraft),
+    abandon: normalizeCanonicalAbandon,
+    update: normalizeCanonicalDraft,
+    validate: normalizeCanonicalValidation,
+    canonicalize: normalizeCanonicalRevision,
+    activate: normalizeCanonicalActivation,
   };
 
   /**
-   * Create the authenticated, setup-only write client. It exposes draft and
-   * validation operations only: there is deliberately no canonicalize,
-   * activate, runtime, or Home Assistant service-call method.
+   * Create the authenticated setup-wizard client. Discovery stays read-only
+   * Setup API v1; canonical v3 is the sole configuration write authority.
    */
-  function createSetupWriteClient({ connection, configEntryId, timeoutMs = 15000 }) {
+  function createSetupWizardClient({ connection, configEntryId, timeoutMs = 15000 }) {
     if (!connection || typeof connection.sendMessagePromise !== "function") {
       throw new ApiError("disconnected", "No Home Assistant connection is available");
     }
@@ -445,7 +496,7 @@
       throw new ApiError("disconnected", "A Controlel config_entry_id is required");
     }
 
-    function call(operation, payload) {
+    function call(commandSet, normalizers, versionField, expectedVersion, operation, payload) {
       return new Promise((resolve, reject) => {
         let settled = false;
         const timer = setTimeout(() => {
@@ -468,7 +519,7 @@
 
         const message = {
           ...(payload && typeof payload === "object" ? payload : {}),
-          type: SETUP_WRITE_COMMANDS[operation],
+          type: commandSet[operation],
           config_entry_id: configEntryId,
         };
         try {
@@ -476,10 +527,10 @@
             (raw) => {
               try {
                 const envelope = _obj(raw, `setup ${operation} response`);
-                if (envelope.setup_write_api_version !== 1 || envelope.operation !== operation) {
+                if (envelope[versionField] !== expectedVersion || envelope.operation !== operation) {
                   throw new ApiError("invalid_response", `Unsupported setup ${operation} response`, "setup");
                 }
-                succeed(SETUP_RESULT_NORMALIZERS[operation](envelope.result));
+                succeed(normalizers[operation](envelope.result));
               } catch (error) {
                 fail(error instanceof ApiError ? error : new ApiError("invalid_response", "Unexpected setup response shape", "setup"));
               }
@@ -501,14 +552,19 @@
     }
 
     return {
-      discover: (request) => call("discovery", request),
-      defaults: () => call("defaults", {}),
-      recommendations: (request) => call("recommendations", request),
-      startDraft: (request) => call("start", request),
-      reopenDraft: (request) => call("reopen", request),
-      updateDraft: (request) => call("update", request),
-      validateDraft: (request) => call("validate", request),
-      deleteDraft: (request) => call("delete", request),
+      discover: (request) => call(SETUP_READ_COMMANDS, SETUP_READ_NORMALIZERS, "setup_write_api_version", 1, "discovery", request),
+      defaults: () => call(SETUP_READ_COMMANDS, SETUP_READ_NORMALIZERS, "setup_write_api_version", 1, "defaults", {}),
+      recommendations: (request) => call(SETUP_READ_COMMANDS, SETUP_READ_NORMALIZERS, "setup_write_api_version", 1, "recommendations", request),
+      readActive: (request) => call(CONFIGURATION_V3_COMMANDS, CONFIGURATION_V3_NORMALIZERS, "canonical_configuration_api_version", 3, "active", request),
+      startDraft: (request) => call(CONFIGURATION_V3_COMMANDS, CONFIGURATION_V3_NORMALIZERS, "canonical_configuration_api_version", 3, "start", request),
+      editDraft: (request) => call(CONFIGURATION_V3_COMMANDS, CONFIGURATION_V3_NORMALIZERS, "canonical_configuration_api_version", 3, "edit", request),
+      reopenDraft: (request) => call(CONFIGURATION_V3_COMMANDS, CONFIGURATION_V3_NORMALIZERS, "canonical_configuration_api_version", 3, "draft", request),
+      listDrafts: () => call(CONFIGURATION_V3_COMMANDS, CONFIGURATION_V3_NORMALIZERS, "canonical_configuration_api_version", 3, "drafts", {}),
+      abandonDraft: (request) => call(CONFIGURATION_V3_COMMANDS, CONFIGURATION_V3_NORMALIZERS, "canonical_configuration_api_version", 3, "abandon", request),
+      updateDraft: (request) => call(CONFIGURATION_V3_COMMANDS, CONFIGURATION_V3_NORMALIZERS, "canonical_configuration_api_version", 3, "update", request),
+      validateDraft: (request) => call(CONFIGURATION_V3_COMMANDS, CONFIGURATION_V3_NORMALIZERS, "canonical_configuration_api_version", 3, "validate", request),
+      canonicalizeDraft: (request) => call(CONFIGURATION_V3_COMMANDS, CONFIGURATION_V3_NORMALIZERS, "canonical_configuration_api_version", 3, "canonicalize", request),
+      activateRevision: (request) => call(CONFIGURATION_V3_COMMANDS, CONFIGURATION_V3_NORMALIZERS, "canonical_configuration_api_version", 3, "activate", request),
     };
   }
 
@@ -549,6 +605,7 @@
       available: hasConnection && Boolean(configEntryId),
       connection: hasConnection ? connection : null,
       configEntryId,
+      userId: hass && hass.user && typeof hass.user.id === "string" ? hass.user.id : null,
       reason: !hasConnection ? "no_ha_connection" : !configEntryId ? "missing_config_entry_id" : null,
     };
   }
@@ -717,7 +774,8 @@
 
   global.CA_API = {
     COMMANDS,
-    SETUP_WRITE_COMMANDS,
+    SETUP_READ_COMMANDS,
+    CONFIGURATION_V3_COMMANDS,
     DOMAINS,
     SEVERITY_LEVEL,
     ApiError,
@@ -727,9 +785,11 @@
     normalizeSetup,
     normalizeDiscoverySnapshot,
     normalizeRecommendations,
-    normalizeSetupSession,
+    normalizeCanonicalDraft,
+    normalizeCanonicalValidation,
+    normalizeCanonicalRevision,
     createFrontendApiClient,
-    createSetupWriteClient,
+    createSetupWizardClient,
     detectHaEnvironment,
     createRealDataSource,
     mockToModels,

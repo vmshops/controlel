@@ -967,14 +967,14 @@
     );
     let mode;
     let dataSource = null;
-    let setupWriteClient = null;
+    let setupWizardClient = null;
 
     if (env.available) {
       mode = "real";
       try {
         const client = CA_API.createFrontendApiClient({ connection: env.connection, configEntryId: env.configEntryId });
         dataSource = CA_API.createRealDataSource(client);
-        setupWriteClient = CA_API.createSetupWriteClient({ connection: env.connection, configEntryId: env.configEntryId });
+        setupWizardClient = CA_API.createSetupWizardClient({ connection: env.connection, configEntryId: env.configEntryId });
       } catch (_err) {
         mode = "unavailable";
         dataSource = null;
@@ -985,10 +985,11 @@
       mode = "unavailable";
     }
 
-    const setupWizard = setupWriteClient && global.CA_WIZARD && typeof global.CA_WIZARD.createSetupWizard === "function"
+    const setupWizard = setupWizardClient && global.CA_WIZARD && typeof global.CA_WIZARD.createSetupWizard === "function"
       ? global.CA_WIZARD.createSetupWizard({
-          client: setupWriteClient,
+          client: setupWizardClient,
           configEntryId: env.configEntryId,
+          actor: `home_assistant:${env.userId || "admin"}`,
           root,
           storage: global.localStorage || null,
         })

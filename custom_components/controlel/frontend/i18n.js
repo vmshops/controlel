@@ -186,7 +186,7 @@
         retained_total: "Retained / total",
       },
       settings: {
-        subtitle: "Setup drafts and validation only — activation and runtime control are not available.",
+        subtitle: "Canonical-v3 setup lifecycle — runtime device control is not available here.",
         overview: "Settings overview",
         heating_config: "Heating configuration",
         heating_config_desc: "Zone, sensor and heat source bindings for the heating module.",
@@ -200,8 +200,8 @@
         advanced_desc: "Advanced options and prototype diagnostics (placeholder).",
         placeholder: "Placeholder",
         note:
-          "The Heating configuration row reflects the real setup readiness state. The setup wizard writes drafts " +
-          "and validation evidence only; other rows are placeholders.",
+          "The Heating configuration row reflects the real setup readiness state. The setup wizard uses the " +
+          "protected canonical-v3 lifecycle; other rows are placeholders.",
       },
       language: {
         auto: "Auto",
@@ -221,7 +221,7 @@
         validation: "Validation messages",
         no_validation: "No validation messages reported.",
         readonly_note:
-          "The wizard writes setup drafts and validation evidence only. It does not activate configuration or control devices.",
+          "The wizard uses canonical configuration v3. Save, validation, canonicalization, and activation remain explicit separate actions.",
         heating: {
           unsupported_module_contract: "This draft uses an unsupported Heating setup contract.",
           invalid_setting: "The setting “{field}” is missing or invalid.",
@@ -263,7 +263,7 @@
       },
       panel: {
         tagline: "Heating control platform",
-        readonly_footer: "Setup drafts only · no activation or runtime control",
+        readonly_footer: "Canonical v3 setup · explicit activation · no device control",
         overall_status: "Overall status",
         load_error: "Controlel panel failed to load",
         wizard_demo_label:
@@ -407,7 +407,7 @@
         source_enable_target: "Heat source enable target",
         source_disable_target: "Heat source disable target",
         review_persisted_lead:
-          "Review the persisted draft and request backend validation. This flow does not activate configuration.",
+          "Review the canonical-v3 draft, then explicitly save, validate, canonicalize, and activate it.",
         unsaved_report: "Unsaved edits are not part of the backend validation report shown below.",
         blocking_count: "{count} blocking",
         warning_count: "{count} warnings",
@@ -437,6 +437,7 @@
         validation_issue_fallback: "Backend validation reported an issue. Review its code and technical details.",
         validation_path: "Field: {path}",
         ready_not_active: "Backend validation found no blocking issues for this saved draft. The draft is Ready, but it is not activated.",
+        not_ready_not_saved: "This configuration has not been saved as a canonical-v3 draft yet.",
         not_ready_unsaved: "This draft has unsaved edits. Save and validate them before it can be Ready.",
         not_ready_validation: "Backend validation is {status}. Validate the saved draft to establish readiness.",
         not_ready_blocking: "Backend validation reports {count} blocking issue(s). The draft is not Ready.",
@@ -446,6 +447,11 @@
         blocking_issues: "Blocking issues",
         validation_warnings: "Warnings",
         no_blocking_issues: "No blocking issues were reported by backend validation.",
+        complete_before_save: "Select and confirm a stable area, temperature sensor, and heat-source switch before the first canonical-v3 save.",
+        canonical_v3_draft: "Canonical v3 draft",
+        canonicalize: "Canonicalize",
+        canonicalized_not_active: "Canonical revision {revision} was created. Active configuration is still unchanged.",
+        activation_complete: "The canonical revision was activated through the protected backend lifecycle.",
       },
     },
 
@@ -603,7 +609,7 @@
         retained_total: "Uloženo / celkem",
       },
       settings: {
-        subtitle: "Pouze koncepty nastavení a validace — aktivace ani řízení běhu nejsou dostupné.",
+        subtitle: "Životní cyklus nastavení canonical-v3 — přímé řízení zařízení zde není dostupné.",
         overview: "Přehled nastavení",
         heating_config: "Konfigurace topení",
         heating_config_desc: "Propojení zóny, senzoru a zdroje tepla pro modul topení.",
@@ -617,8 +623,8 @@
         advanced_desc: "Pokročilé možnosti a diagnostika prototypu (rezervováno).",
         placeholder: "Rezervováno",
         note:
-          "Řádek Konfigurace topení odráží skutečný stav připravenosti. Průvodce zapisuje pouze koncepty " +
-          "a validační podklady; ostatní řádky jsou rezervované.",
+          "Řádek Konfigurace topení odráží skutečný stav připravenosti. Průvodce používá chráněný životní " +
+          "cyklus canonical-v3; ostatní řádky jsou rezervované.",
       },
       language: {
         auto: "Automaticky",
@@ -638,7 +644,7 @@
         validation: "Zprávy validace",
         no_validation: "Nebyly hlášeny žádné zprávy validace.",
         readonly_note:
-          "Průvodce zapisuje pouze koncepty nastavení a validační podklady. Neaktivuje konfiguraci ani neovládá zařízení.",
+          "Průvodce používá kanonickou konfiguraci v3. Uložení, validace, kanonizace a aktivace zůstávají samostatnými kroky.",
         heating: {
           unsupported_module_contract: "Tento koncept používá nepodporovaný kontrakt nastavení topení.",
           invalid_setting: "Nastavení „{field}“ chybí nebo je neplatné.",
@@ -680,7 +686,7 @@
       },
       panel: {
         tagline: "Platforma pro řízení topení",
-        readonly_footer: "Pouze koncepty nastavení · bez aktivace a řízení běhu",
+        readonly_footer: "Kanonické nastavení v3 · výslovná aktivace · bez ovládání zařízení",
         overall_status: "Celkový stav",
         load_error: "Panel Controlel se nepodařilo načíst",
         wizard_demo_label:
@@ -824,7 +830,7 @@
         source_enable_target: "Cíl povolení zdroje tepla",
         source_disable_target: "Cíl zakázání zdroje tepla",
         review_persisted_lead:
-          "Zkontrolujte uložený koncept a vyžádejte validaci backendu. Tento postup konfiguraci neaktivuje.",
+          "Zkontrolujte koncept canonical-v3 a poté jej samostatně uložte, validujte, kanonizujte a aktivujte.",
         unsaved_report: "Neuložené úpravy nejsou součástí níže zobrazeného validačního protokolu backendu.",
         blocking_count: "Blokující: {count}",
         warning_count: "Varování: {count}",
@@ -854,6 +860,7 @@
         validation_issue_fallback: "Backend při validaci nahlásil problém. Zkontrolujte jeho kód a technické podrobnosti.",
         validation_path: "Pole: {path}",
         ready_not_active: "Validace backendu nenašla u tohoto uloženého konceptu žádné blokující problémy. Koncept je připravený, ale není aktivovaný.",
+        not_ready_not_saved: "Tato konfigurace ještě nebyla uložena jako koncept canonical-v3.",
         not_ready_unsaved: "Koncept obsahuje neuložené úpravy. Před dosažením připravenosti je uložte a validujte.",
         not_ready_validation: "Stav validace backendu je {status}. Připravenost ověříte validací uloženého konceptu.",
         not_ready_blocking: "Validace backendu hlásí blokující problémy ({count}). Koncept není připravený.",
@@ -863,6 +870,11 @@
         blocking_issues: "Blokující problémy",
         validation_warnings: "Varování",
         no_blocking_issues: "Validace backendu nenahlásila žádné blokující problémy.",
+        complete_before_save: "Před prvním uložením canonical-v3 vyberte a potvrďte stabilní oblast, teplotní senzor a spínač zdroje tepla.",
+        canonical_v3_draft: "Koncept canonical v3",
+        canonicalize: "Kanonizovat",
+        canonicalized_not_active: "Byla vytvořena kanonická revize {revision}. Aktivní konfigurace se zatím nezměnila.",
+        activation_complete: "Kanonická revize byla aktivována přes chráněný životní cyklus backendu.",
       },
     },
   };

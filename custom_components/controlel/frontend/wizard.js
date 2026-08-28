@@ -1,10 +1,9 @@
 /*
- * Controlel setup wizard — real Setup Write API v1 consumer.
+ * Controlel setup wizard — canonical configuration v3 projection.
  *
- * The backend owns discovery, recommendations, draft persistence, and
- * validation. This file renders those contracts and submits explicit user
- * selections. It never activates/canonicalizes configuration, calls Home
- * Assistant services, or substitutes mock data after a backend failure.
+ * Discovery and recommendations remain read-only Setup API v1 contracts.
+ * Draft persistence, validation, canonicalization, and activation are the
+ * same canonical-v3 lifecycle used by native Home Assistant Configure.
  */
 (function (global) {
   "use strict";
@@ -57,6 +56,7 @@
 
   function isWizardCandidateCompatible(role, candidate) {
     if (!candidate) return false;
+    if (candidate.identity_quality !== "STABLE" || !candidate.native_id) return false;
     const locator = candidate.current_locator || "";
     const objectId = locator.includes(".") ? locator.slice(locator.indexOf(".") + 1) : "";
     if ((candidate.evidence && candidate.evidence.platform === "controlel") || objectId.startsWith("controlel_")) {
@@ -89,6 +89,10 @@
     });
   }
 
+  function deepCopy(value) {
+    return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
+  }
+
   function createSetupWizard(options) {
     const opts = options && typeof options === "object" ? options : {};
     const client = opts.client;
@@ -107,11 +111,12 @@
 
     const now = typeof opts.now === "function" ? opts.now : () => new Date().toISOString();
     const makeId = typeof opts.idFactory === "function" ? opts.idFactory : defaultId;
+    const actor = typeof opts.actor === "string" && opts.actor ? opts.actor : "home_assistant:admin";
     const confirmAction = typeof opts.confirm === "function"
       ? opts.confirm
       : (message) => typeof global.confirm === "function" && global.confirm(message);
     const storage = opts.storage || null;
-    const storageKey = `controlel.setup.draft.v1.${opts.configEntryId || "unknown"}`;
+    const storageKey = `controlel.configuration.draft.v3.${opts.configEntryId || "unknown"}`;
     const state = {
       step: 1,
       status: "idle",
@@ -120,12 +125,18 @@
       errorOperation: null,
       snapshot: null,
       recommendations: [],
-      configurationDefaults: { settings: {}, simple_switch: {} },
+      configurationDefaults: { settings: {}, simple_switch: {}, core_version: null, integration_version: null },
       session: null,
+      validation: null,
+      candidateRevision: null,
+      activation: null,
       dirty: false,
       lastSavedAt: null,
       expandedRoles: {},
-      draft: { areaId: null, selections: {}, confirmations: {}, settings: {} },
+      draft: {
+        areaId: null, selections: {}, confirmations: {}, settings: {}, areaTouched: false,
+        touchedRoles: {}, persistedReferences: {},
+      },
     };
 
     function storedDraftId() {
@@ -164,20 +175,53 @@
       return state.snapshot ? state.snapshot.objects.filter((item) => item.object_kind === AREA_KIND) : [];
     }
 
+    function matchingCandidate(role, reference) {
+      if (!reference) return null;
+      return recommendationCandidates(recommendation(role)).find((item) =>
+        (reference.native_id && item.native_id === reference.native_id) ||
+        (!reference.native_id && reference.current_locator && item.current_locator === reference.current_locator)
+      ) || null;
+    }
+
     function applySession(session) {
+      const zone = session.heating.zones[0];
+      const source = session.heating.heat_sources[0];
+      const globalConfiguration = session.heating.global;
+      const protection = source.protection;
       state.session = session;
-      state.snapshot = session.discovery;
-      state.recommendations = session.recommendations;
+      state.validation = null;
+      state.candidateRevision = null;
+      state.activation = null;
       state.draft.settings = {
-        ...state.configurationDefaults.settings,
-        ...session.settings,
+        target_temperature_celsius: zone.demand_policy.target_temperature_celsius,
+        primary_measurement_max_age_seconds: zone.demand_policy.primary_measurement_max_age_seconds,
+        heating_turn_on_differential_celsius: zone.demand_policy.heating_turn_on_differential_celsius,
+        heating_turn_off_differential_celsius: zone.demand_policy.heating_turn_off_differential_celsius,
+        heat_demand_confirmation_seconds: zone.demand_policy.heat_demand_confirmation_seconds,
+        maximum_future_skew_seconds: globalConfiguration.maximum_future_skew_seconds,
+        indeterminate_grace_period_seconds: protection.indeterminate_grace_period_seconds,
+        minimum_heating_on_seconds: protection.minimum_heating_on_seconds,
+        minimum_heating_off_seconds: protection.minimum_heating_off_seconds,
       };
-      state.draft.areaId = typeof session.settings.zone_id === "string" ? session.settings.zone_id : null;
+      const areaReference = zone.topology.area_reference;
+      state.draft.areaId = areaReference ? areaReference.native_id : null;
       state.draft.selections = {};
       state.draft.confirmations = {};
-      for (const selection of session.selections) {
-        if (selection.candidate_id) state.draft.selections[selection.role] = selection.candidate_id;
-        state.draft.confirmations[selection.role] = Boolean(selection.user_confirmed);
+      state.draft.areaTouched = false;
+      state.draft.touchedRoles = {};
+      const references = {
+        [PRIMARY_TEMPERATURE_ROLE]: zone.primary_temperature_sensor.provider_reference,
+        [SOURCE_ENABLE_TARGET_ROLE]: source.command_strategy.enable_permission.command_target_reference,
+        [SOURCE_DISABLE_TARGET_ROLE]: source.command_strategy.disable_permission.command_target_reference,
+      };
+      state.draft.persistedReferences = {
+        area: areaReference,
+        ...references,
+      };
+      for (const [role, reference] of Object.entries(references)) {
+        const matched = matchingCandidate(role, reference);
+        if (matched) state.draft.selections[role] = matched.candidate_id;
+        state.draft.confirmations[role] = Boolean(matched);
       }
       state.dirty = false;
       state.expandedRoles = {};
@@ -187,8 +231,10 @@
       return Boolean(
         state.session &&
         !state.dirty &&
-        state.session.validation_status === "CURRENT" &&
-        state.session.activation_ready
+        state.validation &&
+        state.validation.draft_id === state.session.draft_id &&
+        state.validation.draft_revision === state.session.revision &&
+        state.validation.activation_ready
       );
     }
 
@@ -203,38 +249,41 @@
       return key ? t(key) : role || t("common.unknown");
     }
 
-    function validationMessage(issue) {
-      const path = Array.isArray(issue.path) && issue.path.length
-        ? issue.path.join(".")
-        : t("common.unknown");
-      const parameters = {
-        ...(issue.parameters || {}),
-        field: path,
-        role: roleLabel(issue.module_role || (issue.parameters && issue.parameters.role)),
-      };
-      return CI18N && typeof CI18N.has === "function" && CI18N.has(issue.message_key)
-        ? t(issue.message_key, parameters)
-        : t("wizard.validation_issue_fallback");
-    }
-
-    function validationDetails(issue) {
-      const details = [];
-      if (Array.isArray(issue.path) && issue.path.length) {
-        details.push(t("wizard.validation_path", { path: issue.path.join(".") }));
-      }
-      if (
-        issue.suggested_action &&
-        CI18N &&
-        typeof CI18N.has === "function" &&
-        CI18N.has(`setup_action.${issue.suggested_action}`)
-      ) {
-        details.push(t(`setup_action.${issue.suggested_action}`));
-      }
-      return details.join(" · ");
-    }
-
     function requestContext() {
       return { snapshot_id: makeId("snapshot"), captured_at: now() };
+    }
+
+    function resetIntent() {
+      state.session = null;
+      state.validation = null;
+      state.candidateRevision = null;
+      state.activation = null;
+      state.draft = {
+        areaId: null,
+        selections: {},
+        confirmations: {},
+        settings: { ...state.configurationDefaults.settings },
+        areaTouched: false,
+        touchedRoles: {},
+        persistedReferences: {},
+      };
+      state.dirty = false;
+    }
+
+    function earliestCorrectionStep() {
+      const persisted = state.draft.persistedReferences;
+      if (state.session) {
+        if (persisted.area && !discoveredObject(persisted.area)) return 2;
+      } else if (!state.draft.areaId || !areas().some((item) => item.native_id === state.draft.areaId)) {
+        return 2;
+      }
+      const requiredRoles = [PRIMARY_TEMPERATURE_ROLE, SOURCE_ENABLE_TARGET_ROLE, SOURCE_DISABLE_TARGET_ROLE];
+      for (const role of requiredRoles) {
+        if (!state.draft.touchedRoles[role] && state.session && providerReference(persisted[role])) continue;
+        const selected = candidate(role, state.draft.selections[role]);
+        if (!isWizardCandidateCompatible(role, selected) || !state.draft.confirmations[role]) return 3;
+      }
+      return 5;
     }
 
     async function startDiscovery({ forceNewDraft = false } = {}) {
@@ -244,39 +293,51 @@
       render();
       const context = requestContext();
       try {
-        const [snapshot, recommendations, configurationDefaults] = await Promise.all([
+        const [snapshot, recommendations, configurationDefaults, drafts] = await Promise.all([
           client.discover(context),
           client.recommendations(context),
           client.defaults(),
+          client.listDrafts(),
         ]);
         state.snapshot = snapshot;
         state.recommendations = recommendations;
         state.configurationDefaults = configurationDefaults;
-        const existingDraftId = forceNewDraft ? null : storedDraftId();
-        let session;
-        if (existingDraftId) {
+        resetIntent();
+
+        let session = null;
+        const localDraftId = forceNewDraft ? null : storedDraftId();
+        const backendDraftIds = forceNewDraft ? [] : drafts.slice().sort((left, right) =>
+          String(right.updated_at).localeCompare(String(left.updated_at))
+        ).map((draft) => draft.draft_id);
+        const resumeDraftIds = [localDraftId, ...backendDraftIds]
+          .filter((draftId, index, all) => draftId && all.indexOf(draftId) === index);
+        for (const draftId of resumeDraftIds) {
           try {
-            session = await client.reopenDraft({ draft_id: existingDraftId, ...context });
+            session = await client.reopenDraft({ draft_id: draftId });
+            break;
           } catch (error) {
             const recoverableCodes = new Set(["not_found", "invalid_format", "setup_storage_integrity"]);
             if (!recoverableCodes.has(error && error.code)) throw error;
-            clearStoredDraftId();
+            if (draftId === localDraftId) clearStoredDraftId();
           }
         }
         if (!session) {
-          session = await client.startDraft({
-            draft_id: makeId("draft"),
-            module_instance_id: "main-heating",
-            created_at: context.captured_at,
-            snapshot_id: context.snapshot_id,
-            report_id: makeId("report"),
-            settings: { ...configurationDefaults.settings },
-            selections: [],
-          });
-          storeDraftId(session.draft_id);
+          try {
+            const active = await client.readActive(context);
+            session = await client.editDraft({
+              draft_id: makeId("wizard-edit-draft"),
+              created_at: context.captured_at,
+              expected_active_generation: active.active_reference.generation,
+            });
+          } catch (error) {
+            if (!new Set(["not_found", "setup_conflict"]).has(error && error.code)) throw error;
+          }
         }
-        applySession(session);
-        if (existingDraftId && storedDraftId() === existingDraftId) state.step = 5;
+        if (session) {
+          applySession(session);
+          storeDraftId(session.draft_id);
+          state.step = earliestCorrectionStep();
+        }
         state.status = "loaded";
       } catch (error) {
         state.status = "error";
@@ -288,8 +349,8 @@
 
     function startNewDraft() {
       clearStoredDraftId();
-      state.session = null;
-      state.draft = { areaId: null, selections: {}, confirmations: {}, settings: {} };
+      resetIntent();
+      state.step = 1;
       return startDiscovery({ forceNewDraft: true });
     }
 
@@ -301,16 +362,15 @@
       state.errorOperation = null;
       render();
       try {
-        const deleted = await client.deleteDraft({
+        const abandoned = await client.abandonDraft({
           draft_id: state.session.draft_id,
-          expected_revision: state.session.draft_revision,
+          expected_revision: state.session.revision,
         });
         clearStoredDraftId();
-        state.session = null;
-        state.draft = { areaId: null, selections: {}, confirmations: {}, settings: {} };
+        resetIntent();
         state.step = 1;
         await startDiscovery({ forceNewDraft: true });
-        return deleted;
+        return abandoned;
       } catch (error) {
         state.status = "error";
         state.error = error;
@@ -322,8 +382,11 @@
 
     function selectArea(areaId) {
       state.draft.areaId = areaId;
+      state.draft.areaTouched = true;
       state.expandedRoles = {};
       state.dirty = true;
+      state.validation = null;
+      state.candidateRevision = null;
       render();
     }
 
@@ -345,6 +408,7 @@
     function selectCandidate(role, candidateId) {
       state.draft.selections[role] = candidateId;
       state.draft.confirmations[role] = false;
+      state.draft.touchedRoles[role] = true;
       if (role === SOURCE_ENABLE_TARGET_ROLE || role === SOURCE_DISABLE_TARGET_ROLE) {
         const selected = candidate(role, candidateId);
         const paired = pairedSourceSelection(role, selected);
@@ -354,14 +418,18 @@
             : SOURCE_ENABLE_TARGET_ROLE;
           state.draft.selections[otherRole] = paired.candidate_id;
           state.draft.confirmations[otherRole] = false;
+          state.draft.touchedRoles[otherRole] = true;
         }
       }
       state.dirty = true;
+      state.validation = null;
+      state.candidateRevision = null;
       render();
     }
 
     function confirmCandidate(role, value) {
       state.draft.confirmations[role] = Boolean(value);
+      state.draft.touchedRoles[role] = true;
       if (role === SOURCE_ENABLE_TARGET_ROLE || role === SOURCE_DISABLE_TARGET_ROLE) {
         const selected = candidate(role, state.draft.selections[role]);
         const paired = pairedSourceSelection(role, selected);
@@ -371,50 +439,127 @@
             : SOURCE_ENABLE_TARGET_ROLE;
           if (state.draft.selections[otherRole] === paired.candidate_id) {
             state.draft.confirmations[otherRole] = Boolean(value);
+            state.draft.touchedRoles[otherRole] = true;
           }
         }
       }
       state.dirty = true;
+      state.validation = null;
+      state.candidateRevision = null;
       render();
     }
 
-    function draftSettings() {
-      const settings = {
-        ...state.configurationDefaults.settings,
-        ...state.session.settings,
-        ...state.draft.settings,
+    function discoveredObject(referenceLike) {
+      if (!referenceLike || !state.snapshot) return null;
+      return state.snapshot.objects.find((item) => {
+        if (referenceLike.object_kind && item.object_kind !== referenceLike.object_kind) return false;
+        if (referenceLike.native_id) return item.native_id === referenceLike.native_id;
+        return Boolean(referenceLike.current_locator && item.current_locator === referenceLike.current_locator);
+      }) || null;
+    }
+
+    function providerReference(referenceLike) {
+      const item = discoveredObject(referenceLike);
+      if (!item || item.identity_quality !== "STABLE" || !item.native_id) return null;
+      return {
+        provider: state.snapshot.provider,
+        provider_instance_id: state.snapshot.provider_instance_id,
+        object_kind: item.object_kind,
+        native_id: item.native_id,
+        identity_quality: item.identity_quality,
+        current_locator: item.current_locator,
+        device_registry_id: item.device_registry_id,
+        area_id: item.area_id,
+        floor_id: item.floor_id,
+        recovery_evidence: {},
       };
+    }
+
+    function selectedReference(role) {
+      return providerReference(candidate(role, state.draft.selections[role]));
+    }
+
+    function greenfieldBindings() {
       const area = areas().find((item) => item.native_id === state.draft.areaId);
-      if (area && area.native_id) {
-        settings.zone_id = area.native_id;
-        settings.zone_name = area.native_id;
-      }
       const sensor = candidate(PRIMARY_TEMPERATURE_ROLE, state.draft.selections[PRIMARY_TEMPERATURE_ROLE]);
-      if (sensor) {
-        const identity = sensor.native_id || sensor.current_locator;
-        if (identity) settings.sensor_id = identity;
-        if (sensor.current_locator || sensor.native_id) settings.sensor_name = sensor.current_locator || sensor.native_id;
-      }
-      const sourceEnable = candidate(
-        SOURCE_ENABLE_TARGET_ROLE,
-        state.draft.selections[SOURCE_ENABLE_TARGET_ROLE]
-      );
-      const sourceDisable = candidate(
-        SOURCE_DISABLE_TARGET_ROLE,
-        state.draft.selections[SOURCE_DISABLE_TARGET_ROLE]
-      );
+      const enable = candidate(SOURCE_ENABLE_TARGET_ROLE, state.draft.selections[SOURCE_ENABLE_TARGET_ROLE]);
+      const disable = candidate(SOURCE_DISABLE_TARGET_ROLE, state.draft.selections[SOURCE_DISABLE_TARGET_ROLE]);
+      const areaReference = providerReference(area);
+      const sensorReference = selectedReference(PRIMARY_TEMPERATURE_ROLE);
+      const enableReference = selectedReference(SOURCE_ENABLE_TARGET_ROLE);
+      const disableReference = selectedReference(SOURCE_DISABLE_TARGET_ROLE);
       if (
-        sourceEnable &&
-        sourceDisable &&
-        sameCandidateIdentity(sourceEnable, sourceDisable) &&
-        isWizardCandidateCompatible(SOURCE_ENABLE_TARGET_ROLE, sourceEnable) &&
-        isWizardCandidateCompatible(SOURCE_DISABLE_TARGET_ROLE, sourceDisable) &&
-        state.draft.confirmations[SOURCE_ENABLE_TARGET_ROLE] &&
-        state.draft.confirmations[SOURCE_DISABLE_TARGET_ROLE]
-      ) {
-        Object.assign(settings, state.configurationDefaults.simple_switch);
+        !areaReference || !sensorReference || !enableReference || !disableReference ||
+        !sameCandidateIdentity(enable, disable) ||
+        !state.draft.confirmations[PRIMARY_TEMPERATURE_ROLE] ||
+        !state.draft.confirmations[SOURCE_ENABLE_TARGET_ROLE] ||
+        !state.draft.confirmations[SOURCE_DISABLE_TARGET_ROLE]
+      ) return null;
+      return {
+        zone_display_name: area.current_locator || area.native_id,
+        primary_sensor_display_name: sensor.current_locator || sensor.native_id,
+        topology: { area_reference: areaReference, floor_reference: null },
+        primary_temperature_sensor_reference: sensorReference,
+        heat_source_display_name: enable.current_locator || enable.native_id,
+        heat_source_reference: enableReference,
+        command_strategy: {
+          mode: "simple",
+          enable_permission: { domain: "switch", service: "turn_on", command_target_reference: enableReference },
+          disable_permission: { domain: "switch", service: "turn_off", command_target_reference: disableReference },
+        },
+        observations: { reported_actuator_state_reference: enableReference, physical_operation_reference: null },
+      };
+    }
+
+    function configurationScopes(session) {
+      const scopes = {
+        heating: deepCopy(session.heating),
+        diagnostics: deepCopy(session.diagnostics),
+        notifications: deepCopy(session.notifications),
+      };
+      const zone = scopes.heating.zones[0];
+      const source = scopes.heating.heat_sources[0];
+      const settings = state.draft.settings;
+      zone.demand_policy.target_temperature_celsius = settings.target_temperature_celsius;
+      zone.demand_policy.primary_measurement_max_age_seconds = settings.primary_measurement_max_age_seconds;
+      zone.demand_policy.heating_turn_on_differential_celsius = settings.heating_turn_on_differential_celsius;
+      zone.demand_policy.heating_turn_off_differential_celsius = settings.heating_turn_off_differential_celsius;
+      zone.demand_policy.heat_demand_confirmation_seconds = settings.heat_demand_confirmation_seconds;
+      scopes.heating.global.maximum_future_skew_seconds = settings.maximum_future_skew_seconds;
+      source.protection.indeterminate_grace_period_seconds = settings.indeterminate_grace_period_seconds;
+      source.protection.minimum_heating_on_seconds = settings.minimum_heating_on_seconds;
+      source.protection.minimum_heating_off_seconds = settings.minimum_heating_off_seconds;
+      if (state.draft.areaTouched) {
+        zone.topology.area_reference = providerReference(
+          areas().find((item) => item.native_id === state.draft.areaId)
+        );
       }
-      return settings;
+      if (state.draft.touchedRoles[PRIMARY_TEMPERATURE_ROLE]) {
+        const reference = selectedReference(PRIMARY_TEMPERATURE_ROLE);
+        if (!reference || !state.draft.confirmations[PRIMARY_TEMPERATURE_ROLE]) throw new Error(t("wizard.complete_before_save"));
+        zone.primary_temperature_sensor.provider_reference = reference;
+        zone.primary_temperature_sensor.display_name = reference.current_locator || reference.native_id;
+      }
+      if (state.draft.touchedRoles[SOURCE_ENABLE_TARGET_ROLE] || state.draft.touchedRoles[SOURCE_DISABLE_TARGET_ROLE]) {
+        const enable = candidate(SOURCE_ENABLE_TARGET_ROLE, state.draft.selections[SOURCE_ENABLE_TARGET_ROLE]);
+        const disable = candidate(SOURCE_DISABLE_TARGET_ROLE, state.draft.selections[SOURCE_DISABLE_TARGET_ROLE]);
+        const enableReference = selectedReference(SOURCE_ENABLE_TARGET_ROLE);
+        const disableReference = selectedReference(SOURCE_DISABLE_TARGET_ROLE);
+        if (
+          !enableReference || !disableReference || !sameCandidateIdentity(enable, disable) ||
+          !state.draft.confirmations[SOURCE_ENABLE_TARGET_ROLE] ||
+          !state.draft.confirmations[SOURCE_DISABLE_TARGET_ROLE]
+        ) throw new Error(t("wizard.complete_before_save"));
+        source.display_name = enableReference.current_locator || enableReference.native_id;
+        source.provider_reference = enableReference;
+        source.command_strategy = {
+          mode: "simple",
+          enable_permission: { domain: "switch", service: "turn_on", command_target_reference: enableReference },
+          disable_permission: { domain: "switch", service: "turn_off", command_target_reference: disableReference },
+        };
+        source.observations.reported_actuator_state_reference = enableReference;
+      }
+      return scopes;
     }
 
     function setNumericSetting(name, rawValue) {
@@ -422,34 +567,44 @@
       if (!Number.isFinite(value)) return;
       state.draft.settings[name] = value;
       state.dirty = true;
+      state.validation = null;
+      state.candidateRevision = null;
       renderDraftStatus();
     }
 
-    function draftSelections() {
-      return Object.entries(state.draft.selections).map(([role, candidateId]) => ({
-        role,
-        candidate_id: candidateId,
-        user_confirmed: Boolean(state.draft.confirmations[role]),
-      }));
-    }
-
     async function saveDraft() {
-      if (!state.session || state.status === "saving") return null;
+      if (state.status === "saving") return null;
       state.status = "saving";
       state.error = null;
       state.errorOperation = null;
       render();
       const updatedAt = now();
       try {
+        let base = state.session;
+        const desiredSettings = { ...state.draft.settings };
+        if (!base) {
+          const bindings = greenfieldBindings();
+          if (!bindings) {
+            state.step = earliestCorrectionStep();
+            state.status = "loaded";
+            render();
+            return null;
+          }
+          base = await client.startDraft({
+            draft_id: makeId("wizard-greenfield-draft"),
+            created_at: updatedAt,
+            snapshot_id: state.snapshot.snapshot_id,
+            bindings,
+          });
+          storeDraftId(base.draft_id);
+          applySession(base);
+          state.draft.settings = desiredSettings;
+        }
         const session = await client.updateDraft({
-          draft_id: state.session.draft_id,
-          expected_revision: state.session.draft_revision,
+          draft_id: base.draft_id,
+          expected_revision: base.revision,
           updated_at: updatedAt,
-          snapshot_id: state.snapshot.snapshot_id,
-          report_id: makeId("report"),
-          settings: draftSettings(),
-          selections: draftSelections(),
-          preferred_area_id: state.draft.areaId,
+          configuration_scopes: configurationScopes(base),
         });
         applySession(session);
         state.lastSavedAt = updatedAt;
@@ -481,10 +636,9 @@
           snapshot_id: state.snapshot.snapshot_id,
           evaluated_at: evaluatedAt,
           report_id: makeId("report"),
-          preferred_area_id: state.draft.areaId,
         });
-        applySession(validated);
-        state.lastSavedAt = evaluatedAt;
+        state.validation = validated;
+        state.candidateRevision = null;
         state.status = "loaded";
       } catch (error) {
         state.status = "error";
@@ -492,6 +646,70 @@
         state.errorOperation = "validate";
       }
       render();
+    }
+
+    async function canonicalizeDraft() {
+      if (!draftIsReady() || state.status === "saving") return null;
+      state.status = "saving";
+      state.error = null;
+      state.errorOperation = null;
+      render();
+      const createdAt = now();
+      try {
+        const revision = await client.canonicalizeDraft({
+          draft_id: state.session.draft_id,
+          validation_report_id: state.validation.report_id,
+          revision_id: makeId("wizard-canonical-v3"),
+          snapshot_id: state.snapshot.snapshot_id,
+          created_at: createdAt,
+          actor,
+          source: "controlel_setup_wizard",
+          change_kind: state.session.lineage.authoring_origin === "canonical_v2_conversion"
+            ? "MIGRATE"
+            : state.session.base_active_revision_id ? "UPDATE" : "CREATE",
+          reason: "guided_setup_wizard",
+          core_version: state.configurationDefaults.core_version,
+          integration_version: state.configurationDefaults.integration_version,
+        });
+        state.candidateRevision = revision;
+        state.status = "loaded";
+        render();
+        return revision;
+      } catch (error) {
+        state.status = "error";
+        state.error = error;
+        state.errorOperation = "canonicalize";
+        render();
+        return null;
+      }
+    }
+
+    async function activateRevision() {
+      if (!state.candidateRevision || state.status === "saving") return null;
+      state.status = "saving";
+      state.error = null;
+      state.errorOperation = null;
+      render();
+      try {
+        const activation = await client.activateRevision({
+          revision_id: state.candidateRevision.revision_id,
+          semantic_configuration_fingerprint: state.candidateRevision.semantic_configuration_fingerprint,
+          expected_active_revision_id: state.session.base_active_revision_id,
+          expected_active_generation: state.session.base_active_generation,
+          attempt_id: makeId("wizard-activation"),
+        });
+        state.activation = activation;
+        clearStoredDraftId();
+        state.status = "loaded";
+        render();
+        return activation;
+      } catch (error) {
+        state.status = "error";
+        state.error = error;
+        state.errorOperation = "activate";
+        render();
+        return null;
+      }
     }
 
     function formatTime(value) {
@@ -607,8 +825,8 @@
             kvRow(t("wizard.snapshot_id"), snapshot.snapshot_id),
             kvRow(t("wizard.captured_at"), formatTime(snapshot.captured_at)),
             kvRow(t("wizard.fingerprint"), snapshot.content_fingerprint),
-            kvRow(t("wizard.draft"), state.session.draft_id),
-            kvRow(t("wizard.revision"), String(state.session.draft_revision))
+            kvRow(t("wizard.draft"), state.session ? state.session.draft_id : t("wizard.not_saved")),
+            kvRow(t("wizard.revision"), state.session ? String(state.session.revision) : t("common.unknown"))
           ),
           el("div", { class: "count-grid" },
             [[t("wizard.count_floors"), count("home_assistant.floor")],
@@ -768,38 +986,32 @@
 
     function reviewSelection(role, label) {
       const selected = candidate(role, state.draft.selections[role]);
-      return el("div", { class: `review-row ${selected ? "" : "review-row--missing"}` },
+      const persisted = state.draft.persistedReferences[role];
+      const displayed = selected || (persisted && discoveredObject(persisted) ? persisted : null);
+      return el("div", { class: `review-row ${displayed ? "" : "review-row--missing"}` },
         el("span", { class: "review-row__label" }, label),
-        selected
-          ? el("span", { class: "review-row__value" }, selected.current_locator || selected.native_id || "Unknown")
+        displayed
+          ? el("span", { class: "review-row__value" }, displayed.current_locator || displayed.native_id || "Unknown")
           : badge(t("wizard.not_selected"), "warning"),
-        selected ? badge(state.draft.confirmations[role] ? t("wizard.confirmed") : t("wizard.not_confirmed"), state.draft.confirmations[role] ? "positive" : "negative") : null
+        selected
+          ? badge(state.draft.confirmations[role] ? t("wizard.confirmed") : t("wizard.not_confirmed"), state.draft.confirmations[role] ? "positive" : "negative")
+          : displayed ? badge(t("wizard.persisted"), "info") : null
       );
     }
 
     function renderReview() {
       const session = state.session;
-      const issues = session.validation_issues || [];
-      const blockingIssues = issues.filter((issue) => issue.severity === "ERROR");
-      const warnings = issues.filter((issue) => issue.severity !== "ERROR");
+      const issues = state.validation ? state.validation.issue_codes : [];
       const ready = draftIsReady();
-      const readinessMessage = state.dirty
+      const readinessMessage = !session
+        ? t("wizard.not_ready_not_saved")
+        : state.dirty
         ? t("wizard.not_ready_unsaved")
-        : session.validation_status !== "CURRENT"
-          ? t("wizard.not_ready_validation", { status: session.validation_status })
+        : !state.validation
+          ? t("wizard.not_ready_validation", { status: t("wizard.validation_status_not_validated") })
           : ready
             ? t("wizard.ready_not_active")
-            : t("wizard.not_ready_blocking", { count: session.blocking_issue_count });
-
-      function issueList(group, severity) {
-        if (!group.length) return null;
-        return el("ul", { class: `validation-list validation-list--${severity}` }, group.map((issue) => validationItem({
-          severity,
-          code: issue.code,
-          message: validationMessage(issue),
-          details: validationDetails(issue),
-        })));
-      }
+            : t("wizard.not_ready_blocking", { count: issues.length });
 
       return el("div", { class: "step" },
         el("h2", { class: "step__title" }, t("wizard.review_title")),
@@ -808,7 +1020,7 @@
           el("h3", { class: "panel__title" }, t("wizard.draft_review")),
           el("div", { class: "review-row" },
             el("span", { class: "review-row__label" }, t("wizard.zone")),
-            state.draft.areaId || badge(t("wizard.not_selected"), "warning")
+            state.draft.areaId || (session ? t("common.none") : badge(t("wizard.not_selected"), "warning"))
           ),
           reviewSelection(PRIMARY_TEMPERATURE_ROLE, t("wizard.role_sensor")),
           reviewSelection(SOURCE_ENABLE_TARGET_ROLE, t("wizard.source_enable_target")),
@@ -825,7 +1037,8 @@
               grace: state.draft.settings.indeterminate_grace_period_seconds,
             })
           ),
-          state.dirty ? noteBox(t("wizard.unsaved_report"), "warning") : null
+          state.dirty ? noteBox(t("wizard.unsaved_report"), "warning") : null,
+          !session ? noteBox(t("wizard.complete_before_save"), "warning") : null
         ),
         el("div", { class: "panel" },
           el("h3", { class: "panel__title" }, t("wizard.validation_report")),
@@ -834,23 +1047,25 @@
             el("span", { class: "readiness-summary__message" }, readinessMessage)
           ),
           el("div", { class: "section__badges" },
-            badge(t(`wizard.validation_status_${String(session.validation_status).toLowerCase()}`), session.validation_status === "CURRENT" ? "info" : "warning"),
-            badge(t("wizard.blocking_count", { count: session.blocking_issue_count }), session.blocking_issue_count ? "negative" : "positive"),
-            badge(t("wizard.warning_count", { count: session.warning_count }), session.warning_count ? "warning" : "neutral")
+            badge(
+              state.validation ? t("wizard.validation_status_current") : t("wizard.validation_status_not_validated"),
+              state.validation ? "info" : "warning"
+            ),
+            badge(t("wizard.blocking_count", { count: issues.length }), issues.length ? "negative" : "positive")
           ),
-          blockingIssues.length
+          issues.length
             ? el("div", { class: "validation-group validation-group--blocking" },
                 el("h4", { class: "validation-group__title" }, t("wizard.blocking_issues")),
-                issueList(blockingIssues, "blocking")
+                el("ul", { class: "validation-list validation-list--blocking" }, issues.map((code) =>
+                  validationItem({ severity: "blocking", code, message: code, details: "" })
+                ))
               )
             : noteBox(t("wizard.no_blocking_issues"), ready ? "positive" : "neutral"),
-          warnings.length
-            ? el("div", { class: "validation-group validation-group--warning" },
-                el("h4", { class: "validation-group__title" }, t("wizard.validation_warnings")),
-                issueList(warnings, "warning")
-              )
+          noteBox(t("wizard.validation_preparation"), "neutral"),
+          state.candidateRevision
+            ? noteBox(t("wizard.canonicalized_not_active", { revision: state.candidateRevision.revision_id }), "positive")
             : null,
-          noteBox(t("wizard.validation_preparation"), "neutral")
+          state.activation ? noteBox(t("wizard.activation_complete"), "positive") : null
         )
       );
     }
@@ -864,10 +1079,10 @@
       draftStatus.hidden = false;
       draftStatus.replaceChildren(
         badge(draftIsReady() ? t("wizard.ready") : t("wizard.not_ready"), draftIsReady() ? "positive" : "negative"),
-        badge(state.session.incomplete ? t("wizard.incomplete_draft") : t("wizard.draft_complete"), state.session.incomplete ? "warning" : "positive"),
+        badge(t("wizard.canonical_v3_draft"), "info"),
         el("span", { class: "draft-status__text" },
           t("wizard.revision_status", {
-            revision: state.session.draft_revision,
+            revision: state.session.revision,
             status: state.dirty
               ? t("wizard.unsaved_edits")
               : state.lastSavedAt
@@ -887,7 +1102,7 @@
       }, t("wizard.back"));
       const save = el("button", {
         class: "btn btn--secondary",
-        disabled: !loaded || !state.session,
+        disabled: !loaded,
         onclick: saveDraft,
       }, state.status === "saving" ? t("wizard.saving") : t("wizard.save_later"));
       const remove = el("button", {
@@ -897,10 +1112,25 @@
       }, t("wizard.delete_draft"));
       const next = el("button", {
         class: "btn btn--primary",
-        disabled: !loaded || !state.session,
+        disabled: !loaded,
         onclick: state.step < 5 ? () => goToStep(state.step + 1) : validateDraft,
       }, state.step < 5 ? t("wizard.continue") : t("wizard.validate_draft"));
-      footer.replaceChildren(back, remove, save, next);
+      const canonicalize = el("button", {
+        class: "btn btn--secondary",
+        disabled: !loaded || !draftIsReady() || Boolean(state.candidateRevision),
+        onclick: canonicalizeDraft,
+      }, t("wizard.canonicalize"));
+      const activate = el("button", {
+        class: "btn btn--primary",
+        disabled: !loaded || !state.candidateRevision || Boolean(state.activation),
+        onclick: activateRevision,
+      }, t("wizard.activate"));
+      footer.replaceChildren(
+        back,
+        remove,
+        save,
+        state.step === 5 && state.candidateRevision ? activate : state.step === 5 && draftIsReady() ? canonicalize : next
+      );
     }
 
     function render() {
@@ -920,6 +1150,10 @@
               class: "btn btn--secondary",
               onclick: state.errorOperation === "validate"
                 ? validateDraft
+                : state.errorOperation === "canonicalize"
+                  ? canonicalizeDraft
+                  : state.errorOperation === "activate"
+                    ? activateRevision
                 : state.errorOperation === "delete"
                   ? deleteDraft
                   : saveDraft,
@@ -945,6 +1179,8 @@
       deleteDraft,
       saveDraft,
       validateDraft,
+      canonicalizeDraft,
+      activateRevision,
       goToStep,
       render,
     };
