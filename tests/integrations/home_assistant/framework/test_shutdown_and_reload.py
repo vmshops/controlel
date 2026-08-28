@@ -10,33 +10,19 @@ from homeassistant.const import (
     EVENT_HOMEASSISTANT_STOP,
     UnitOfTemperature,
 )
+from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 import controlel.application.runtime.control_runtime_assembly as runtime_assembly_module
 import custom_components.controlel as component
 from controlel.domain.value_objects.sensor_id import SensorId
+from controlel.infrastructure.home_assistant import ACTIVE_REFERENCE_KEY
+from custom_components.controlel import config_flow as cf
 from custom_components.controlel.const import (
-    CONF_CONTROLLED_ENTITY_ID,
-    CONF_DISABLE_SERVICE_DOMAIN,
-    CONF_DISABLE_SERVICE_NAME,
     CONF_DISABLE_TARGET_ENTITY_ID,
-    CONF_ENABLE_SERVICE_DOMAIN,
-    CONF_ENABLE_SERVICE_NAME,
     CONF_ENABLE_TARGET_ENTITY_ID,
-    CONF_HEAT_SOURCE_CONTROL_MODE,
     CONF_INDETERMINATE_GRACE_PERIOD,
-    CONF_INDETERMINATE_GRACE_PERIOD_MINUTES,
-    CONF_INDETERMINATE_TIMEOUT_ACTION,
-    CONF_MAX_FUTURE_SKEW,
-    CONF_PRIMARY_MEASUREMENT_MAX_AGE_MINUTES,
-    CONF_SENSOR_ID,
-    CONF_SENSOR_NAME,
-    CONF_TARGET_TEMPERATURE,
     CONF_TEMPERATURE_ENTITY_ID,
-    CONF_ZONE_ID,
-    CONF_ZONE_NAME,
-    CONTROL_MODE_CUSTOM,
-    CONTROL_MODE_SIMPLE,
     DOMAIN,
 )
 from custom_components.controlel.runtime_executor import HomeAssistantRuntimeExecutor
@@ -77,49 +63,56 @@ class CapturingHost(component.HomeAssistantControlelHost):
         self.__class__.instances.append(self)
 
 
-async def _submit_options(
-    hass,
-    entry,
-    *,
-    zone_name: str,
-    sensor_name: str,
-    temperature_entity_id: str,
-    target_temperature: float,
-    mode: str,
-    controlled_entity_id: str | None,
-    max_age_minutes: float,
-    future_skew_seconds: float,
-    grace_minutes: float,
-    timeout_action: str,
-    custom_bindings: dict[str, str] | None = None,
-) -> None:
-    initial = await hass.config_entries.options.async_init(entry.entry_id)
-    basic = {
-        CONF_ZONE_NAME: zone_name,
-        CONF_SENSOR_NAME: sensor_name,
-        CONF_TEMPERATURE_ENTITY_ID: temperature_entity_id,
-        CONF_TARGET_TEMPERATURE: target_temperature,
-        CONF_HEAT_SOURCE_CONTROL_MODE: mode,
-    }
-    if controlled_entity_id is not None:
-        basic[CONF_CONTROLLED_ENTITY_ID] = controlled_entity_id
-    advanced = await hass.config_entries.options.async_configure(
-        initial["flow_id"],
-        basic,
+def _defaults(result) -> dict[str, object]:
+    values: dict[str, object] = {}
+    for marker in result["data_schema"].schema:
+        if marker.default is None:
+            continue
+        try:
+            values[marker.schema] = marker.default()
+        except (TypeError, ValueError):
+            pass
+    return values
+
+
+def _register_entry_bindings(hass) -> tuple[str, str]:
+    registry = er.async_get(hass)
+    sensor = registry.async_get_or_create(
+        "sensor",
+        "shutdown-reload-test",
+        "living-room-temperature",
+        suggested_object_id="living_room_temperature",
+        original_device_class="temperature",
+        unit_of_measurement=UnitOfTemperature.CELSIUS,
     )
-    safety = {
-        CONF_PRIMARY_MEASUREMENT_MAX_AGE_MINUTES: max_age_minutes,
-        CONF_MAX_FUTURE_SKEW: future_skew_seconds,
-        CONF_INDETERMINATE_GRACE_PERIOD_MINUTES: grace_minutes,
-        CONF_INDETERMINATE_TIMEOUT_ACTION: timeout_action,
-    }
-    if custom_bindings is not None:
-        safety.update(custom_bindings)
-    result = await hass.config_entries.options.async_configure(
-        advanced["flow_id"],
-        safety,
+    source = registry.async_get_or_create(
+        "switch",
+        "shutdown-reload-test",
+        "boiler",
+        suggested_object_id="boiler",
     )
-    assert result["type"].value == "create_entry"
+    hass.states.async_set(source.entity_id, "off")
+    return sensor.entity_id, source.entity_id
+
+
+async def _choose(hass, result, step_id: str):
+    return await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {"next_step_id": step_id},
+    )
+
+
+async def _save_and_prepare_activation(hass, result):
+    steps = ("zone", "sensor", "heat_source", "heat_delivery", "safety_timing", "diagnostics", "notifications")
+    for step_id in steps[steps.index(result["step_id"]) :]:
+        assert result["step_id"] == step_id
+        result = await hass.config_entries.options.async_configure(result["flow_id"], _defaults(result))
+    assert result["step_id"] == "save_draft"
+    saved = await hass.config_entries.options.async_configure(result["flow_id"], {})
+    validate = await _choose(hass, saved, "validate")
+    validated = await hass.config_entries.options.async_configure(validate["flow_id"], {})
+    canonicalize = await hass.config_entries.options.async_configure(validated["flow_id"], {})
+    return await hass.config_entries.options.async_configure(canonicalize["flow_id"], {})
 
 
 @pytest.mark.asyncio
@@ -182,7 +175,7 @@ async def test_real_reload_fully_unloads_then_constructs_fresh_in_memory_runtime
 
 
 @pytest.mark.asyncio
-async def test_repeated_options_updates_reload_once_and_leave_one_runtime(
+async def test_explicit_canonical_activations_reload_once_and_leave_one_runtime(
     hass,
     entry_data,
     service_calls,
@@ -190,17 +183,18 @@ async def test_repeated_options_updates_reload_once_and_leave_one_runtime(
     ReloadRuntime.instances.clear()
     ReloadRuntime.lifecycle.clear()
     CapturingHost.instances.clear()
-    first_entity = entry_data[CONF_TEMPERATURE_ENTITY_ID]
-    second_entity = "sensor.upstairs_temperature"
-    for entity_id, value in ((first_entity, "20"), (second_entity, "21")):
-        hass.states.async_set(
-            entity_id,
-            value,
-            {
-                ATTR_DEVICE_CLASS: "temperature",
-                ATTR_UNIT_OF_MEASUREMENT: UnitOfTemperature.CELSIUS,
-            },
-        )
+    first_entity, source_entity = _register_entry_bindings(hass)
+    entry_data[CONF_TEMPERATURE_ENTITY_ID] = first_entity
+    entry_data[CONF_ENABLE_TARGET_ENTITY_ID] = source_entity
+    entry_data[CONF_DISABLE_TARGET_ENTITY_ID] = source_entity
+    hass.states.async_set(
+        first_entity,
+        "20",
+        {
+            ATTR_DEVICE_CLASS: "temperature",
+            ATTR_UNIT_OF_MEASUREMENT: UnitOfTemperature.CELSIUS,
+        },
+    )
     entry = MockConfigEntry(
         domain=DOMAIN,
         title="Living room",
@@ -216,85 +210,36 @@ async def test_repeated_options_updates_reload_once_and_leave_one_runtime(
         assert await hass.config_entries.async_setup(entry.entry_id)
         first_host = entry.runtime_data.host
 
-        await _submit_options(
-            hass,
-            entry,
-            zone_name="Upstairs",
-            sensor_name="Upstairs temperature",
-            temperature_entity_id=second_entity,
-            target_temperature=22.5,
-            mode=CONTROL_MODE_SIMPLE,
-            controlled_entity_id="switch.heat_pump",
-            max_age_minutes=10,
-            future_skew_seconds=15,
-            grace_minutes=3,
-            timeout_action="disable_heating",
-        )
+        initial = await hass.config_entries.options.async_init(entry.entry_id)
+        convert = await _choose(hass, initial, "convert_legacy")
+        review = await hass.config_entries.options.async_configure(convert["flow_id"], {})
+        activate = await _save_and_prepare_activation(hass, review)
+        await hass.config_entries.options.async_configure(activate["flow_id"], {})
         await wait_until(lambda: len(ReloadRuntime.instances) == 2)
         await hass.async_block_till_done()
         second_host = entry.runtime_data.host
 
-        await _submit_options(
-            hass,
-            entry,
-            zone_name="Upstairs",
-            sensor_name="Upstairs temperature",
-            temperature_entity_id=second_entity,
-            target_temperature=22.5,
-            mode=CONTROL_MODE_CUSTOM,
-            controlled_entity_id=None,
-            max_age_minutes=10,
-            future_skew_seconds=15,
-            grace_minutes=3,
-            timeout_action="enable_heating",
-            custom_bindings={
-                CONF_ENABLE_SERVICE_DOMAIN: "switch",
-                CONF_ENABLE_SERVICE_NAME: "turn_on",
-                CONF_ENABLE_TARGET_ENTITY_ID: "switch.heat_pump",
-                CONF_DISABLE_SERVICE_DOMAIN: "switch",
-                CONF_DISABLE_SERVICE_NAME: "turn_off",
-                CONF_DISABLE_TARGET_ENTITY_ID: "switch.backup_boiler",
-            },
-        )
+        initial = await hass.config_entries.options.async_init(entry.entry_id)
+        edit = await _choose(hass, initial, "edit_active")
+        zone = _defaults(edit)
+        zone[cf.TARGET_TEMPERATURE] = 21.5
+        edit = await hass.config_entries.options.async_configure(edit["flow_id"], zone)
+        activate = await _save_and_prepare_activation(hass, edit)
+        await hass.config_entries.options.async_configure(activate["flow_id"], {})
         await wait_until(lambda: len(ReloadRuntime.instances) == 3)
-        await hass.async_block_till_done()
-        third_host = entry.runtime_data.host
-
-        await _submit_options(
-            hass,
-            entry,
-            zone_name="Upstairs",
-            sensor_name="Renamed measurement",
-            temperature_entity_id=second_entity,
-            target_temperature=21.5,
-            mode=CONTROL_MODE_SIMPLE,
-            controlled_entity_id="switch.backup_boiler",
-            max_age_minutes=15,
-            future_skew_seconds=30,
-            grace_minutes=2,
-            timeout_action="disable_heating",
-        )
-        await wait_until(lambda: len(ReloadRuntime.instances) == 4)
         await hass.async_block_till_done()
         final_host = entry.runtime_data.host
 
-        assert entry.title == "Upstairs"
-        assert entry.data[CONF_SENSOR_ID] == "living_room_temperature"
-        assert entry.data[CONF_ZONE_ID] == "living_room"
-        assert entry.runtime_data.config.sensor_name == "Renamed measurement"
-        assert entry.runtime_data.config.temperature_entity_id == second_entity
+        assert set(entry.data) == {ACTIVE_REFERENCE_KEY}
+        assert entry.options == {}
+        assert entry.runtime_data.config.sensor_name == "Living room temperature"
+        assert entry.runtime_data.config.temperature_entity_id == first_entity
         assert entry.runtime_data.config.target_temperature.value == 21.5
-        assert entry.runtime_data.config.primary_measurement_max_age.total_seconds() == 900
-        assert entry.runtime_data.config.max_future_skew.total_seconds() == 30
-        assert entry.runtime_data.config.indeterminate_grace_period.total_seconds() == 120
-        assert entry.runtime_data.config.heat_source_control_mode == CONTROL_MODE_SIMPLE
-        assert entry.runtime_data.config.controlled_entity_id == "switch.backup_boiler"
         assert first_host is not None and first_host.stopped
         assert second_host is not None and second_host.stopped
-        assert third_host is not None and third_host.stopped
         assert final_host is not None and final_host.accepting
         assert sum(host.accepting for host in CapturingHost.instances) == 1
-        assert len(ReloadRuntime.instances) == 4
+        assert len(ReloadRuntime.instances) == 3
 
         assert await hass.config_entries.async_unload(entry.entry_id)
         assert final_host.stopped
@@ -302,19 +247,23 @@ async def test_repeated_options_updates_reload_once_and_leave_one_runtime(
         assert await hass.config_entries.async_setup(entry.entry_id)
         restarted_host = entry.runtime_data.host
         assert restarted_host is not None and restarted_host.accepting
-        assert entry.runtime_data.config.sensor_name == "Renamed measurement"
+        assert entry.runtime_data.config.sensor_name == "Living room temperature"
         assert entry.runtime_data.config.sensor_id == SensorId("living_room_temperature")
         assert await hass.config_entries.async_unload(entry.entry_id)
         await component.async_remove_entry(hass, entry)
 
 
 @pytest.mark.asyncio
-async def test_invalid_options_are_rejected_without_runtime_reload(
+async def test_invalid_canonical_draft_edit_does_not_reload_runtime(
     hass,
     entry_data,
     service_calls,
 ) -> None:
     ReloadRuntime.instances.clear()
+    sensor_entity, source_entity = _register_entry_bindings(hass)
+    entry_data[CONF_TEMPERATURE_ENTITY_ID] = sensor_entity
+    entry_data[CONF_ENABLE_TARGET_ENTITY_ID] = source_entity
+    entry_data[CONF_DISABLE_TARGET_ENTITY_ID] = source_entity
     hass.states.async_set(
         entry_data[CONF_TEMPERATURE_ENTITY_ID],
         "20",
@@ -323,27 +272,24 @@ async def test_invalid_options_are_rejected_without_runtime_reload(
             ATTR_UNIT_OF_MEASUREMENT: UnitOfTemperature.CELSIUS,
         },
     )
+    hass.states.async_set("sensor.not_temperature", "20")
     entry = MockConfigEntry(domain=DOMAIN, data=entry_data, options={})
     entry.add_to_hass(hass)
 
     with patch.object(runtime_assembly_module, "ControlRuntime", ReloadRuntime):
         assert await hass.config_entries.async_setup(entry.entry_id)
         initial = await hass.config_entries.options.async_init(entry.entry_id)
-        result = await hass.config_entries.options.async_configure(
-            initial["flow_id"],
-            {
-                CONF_ZONE_NAME: "Living room",
-                CONF_SENSOR_NAME: "Living room temperature",
-                CONF_TEMPERATURE_ENTITY_ID: "sensor.not_temperature",
-                CONF_TARGET_TEMPERATURE: 21.0,
-                CONF_HEAT_SOURCE_CONTROL_MODE: CONTROL_MODE_SIMPLE,
-                CONF_CONTROLLED_ENTITY_ID: "switch.boiler",
-            },
-        )
+        convert = await _choose(hass, initial, "convert_legacy")
+        result = await hass.config_entries.options.async_configure(convert["flow_id"], {})
+        result = await hass.config_entries.options.async_configure(result["flow_id"], _defaults(result))
+        sensor = _defaults(result)
+        sensor[cf.TEMPERATURE_ENTITY] = "sensor.not_temperature"
+        result = await hass.config_entries.options.async_configure(result["flow_id"], sensor)
 
-        assert result["type"].value == "form"
-        assert result["errors"] == {CONF_TEMPERATURE_ENTITY_ID: "not_temperature_sensor"}
+        assert result["step_id"] == "sensor"
+        assert result["errors"] == {"base": "invalid_configuration"}
         assert len(ReloadRuntime.instances) == 1
+        assert ACTIVE_REFERENCE_KEY not in entry.data
         assert await hass.config_entries.async_unload(entry.entry_id)
 
 

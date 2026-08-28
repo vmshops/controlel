@@ -33,7 +33,7 @@ from controlel.domain.source_control import SourceCapabilities, SourceOwnership
 from controlel.infrastructure.home_assistant import ACTIVE_REFERENCE_KEY
 from controlel.infrastructure.time.system_clock import SystemClock
 
-from .canonical_runtime import async_select_runtime_configuration
+from .canonical_runtime import async_select_runtime_configuration, staged_candidate_runtime
 from .config import HomeAssistantIntegrationConfig, integration_config_from_entry
 from .event_loop_bridge import HomeAssistantEventLoopBridge
 from .failure_sink import HomeAssistantScheduledFailureSink, clear_entry_issues
@@ -52,7 +52,7 @@ PLATFORMS = ("sensor", "binary_sensor")
 @dataclass
 class ControlelEntryRuntime:
     host: HomeAssistantControlelHost | None
-    config: HomeAssistantIntegrationConfig
+    config: HomeAssistantIntegrationConfig | None
     loaded_configuration: LoadedRuntimeConfiguration | None = None
     reloading: bool = False
     frontend_api_unregister: Callable[[], None] | None = None
@@ -81,6 +81,18 @@ async def async_setup_entry(
     entry: ControlelConfigEntry,
 ) -> bool:
     """Set up one Controlel runtime from a config entry."""
+    if not entry.data and not entry.options and staged_candidate_runtime(hass, entry.entry_id) is None:
+        from .panel import async_register_controlel_panel
+        from .setup_backend import async_get_setup_backend
+
+        await async_get_setup_backend(hass, entry)
+        entry.runtime_data = ControlelEntryRuntime(host=None, config=None)
+        entry.async_on_unload(entry.add_update_listener(_async_update_listener))
+        try:
+            await async_register_controlel_panel(hass, entry.entry_id)
+        except Exception:
+            LOGGER.exception("Controlel panel registration failed; the integration remains configurable")
+        return True
     core_version = await hass.async_add_executor_job(metadata.version, "controlel")
     selection, setup_backend = await async_select_runtime_configuration(hass, entry)
     config = selection.config
@@ -369,17 +381,19 @@ async def _async_update_listener(
             and loaded.semantic_configuration_fingerprint == active.semantic_configuration_fingerprint
             and (loaded.environment_id, loaded.module_key, loaded.module_instance_id) == active.scope_key
         )
-        if authority_matches and entry.title == runtime_data.config.zone_name:
+        if authority_matches and runtime_data.config is not None and entry.title == runtime_data.config.zone_name:
             return
         if runtime_data.reloading:
             return
         runtime_data.reloading = True
-        if entry.title != runtime_data.config.zone_name:
+        if runtime_data.config is not None and entry.title != runtime_data.config.zone_name:
             hass.config_entries.async_update_entry(entry, title=runtime_data.config.zone_name)
         await hass.config_entries.async_reload(entry.entry_id)
         LOGGER.info("Controlel canonical configuration reloaded entry_id=%s", entry.entry_id)
         return
 
+    if not entry.data and not entry.options:
+        return
     config = integration_config_from_entry(entry.data, entry.options)
     if runtime_data.config == config and entry.title == config.zone_name:
         return

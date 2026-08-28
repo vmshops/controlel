@@ -29,192 +29,78 @@
   "config": {
     "step": {
       "user": {
-        "title": "Configure heating control",
-        "description": "Choose the temperature measurement and the heat-source switch for this zone. Safe timing defaults are applied automatically unless you open advanced settings.",
-        "data": {
-          "zone_name": "Zone name",
-          "sensor_name": "Sensor name",
-          "temperature_entity_id": "Temperature sensor",
-          "target_temperature": "Target temperature",
-          "heating_turn_on_differential": "Heating turn-on differential",
-          "heating_turn_off_differential": "Heating turn-off differential",
-          "heat_demand_confirmation_duration_minutes": "Heat-demand confirmation time",
-          "heat_source_control_mode": "Heat-source control mode",
-          "controlled_entity_id": "Controlled heat-source switch",
-          "heat_delivery_mode": "Zone heat delivery",
-          "heat_delivery_actuator_entity_id": "Actuator climate entity",
-          "heat_delivery_ownership": "Actuator ownership",
-          "heat_delivery_assist_policy": "Assist policy",
-          "heat_delivery_assist_target": "Assist target temperature",
-          "show_advanced": "Configure advanced and safety settings"
-        },
-        "data_description": {
-          "zone_name": "The user-facing name of the controlled area.",
-          "sensor_name": "A user-facing name for this temperature measurement inside Controlel.",
-          "temperature_entity_id": "The Home Assistant temperature entity used for control.",
-          "target_temperature": "Heating is requested while the measured temperature is below this value.",
-          "heating_turn_on_differential": "How far below target the room must fall before heating is requested.",
-          "heating_turn_off_differential": "How far above target the room must rise before heating is stopped.",
-          "heat_demand_confirmation_duration_minutes": "How long the zone must continuously remain below its heating threshold before its request is passed to the heat source. Zero responds immediately. This filters brief drops, is separate from minimum-off time, resets on invalid or unavailable measurements, and does not detect an open window.",
-          "heat_source_control_mode": "Use one normal switch, or choose custom services for an advanced installation.",
-          "controlled_entity_id": "The switch Controlel turns on and off.",
-          "heat_delivery_mode": "Leave zone delivery unmanaged or enable thermostat setpoint assist.",
-          "heat_delivery_actuator_entity_id": "The climate entity whose technical target Controlel commands.",
-          "heat_delivery_ownership": "Setpoint assist requires Controlel to own the actuator target.",
-          "heat_delivery_assist_policy": "Choose whether confirmed heating demand selects the assist target.",
-          "heat_delivery_assist_target": "Technical thermostat target while assist is active; this is not a valve position.",
-          "show_advanced": "Set stable IDs, safety times, or other advanced values before creating the entry."
-        }
-      },
-      "advanced": {
-        "title": "Advanced and safety settings",
-        "description": "The recommended defaults are safe for most installations. Custom-service mode keeps enable and disable commands separate.",
-        "data": {
-          "sensor_id": "Sensor ID",
-          "zone_id": "Zone ID",
-          "primary_measurement_max_age_minutes": "Maximum measurement age",
-          "max_future_skew": "Future clock tolerance",
-          "indeterminate_grace_period_minutes": "Sensor failure grace period",
-          "indeterminate_timeout_action": "Timeout action",
-          "minimum_heating_on_time_minutes": "Minimum heating-on time",
-          "minimum_heating_off_time_minutes": "Minimum heating-off time",
-          "diagnostic_profile": "Diagnostic profile",
-          "debug_duration_minutes": "Debug duration",
-          "debug_until_changed": "Keep Debug active until manually changed",
-          "notifications": "Notifications configuration",
-          "enable_service_domain": "Enable service domain",
-          "enable_service_name": "Enable service name",
-          "enable_target_entity_id": "Enable target entity",
-          "disable_service_domain": "Disable service domain",
-          "disable_service_name": "Disable service name",
-          "disable_target_entity_id": "Disable target entity"
-        },
-        "data_description": {
-          "sensor_id": "A stable internal identifier generated automatically unless manually specified.",
-          "zone_id": "A stable internal identifier generated automatically unless manually specified.",
-          "primary_measurement_max_age_minutes": "How long the last sensor value may remain valid before Controlel treats it as stale.",
-          "max_future_skew": "How much future timestamp error is tolerated before the measurement is rejected.",
-          "indeterminate_grace_period_minutes": "How long Controlel preserves the current decision when the sensor becomes unknown, unavailable, invalid, or stale before applying the timeout action.",
-          "indeterminate_timeout_action": "What Controlel does if valid measurement data does not return before the grace period expires.",
-          "minimum_heating_on_time_minutes": "Shortest permitted run after an enable command is dispatched; this does not confirm physical boiler state.",
-          "minimum_heating_off_time_minutes": "Shortest permitted idle period after a disable command is dispatched; this does not confirm physical boiler state.",
-          "diagnostic_profile": "Controls presentation cadence, trace capacity, and logging detail only. Debug can update active countdown entities once per second and may increase Recorder database activity.",
-          "debug_duration_minutes": "How long Debug remains active before returning to the previous profile, or Detailed when no previous profile is available.",
-          "debug_until_changed": "Disable automatic Debug expiry. Debug then remains active until this option is changed manually.",
-          "notifications": "A modular object containing enabled, recipients, ordinary and critical rate limits, and bounded history capacity. Notifications remain disabled until explicitly enabled and addressed.",
-          "enable_service_domain": "Home Assistant service domain used when heating is required.",
-          "enable_service_name": "Home Assistant service called when heating is required.",
-          "enable_target_entity_id": "Entity targeted by the enable command.",
-          "disable_service_domain": "Home Assistant service domain used when heating is not required.",
-          "disable_service_name": "Home Assistant service called when heating is not required.",
-          "disable_target_entity_id": "Entity targeted by the disable command."
-        }
+        "title": "Add Controlel",
+        "description": "{configure_explanation} Continue to create an empty canonical-v3 installation and open Configure."
       }
     },
-    "error": {
-      "invalid_configuration": "The configuration is invalid.",
-      "invalid_sensor_id": "Use a lowercase letter first, followed only by lowercase letters, numbers, or underscores.",
-      "invalid_zone_id": "Use a lowercase letter first, followed only by lowercase letters, numbers, or underscores.",
-      "invalid_value": "Enter a valid value.",
-      "required": "This field is required.",
-      "cannot_generate_id": "Use a name that begins with a letter and contains at least one ASCII letter.",
-      "controlled_switch_required": "Select the switch that Controlel should turn on and off.",
-      "actuator_required": "Select a climate actuator for setpoint assist.",
-      "controlel_ownership_required": "Setpoint assist requires Controlel-owned actuator state.",
-      "not_temperature_sensor": "Select a sensor entity whose device class is temperature.",
-      "controlel_service_not_allowed": "Controlel cannot call its own service domain.",
-      "unsupported_temperature_unit": "The temperature sensor must use Celsius or Fahrenheit."
-    }
+    "abort": {"single_instance_allowed": "Only one Controlel installation is supported."}
   },
   "options": {
     "step": {
       "init": {
-        "title": "Basic settings",
-        "description": "Edit the zone, temperature measurement, target, and heat-source control mode. Stable internal IDs are preserved.",
-        "data": {
-          "zone_name": "Zone name",
-          "sensor_name": "Sensor name",
-          "temperature_entity_id": "Temperature sensor",
-          "target_temperature": "Target temperature",
-          "heating_turn_on_differential": "Heating turn-on differential",
-          "heating_turn_off_differential": "Heating turn-off differential",
-          "heat_demand_confirmation_duration_minutes": "Heat-demand confirmation time",
-          "heat_source_control_mode": "Heat-source control mode",
-          "controlled_entity_id": "Controlled heat-source switch",
-          "heat_delivery_mode": "Zone heat delivery",
-          "heat_delivery_actuator_entity_id": "Actuator climate entity",
-          "heat_delivery_ownership": "Actuator ownership",
-          "heat_delivery_assist_policy": "Assist policy",
-          "heat_delivery_assist_target": "Assist target temperature"
-        },
-        "data_description": {
-          "zone_name": "The user-facing name of the controlled area.",
-          "sensor_name": "A user-facing name for this temperature measurement inside Controlel.",
-          "temperature_entity_id": "The Home Assistant temperature entity used for control.",
-          "target_temperature": "Heating is requested while the measured temperature is below this value.",
-          "heating_turn_on_differential": "How far below target the room must fall before heating is requested.",
-          "heating_turn_off_differential": "How far above target the room must rise before heating is stopped.",
-          "heat_demand_confirmation_duration_minutes": "How long the zone must continuously remain below its heating threshold before its request is passed to the heat source. Zero responds immediately. This filters brief drops, is separate from minimum-off time, resets on invalid or unavailable measurements, and does not detect an open window.",
-          "heat_source_control_mode": "Use one normal switch, or choose custom services for an advanced installation.",
-          "controlled_entity_id": "The switch Controlel turns on and off.",
-          "heat_delivery_mode": "Leave zone delivery unmanaged or enable thermostat setpoint assist.",
-          "heat_delivery_actuator_entity_id": "The climate entity whose technical target Controlel commands.",
-          "heat_delivery_ownership": "Setpoint assist requires Controlel to own the actuator target.",
-          "heat_delivery_assist_policy": "Choose whether confirmed heating demand selects the assist target.",
-          "heat_delivery_assist_target": "Technical thermostat target while assist is active; this is not a valve position."
-        }
+        "title": "Configure Controlel",
+        "description": "{configure_explanation} Choose Open Setup Wizard below to launch the guided Wizard."
       },
-      "advanced": {
-        "title": "Advanced and safety settings",
-        "description": "Review normalized safety times and, in custom mode, the separate enable and disable service calls.",
+      "start_greenfield": {
+        "title": "Start canonical v3 configuration",
+        "description": "Choose the required Home Assistant bindings. This creates a durable inactive draft; it does not activate heating control.",
         "data": {
-          "primary_measurement_max_age_minutes": "Maximum measurement age",
-          "max_future_skew": "Future clock tolerance",
-          "indeterminate_grace_period_minutes": "Sensor failure grace period",
-          "indeterminate_timeout_action": "Timeout action",
-          "minimum_heating_on_time_minutes": "Minimum heating-on time",
-          "minimum_heating_off_time_minutes": "Minimum heating-off time",
-          "diagnostic_profile": "Diagnostic profile",
-          "debug_duration_minutes": "Debug duration",
-          "debug_until_changed": "Keep Debug active until manually changed",
-          "notifications": "Notifications configuration",
+          "zone_display_name": "Zone name",
+          "zone_area": "Area",
+          "zone_floor": "Floor",
+          "primary_sensor_display_name": "Sensor name",
+          "primary_temperature_entity_id": "Temperature sensor",
+          "heat_source_display_name": "Heat source name",
+          "heat_source_entity_id": "Heat source entity",
+          "heat_source_command_mode": "Command mode",
           "enable_service_domain": "Enable service domain",
           "enable_service_name": "Enable service name",
           "enable_target_entity_id": "Enable target entity",
           "disable_service_domain": "Disable service domain",
           "disable_service_name": "Disable service name",
-          "disable_target_entity_id": "Disable target entity"
-        },
-        "data_description": {
-          "primary_measurement_max_age_minutes": "How long the last sensor value may remain valid before Controlel treats it as stale.",
-          "max_future_skew": "How much future timestamp error is tolerated before the measurement is rejected.",
-          "indeterminate_grace_period_minutes": "How long Controlel preserves the current decision when the sensor becomes unknown, unavailable, invalid, or stale before applying the timeout action.",
-          "indeterminate_timeout_action": "What Controlel does if valid measurement data does not return before the grace period expires.",
-          "minimum_heating_on_time_minutes": "Shortest permitted run after an enable command is dispatched; this does not confirm physical boiler state.",
-          "minimum_heating_off_time_minutes": "Shortest permitted idle period after a disable command is dispatched; this does not confirm physical boiler state.",
-          "diagnostic_profile": "Controls presentation cadence, trace capacity, and logging detail only. Warning: Debug can update active countdown entities once per second and may increase Recorder database activity.",
-          "debug_duration_minutes": "How long Debug remains active before returning to the profile active before Debug, or Detailed when unavailable.",
-          "debug_until_changed": "Disable automatic Debug expiry. Debug then remains active until this option is changed manually.",
-          "notifications": "A modular object containing enabled, recipients, ordinary and critical rate limits, and bounded history capacity. Notifications remain disabled until explicitly enabled and addressed.",
-          "enable_service_domain": "Home Assistant service domain used when heating is required.",
-          "enable_service_name": "Home Assistant service called when heating is required.",
-          "enable_target_entity_id": "Entity targeted by the enable command.",
-          "disable_service_domain": "Home Assistant service domain used when heating is not required.",
-          "disable_service_name": "Home Assistant service called when heating is not required.",
-          "disable_target_entity_id": "Entity targeted by the disable command."
+          "disable_target_entity_id": "Disable target entity",
+          "reported_source_state_entity_id": "Reported actuator-state entity"
         }
-      }
+      },
+      "convert_legacy": {"title": "Convert legacy configuration", "description": "Explicitly project legacy settings through v2 into a durable v3 review draft. Legacy remains active and unchanged until explicit activation."},
+      "convert_v2": {"title": "Convert canonical v2 configuration", "description": "Explicitly create an inactive canonical v3 review draft from the active v2 revision."},
+      "resume_draft": {"title": "Resume durable draft", "data": {"draft_id": "Draft"}},
+      "abandon_draft": {"title": "Abandon durable draft", "description": "This deletes only editable draft state.", "data": {"draft_id": "Draft"}},
+      "abandon_current": {"title": "Abandon this draft", "description": "Delete this durable draft without changing canonical or active authority?"},
+      "zone": {"title": "Zone", "data": {"zone_display_name": "Zone name", "zone_area": "Area", "zone_floor": "Floor", "target_temperature_celsius": "Target temperature", "heating_turn_on_differential_celsius": "Heating turn-on differential", "heating_turn_off_differential_celsius": "Heating turn-off differential", "heat_demand_confirmation_seconds": "Heat-demand confirmation time"}},
+      "sensor": {"title": "Sensor", "data": {"primary_sensor_display_name": "Sensor name", "primary_temperature_entity_id": "Temperature sensor", "primary_measurement_max_age_seconds": "Maximum measurement age"}},
+      "heat_source": {"title": "Heat Source", "description": "Commands are requests for heat-source permission; they do not prove physical burner operation.", "data": {"heat_source_display_name": "Heat source name", "heat_source_entity_id": "Heat source entity", "heat_source_command_mode": "Command mode", "enable_service_domain": "Enable service domain", "enable_service_name": "Enable service name", "enable_target_entity_id": "Enable target entity", "disable_service_domain": "Disable service domain", "disable_service_name": "Disable service name", "disable_target_entity_id": "Disable target entity", "reported_source_state_entity_id": "Reported actuator-state entity"}},
+      "heat_delivery": {"title": "Heat Delivery", "data": {"heat_delivery_mode": "Delivery mode", "heat_delivery_actuator_entity_id": "Actuator climate entity", "heat_delivery_ownership": "Actuator ownership", "heat_delivery_assist_policy": "Assist policy", "heat_delivery_assist_target_celsius": "Assist target temperature"}},
+      "safety_timing": {"title": "Safety / Timing", "data": {"maximum_future_skew_seconds": "Future clock tolerance", "indeterminate_grace_period_seconds": "Sensor failure grace period", "indeterminate_timeout_action": "Timeout action", "minimum_heating_on_seconds": "Minimum heating-on time", "minimum_heating_off_seconds": "Minimum heating-off time"}},
+      "diagnostics": {"title": "Diagnostics", "data": {"diagnostic_steady_profile": "Steady diagnostic profile", "debug_configured_duration_seconds": "Debug duration"}},
+      "notifications": {"title": "Notifications", "description": "Recipient IDs remain stable and are managed by Controlel; edit only delivery preferences here.", "data": {"notifications_enabled": "Enable notifications", "notification_recipients": "Recipients", "notification_maximum_per_window": "Maximum per window", "notification_rate_window_seconds": "Rate window", "critical_notification_maximum_per_window": "Critical maximum per window", "critical_notification_rate_window_seconds": "Critical rate window", "notification_history_capacity": "History capacity"}},
+      "save_draft": {"title": "Save draft", "description": "Save these edits as a new durable draft revision? Saving does not validate, canonicalize, or activate."},
+      "draft_saved": {"title": "Draft saved", "description": "Draft {draft_id} is durable and inactive. Choose a separate next action."},
+      "validate": {"title": "Validate draft", "description": "Validate the saved draft against a fresh Home Assistant discovery snapshot? Validation does not activate."},
+      "validation_result": {"title": "Validation result", "description": "Issues: {validation_issues}. Continue only when activation-ready."},
+      "canonicalize": {"title": "Create canonical revision", "description": "Create an immutable canonical revision from this validated draft? This still does not activate it."},
+      "activate": {"title": "Activate canonical revision", "description": "Explicitly activate revision {revision_id}? This is the authority transition and reloads Controlel."}
+    },
+    "menu_options": {
+      "open_wizard": "Open Setup Wizard",
+      "start_greenfield": "Start manual canonical v3 configuration",
+      "edit_active": "Edit active canonical v3 configuration",
+      "convert_v2": "Convert active canonical v2 configuration",
+      "convert_legacy": "Convert legacy configuration to v3",
+      "resume_draft": "Resume a durable draft",
+      "abandon_draft": "Abandon a durable draft",
+      "validate": "Validate saved draft",
+      "continue_editing": "Continue editing",
+      "abandon_current": "Abandon this draft"
     },
     "error": {
       "invalid_configuration": "The configuration is invalid.",
-      "invalid_value": "Enter a valid value.",
-      "required": "This field is required.",
-      "controlled_switch_required": "Select the switch that Controlel should turn on and off.",
-      "actuator_required": "Select a climate actuator for setpoint assist.",
-      "controlel_ownership_required": "Setpoint assist requires Controlel-owned actuator state.",
-      "not_temperature_sensor": "Select a sensor entity whose device class is temperature.",
-      "controlel_service_not_allowed": "Controlel cannot call its own service domain.",
-      "unsupported_temperature_unit": "The temperature sensor must use Celsius or Fahrenheit."
+      "validation_failed": "The draft is not activation-ready. Correct the reported issues and validate again."
+    },
+    "abort": {
+      "canonical_legacy_mixed": "This entry contains both canonical and legacy authority. Resolve the mixed entry before configuring it.",
+      "draft_abandoned": "The durable draft was abandoned. Active authority was not changed.",
+      "conversion_not_ready": "Conversion requires reference review before editing can continue."
     }
   },
   "entity": {

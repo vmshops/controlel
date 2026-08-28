@@ -28,6 +28,7 @@ EXPECTED_ARCHIVE_FILES = frozenset(
         "activation_backend.py",
         "binary_sensor.py",
         "canonical_runtime.py",
+        "canonical_v3_service.py",
         "config.py",
         "config_flow.py",
         "const.py",
