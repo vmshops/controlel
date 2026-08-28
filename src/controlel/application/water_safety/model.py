@@ -7,7 +7,13 @@ from datetime import datetime
 from enum import StrEnum
 
 from controlel.application.setup import ProviderReference
-from controlel.domain.water_safety import MoistureObservation, WaterIncident, WaterSafetySnapshot, WaterSafetyState
+from controlel.domain.water_safety import (
+    MoistureObservation,
+    WaterIncident,
+    WaterSafetyAssessmentStatus,
+    WaterSafetySnapshot,
+    WaterSafetyState,
+)
 
 
 class WaterOutputKind(StrEnum):
@@ -37,6 +43,7 @@ class WaterSafetyEventCode(StrEnum):
     WET_INCIDENT_STARTED = "WET_INCIDENT_STARTED"
     WET_INCIDENT_RECOVERED = "WET_INCIDENT_RECOVERED"
     SENSOR_GRACE_STARTED = "SENSOR_GRACE_STARTED"
+    SENSOR_GRACE_CANCELLED = "SENSOR_GRACE_CANCELLED"
     SENSOR_FAULT_STARTED = "SENSOR_FAULT_STARTED"
     SENSOR_FAULT_RECOVERED = "SENSOR_FAULT_RECOVERED"
     SENSOR_FAULT_NOTIFICATION_REPEATED = "SENSOR_FAULT_NOTIFICATION_REPEATED"
@@ -176,6 +183,10 @@ class WaterSafetyProcessingResult:
     events: tuple[WaterSafetyEvent, ...] = ()
     output_results: tuple[WaterOutputCommandResult, ...] = ()
 
+    @property
+    def assessment_status(self) -> WaterSafetyAssessmentStatus:
+        return self.snapshot.assessment_status
+
 
 @dataclass(frozen=True, slots=True)
 class WaterSafetyDiagnostics:
@@ -187,7 +198,9 @@ class WaterSafetyDiagnostics:
     zone_id: str
     area_id: str
     critical_sensor: bool
+    assessment_status: WaterSafetyAssessmentStatus
     latest_observation: MoistureObservation | None
+    last_confirmed_observation: MoistureObservation | None
     active_incident: WaterIncident | None
     last_incident: WaterIncident | None
     fault_deadline: datetime | None
