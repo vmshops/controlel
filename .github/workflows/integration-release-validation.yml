@@ -33,13 +33,13 @@ jobs:
           python-version: "3.14"
 
       - name: Build deterministic HACS release archive
-        run: python scripts/packaging/build_hacs_release.py --version 0.13.0
+        run: python scripts/packaging/build_hacs_release.py --version 0.14.0
 
       - name: Validate HACS release archive
         run: |
           python scripts/packaging/validate_hacs_release.py \
             dist/hacs/controlel.zip \
-            --version 0.13.0 \
+            --version 0.14.0 \
             --checksum dist/hacs/controlel.zip.sha256
 
       - name: Upload inspection artifacts

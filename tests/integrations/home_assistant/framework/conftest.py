@@ -1,5 +1,4 @@
 import json
-import os
 from collections.abc import Iterator
 from pathlib import Path
 from shutil import copytree
@@ -26,16 +25,10 @@ from custom_components.controlel.const import (
 )
 
 ROOT = Path(__file__).parents[4]
-FRAMEWORK_COMPOSITION_ENV = "CONTROLEL_FRAMEWORK_COMPOSITION"
 MANIFEST_REQUIREMENT = json.loads(
     (ROOT / "custom_components" / "controlel" / "manifest.json").read_text(encoding="utf-8")
 )["requirements"][0]
 MANIFEST_CORE_VERSION = MANIFEST_REQUIREMENT.removeprefix("controlel==")
-CANDIDATE_CORE_VERSION = "0.16.0"
-FRAMEWORK_CORE_VERSION_BY_COMPOSITION = {
-    "public": MANIFEST_CORE_VERSION,
-    "candidate": CANDIDATE_CORE_VERSION,
-}
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -44,21 +37,9 @@ def pytest_configure(config: pytest.Config) -> None:
 
 
 @pytest.fixture(scope="session")
-def framework_composition() -> str:
-    """Return the explicitly selected framework package composition."""
-    composition = os.environ.get(FRAMEWORK_COMPOSITION_ENV)
-    if composition not in FRAMEWORK_CORE_VERSION_BY_COMPOSITION:
-        pytest.fail(
-            f"{FRAMEWORK_COMPOSITION_ENV} must be one of "
-            f"{sorted(FRAMEWORK_CORE_VERSION_BY_COMPOSITION)}, got {composition!r}"
-        )
-    return composition
-
-
-@pytest.fixture(scope="session")
-def expected_framework_core_version(framework_composition: str) -> str:
-    """Return the exact core version selected by the framework composition."""
-    return FRAMEWORK_CORE_VERSION_BY_COMPOSITION[framework_composition]
+def expected_framework_core_version() -> str:
+    """Return the exact public core version declared by the integration manifest."""
+    return MANIFEST_CORE_VERSION
 
 
 @pytest.fixture(scope="session")

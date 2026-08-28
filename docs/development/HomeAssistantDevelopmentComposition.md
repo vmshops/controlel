@@ -2,9 +2,8 @@
 
 The development composition is a local-test artifact that keeps one integration
 ZIP and its exact Core wheel together. It is intentionally non-publishable. The
-source integration manifest continues to require immutable, published
-`controlel==0.15.0`; only the integration copy inside this bundle is overlaid to
-require candidate Core `controlel==0.16.0`.
+source integration manifest requires immutable, published `controlel==0.16.0`;
+the bundled integration copy inside this artifact uses the same exact pin.
 
 ## Build
 
@@ -12,7 +11,7 @@ Run from WSL in the Windows worktree. Git identity is read through Windows Git
 because this worktree's metadata contains Windows paths:
 
 ```bash
-cd /mnt/c/GitHub/Controlel/controlel-heating-runtime
+cd /mnt/c/GitHub/Controlel/controlel-ha-core-016
 source_ref="$(git.exe rev-parse HEAD | tr -d '\r')"
 export SOURCE_DATE_EPOCH="$(git.exe show -s --format=%ct HEAD | tr -d '\r')"
 .venv/bin/python scripts/packaging/build_development_composition.py \
@@ -48,7 +47,7 @@ find "$HA_CONFIG/custom_components/controlel" -type d -name __pycache__ \
 ```
 
 The version check must print `0.16.0`. Start Home Assistant and confirm that its
-log loads integration `0.13.0` with requirement `controlel==0.16.0`, then run
+log loads integration `0.14.0` with requirement `controlel==0.16.0`, then run
 the Setup Wizard smoke flow. A restart of an existing Docker container retains
 the wheel; recreating the container does not, so reinstall the wheel after a
 container recreation.

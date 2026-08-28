@@ -9,7 +9,7 @@ import controlel
 from custom_components.controlel.const import DOMAIN
 
 ROOT = Path(__file__).parents[4].resolve()
-INTEGRATION_VERSION = "0.13.0"
+INTEGRATION_VERSION = "0.14.0"
 
 
 @pytest.mark.asyncio
@@ -32,23 +32,15 @@ async def test_real_loader_accepts_manifest_and_discovers_component(
     assert integration.file_path.name == DOMAIN
 
 
-def test_core_package_matches_framework_composition(
-    framework_composition: str,
-    expected_framework_core_version: str,
-) -> None:
+def test_core_package_matches_public_composition(expected_framework_core_version: str) -> None:
     package_path = Path(controlel.__file__).resolve()
     source_root = (ROOT / "src").resolve()
 
     assert importlib.metadata.version("controlel") == expected_framework_core_version
     assert controlel.__version__ == expected_framework_core_version
-    if framework_composition == "public":
-        assert "site-packages" in package_path.as_posix()
-        assert not package_path.is_relative_to(source_root)
-        assert source_root not in {Path(entry or ".").resolve() for entry in sys.path}
-        return
-
-    assert framework_composition == "candidate"
-    assert package_path.is_relative_to(source_root)
+    assert "site-packages" in package_path.as_posix()
+    assert not package_path.is_relative_to(source_root)
+    assert source_root not in {Path(entry or ".").resolve() for entry in sys.path}
 
 
 def test_custom_component_does_not_vendor_core() -> None:

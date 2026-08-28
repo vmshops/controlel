@@ -20,14 +20,14 @@ The goal is to create a reliable heating controller capable of optimizing comfor
 
 ## Status
 
-Project phase: Home Assistant 0.13.0 release candidate preparation
+Project phase: Home Assistant 0.14.0 release candidate preparation
 
-Published Core package: 0.14.0
+Published Core package: 0.16.0
 Published Home Assistant integration: 0.12.0
-Repository Home Assistant candidate: 0.13.0
+Repository Home Assistant candidate: 0.14.0
 
 The checked-out integration candidate pins exact public Core
-`controlel==0.14.0`. Core 0.14.0 is published on PyPI and independently
+`controlel==0.16.0`. Core 0.16.0 is published on PyPI and independently
 verified against its immutable tag-bound wheel and sdist provenance.
 
 The candidate ships the read-only Frontend API v1 bridge, authenticated Home
@@ -53,6 +53,7 @@ installation flow is:
 
 The currently published integration manifest makes Home Assistant install exact
 public Core `controlel==0.12.0`; users must not install the core manually.
+The repository candidate `0.14.0` pins `controlel==0.16.0` for HAOS testing.
 Detailed prerequisites, configuration, safety behavior, manual installation,
 upgrades, removal, and current limitations are in the
 [Home Assistant installation guide](docs/operations/HomeAssistantInstallation.md).

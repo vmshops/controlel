@@ -7,7 +7,7 @@ from homeassistant.loader import async_get_integration
 import controlel
 
 CORE_VERSION = "0.16.0"
-INTEGRATION_VERSION = "0.13.0"
+INTEGRATION_VERSION = "0.14.0"
 
 
 @pytest.mark.asyncio

@@ -7,13 +7,53 @@
 metadata_version: 1
 
 releases:
+  - release_id: controlel-home_assistant-0.14.0
+    component: home_assistant
+    title: "Controlel Home Assistant integration 0.14.0"
+    version: "0.14.0"
+    status: candidate
+    tag: null
+    commit_sha: null
+    summary: "Canonical configuration v3 Configure, Setup Wizard, and Heating settings over public Core 0.16.0"
+    highlights:
+      - "Configure flow, Setup Wizard, and Heating settings consume canonical configuration v3 lifecycle contracts"
+      - "Deterministic v2-to-v3 Heating migration with explicit conversion review and activation"
+      - "Authenticated WebSocket commands for canonicalize, activate, and read-only Frontend API v1 surfaces"
+      - "Deterministic HACS release artifact prepared for real HAOS installation testing"
+    compatibility:
+      required_core: "0.16.0"
+      config_entry_version: 1
+      home_assistant: "2026.7.3"
+    notes:
+      - "Existing version-1 config entries retain their runtime/configuration path without automatic migration."
+      - "The integration pins exactly controlel==0.16.0 from public PyPI; HA adapter and framework CI install that package, not editable source."
+      - "The integration remains unpublished pending real HAOS installation testing and separate release approval."
+
   - release_id: controlel-core-0.16.0
     component: core
     title: "Controlel Core 0.16.0"
     version: "0.16.0"
-    status: candidate
-    tag: null
-    commit_sha: null
+    status: published
+    tag: "core-v0.16.0"
+    commit_sha: "6a587728551a1ae8f9d04b8ddef8f2cde288a469"
+    tagged_at: "2026-08-28T19:13:55+02:00"
+    published_at: "2026-08-28T17:19:16Z"
+    provenance:
+      method: "tag-bound deterministic build verified against public PyPI bytes"
+      tag_object_sha: "2aad5aec4b01be907b7e48fd0150d9a2c75e6297"
+      resolved_tag_commit: "6a587728551a1ae8f9d04b8ddef8f2cde288a469"
+      verification_status: passed
+    artifacts:
+      wheel:
+        filename: "controlel-0.16.0-py3-none-any.whl"
+        size: 262788
+        sha256: "1bd604429b8a655f6a4295f8b95378fafa194ff9c070eb884745a620cb3c0b8e"
+        uploaded_at: "2026-08-28T17:19:16Z"
+      sdist:
+        filename: "controlel-0.16.0.tar.gz"
+        size: 185466
+        sha256: "6a132d3af66261b704d07e055305fe81d62c9648bbd075a3c66300c98cd3050a"
+        uploaded_at: "2026-08-28T17:19:16Z"
     summary: "Canonical configuration v3 backend for Configure, Setup Wizard, and Heating settings"
     highlights:
       - "Versioned canonical configuration schema v3 with explicit field ownership and editability"
@@ -21,14 +61,13 @@ releases:
       - "Greenfield authoring and deterministic v2-to-v3 Heating migration"
       - "Frontend-neutral lifecycle contracts consumed by Home Assistant adapter surfaces"
     compatibility:
-      home_assistant_development_composition: "0.13.0"
+      home_assistant_integration_candidate: "0.14.0"
       python: ">=3.13"
       pydantic: ">=2.0"
     notes:
-      - "Unreleased development candidate; no tag, publication, or public artifact identity exists yet."
       - "No runtime control algorithm, activation behavior change, or automatic migration beyond explicit v2-to-v3 conversion is included."
-      - "Published Core 0.15.0 records and any future public artifact identities remain unchanged until separate publication."
-      - "Home Assistant integration manifest dependency pin remains on published Core 0.15.0 until a separate integration release."
+      - "Published PyPI bytes match the deterministic final artifacts bound to core-v0.16.0."
+      - "Home Assistant integration 0.14.0 candidate pins this package exactly."
 
   - release_id: controlel-core-0.15.0
     component: core

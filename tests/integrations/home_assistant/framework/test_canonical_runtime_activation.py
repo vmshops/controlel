@@ -79,7 +79,7 @@ async def _canonical_candidate(
         revision_id=revision_id,
         created_at=NOW,
         core_version="0.14.0",
-        integration_version="0.13.0",
+        integration_version="0.14.0",
     )
     target_environment = environment_id or provider_instance_id
     snapshot = await HomeAssistantDiscoveryAdapter.async_snapshot_from_hass(
@@ -132,7 +132,7 @@ async def _canonical_candidate(
         change_kind="CREATE",
         reason="canonical_runtime_test",
         core_version="0.14.0",
-        integration_version="0.13.0",
+        integration_version="0.14.0",
     )
     backend = await async_get_setup_backend(hass, entry)
     await backend.repository.add_canonical_revision(candidate)
@@ -470,7 +470,7 @@ async def test_canonical_v3_edit_activate_read_and_restart_lifecycle(
             "change_kind": "UPDATE",
             "reason": "adjust_target",
             "core_version": "0.16.0",
-            "integration_version": "0.13.0",
+            "integration_version": "0.14.0",
         }
     )
     canonicalize_response = await client.receive_json()
@@ -752,7 +752,7 @@ async def test_v3_canonicalization_revalidates_live_reference_health(
             "change_kind": "UPDATE",
             "reason": "reference_removed_after_validation",
             "core_version": "0.16.0",
-            "integration_version": "0.13.0",
+            "integration_version": "0.14.0",
         }
     )
     canonicalize_response = await client.receive_json()
@@ -876,7 +876,7 @@ async def test_greenfield_v3_authoring_validates_canonicalizes_activates_and_res
             "change_kind": "CREATE",
             "reason": "greenfield_setup",
             "core_version": "0.16.0",
-            "integration_version": "0.13.0",
+            "integration_version": "0.14.0",
         }
     )
     canonical_response = await client.receive_json()
@@ -1009,7 +1009,7 @@ async def test_active_v2_conversion_is_idempotent_and_switches_wholly_on_explici
             "change_kind": "MIGRATE",
             "reason": "explicit_v2_conversion",
             "core_version": "0.16.0",
-            "integration_version": "0.13.0",
+            "integration_version": "0.14.0",
         }
     )
     canonical_response = await client.receive_json()
@@ -1084,7 +1084,7 @@ async def test_explicit_legacy_to_v2_to_v3_conversion_preserves_runtime_until_ac
         "snapshot_id": "legacy-v3-conversion",
         "created_at": NOW.isoformat(),
         "core_version": "0.16.0",
-        "integration_version": "0.13.0",
+        "integration_version": "0.14.0",
     }
     await client.send_json_auto_id(conversion_request)
     conversion_response = await client.receive_json()
@@ -1141,7 +1141,7 @@ async def test_explicit_legacy_to_v2_to_v3_conversion_preserves_runtime_until_ac
             "change_kind": "MIGRATE",
             "reason": "explicit_legacy_conversion",
             "core_version": "0.16.0",
-            "integration_version": "0.13.0",
+            "integration_version": "0.14.0",
         }
     )
     canonical_response = await client.receive_json()
@@ -1220,7 +1220,7 @@ async def test_legacy_conversion_surfaces_ephemeral_missing_bindings_without_a_v
             "snapshot_id": "unresolved-legacy-v3-conversion",
             "created_at": NOW.isoformat(),
             "core_version": "0.16.0",
-            "integration_version": "0.13.0",
+            "integration_version": "0.14.0",
         }
     )
     response = await client.receive_json()
@@ -1264,7 +1264,7 @@ async def test_legacy_conversion_surfaces_ephemeral_missing_bindings_without_a_v
         "snapshot_id": "unresolved-legacy-v3-conversion",
         "created_at": NOW.isoformat(),
         "core_version": "0.16.0",
-        "integration_version": "0.13.0",
+        "integration_version": "0.14.0",
         "binding_overrides": {
             "heating.primary_temperature": sensor_override,
             "heating.source.enable_target": source_override,

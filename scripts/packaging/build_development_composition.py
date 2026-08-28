@@ -121,8 +121,8 @@ Install in this order while Home Assistant is stopped:
    `HA_PYTHON -c "import importlib.metadata; print(importlib.metadata.version('controlel'))"`
    The result must be `{core_version}`.
 
-The integration ZIP carries an exact `controlel=={core_version}` development
-pin. The repository's release manifest remains pinned to published Core 0.15.0.
+The integration ZIP carries an exact `controlel=={core_version}` pin matching the
+published release manifest.
 """.encode()
 
 
@@ -236,7 +236,7 @@ def validate_development_composition(archive_path: Path, *, expected_core_versio
         raise DevelopmentCompositionError("development integration hash does not match")
     if integration.get("development_requirement") != f"controlel=={expected_core_version}":
         raise DevelopmentCompositionError("development integration requirement does not match Core")
-    if integration.get("release_source_requirement") != "controlel==0.15.0":
+    if integration.get("release_source_requirement") != "controlel==0.16.0":
         raise DevelopmentCompositionError("published integration requirement history was not preserved")
     wheel_name, wheel_version = _wheel_identity(wheel_content)
     if (wheel_name.casefold(), wheel_version) != ("controlel", expected_core_version):

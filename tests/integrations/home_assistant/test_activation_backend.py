@@ -47,7 +47,7 @@ def canonical_revision(request: pytest.FixtureRequest):
         change_kind="UPDATE",
         reason="activation_backend_test",
         core_version="0.14.0",
-        integration_version="0.13.0",
+        integration_version="0.14.0",
     )
     if request.param == "v2":
         return v2

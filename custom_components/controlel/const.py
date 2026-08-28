@@ -18,7 +18,7 @@ from controlel.application.configuration.canonical_defaults import (
 from controlel.domain import notifications as core_notifications
 
 DOMAIN = "controlel"
-INTEGRATION_VERSION = "0.13.0"
+INTEGRATION_VERSION = "0.14.0"
 CONFIG_ENTRY_VERSION = 1
 
 CONTROL_MODE_SIMPLE = "simple_switch"

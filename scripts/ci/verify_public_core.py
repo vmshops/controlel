@@ -12,6 +12,11 @@ from pathlib import Path
 from urllib.request import Request, urlopen
 
 import controlel
+from controlel.application.configuration import (
+    CanonicalConfigurationDraftV3,
+    CanonicalConfigurationRevisionV3,
+    migrate_heating_v2_revision_to_v3,
+)
 from controlel.application.setup import (
     ActiveReference,
     CanonicalConfigurationRevision,
@@ -39,14 +44,14 @@ from controlel.infrastructure.home_assistant import (
 )
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-CORE_VERSION = "0.15.0"
+CORE_VERSION = "0.16.0"
 CORE_REQUIREMENT = f"controlel=={CORE_VERSION}"
-PUBLIC_WHEEL_FILENAME = "controlel-0.15.0-py3-none-any.whl"
-PUBLIC_WHEEL_SIZE = 239_714
-PUBLIC_WHEEL_SHA256 = "e76b984aa62c695bc65e694c42c9d8d817fabcad32e7bfedb9d85dda340b420e"
-PUBLIC_SDIST_FILENAME = "controlel-0.15.0.tar.gz"
-PUBLIC_SDIST_SIZE = 167_206
-PUBLIC_SDIST_SHA256 = "88d5e65fb42f639b8e6a838d5d639ff80ff0683689e36991e9121a64a6bc35cf"
+PUBLIC_WHEEL_FILENAME = "controlel-0.16.0-py3-none-any.whl"
+PUBLIC_WHEEL_SIZE = 262_788
+PUBLIC_WHEEL_SHA256 = "1bd604429b8a655f6a4295f8b95378fafa194ff9c070eb884745a620cb3c0b8e"
+PUBLIC_SDIST_FILENAME = "controlel-0.16.0.tar.gz"
+PUBLIC_SDIST_SIZE = 185_466
+PUBLIC_SDIST_SHA256 = "6a132d3af66261b704d07e055305fe81d62c9648bbd075a3c66300c98cd3050a"
 PYPI_METADATA_URL = f"https://pypi.org/pypi/controlel/{CORE_VERSION}/json"
 
 
@@ -133,6 +138,15 @@ def main() -> int:
     assert hasattr(HeatingSetupHostService, "canonicalize_heating_draft")
     assert not hasattr(HeatingSetupHostService, "activate")
     assert not hasattr(HeatingSetupHostService, "activate_heating_draft")
+
+    canonical_v3_contracts = (
+        CanonicalConfigurationDraftV3,
+        CanonicalConfigurationRevisionV3,
+        migrate_heating_v2_revision_to_v3,
+    )
+    assert all(
+        _contract_module_path(contract).is_relative_to(package_path.parent) for contract in canonical_v3_contracts
+    )
 
     frontend_api_contracts = (
         BuildingEvidenceV1,
