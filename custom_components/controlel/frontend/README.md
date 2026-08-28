@@ -22,9 +22,9 @@ python -m http.server 8000
 | --- | --- |
 | `overview` (default) | Overall status, module states, important warnings, quick actions |
 | `modules` | Module cards: Heating (configured/incomplete), Smart Charging, Lighting, Water Safety (not configured / coming later) |
-| `heating` | Zone, reported temperature, target, demand state, heat source permission state, status/reason, configuration completeness, recent events |
+| `heating` | Active canonical-v3 revision and single-zone settings editor, plus separate operational zone, demand and heat-source evidence |
 | `diagnostics` | Readable activity list with Basic / Detailed / Debug display levels; reason codes and raw metadata behind expandable Details |
-| `settings` | Settings overview (navigation/structure only, not a settings form) |
+| `settings` | Shared canonical-v3 Heating summary/editor plus frontend-local and placeholder settings |
 | `setup` | Real discovery, resumable draft editing, and backend validation |
 
 Navigation is hash-based (`#/route`), so deep links and back/forward work.
@@ -51,8 +51,21 @@ targets → heating settings → review and canonical-v3 lifecycle actions.
 - No runtime-control or HA device-service action is exposed by the wizard.
 
 An incomplete Heating module surfaces **Continue setup** actions (Overview,
-Modules, Heating, Settings) that open the wizard. Starting discovery reopens a
+Modules and Heating) that open the wizard. Starting discovery reopens a
 known persisted canonical-v3 draft or clones active canonical-v3 authority for editing.
+
+## Heating settings
+
+Heating and Settings project the same active canonical-v3 authority used by
+the Setup Wizard and native Home Assistant Configure. The projection displays
+the active revision/generation, stable single-zone bindings, and the existing
+compact set of typed Heating values with explicit Celsius/seconds units.
+
+**Edit configuration** reopens a compatible persisted draft or clones the
+active revision into a new draft. It never changes active authority directly.
+Save Draft, Validate, Canonicalize, and Activate remain separate backend
+transitions. Stable Controlel identities, runtime evidence, and deferred
+physical-operation fields are preserved but are not editable on this surface.
 
 ## Files
 
@@ -85,9 +98,9 @@ node --test tests/*.test.js
 ```
 
 Covered: navigation and route fallback, module states, diagnostics filtering,
-real setup request mapping, discovery response rendering, cross-client draft
-resume, canonical create/edit/update/validate/canonicalize/activate boundaries,
-explicit backend errors, and no mock fallback.
+real setup request mapping, discovery response rendering, cross-surface draft
+resume, active Heating projection, canonical create/edit/update/validate/
+canonicalize/activate boundaries, explicit backend errors, and no mock fallback.
 
 ## Architecture notes
 

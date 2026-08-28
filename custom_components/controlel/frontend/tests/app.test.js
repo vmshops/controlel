@@ -131,7 +131,7 @@ function fakeConnection({ responses = {}, failTransport = false } = {}) {
 
 // ------------------------------------------------------------- app builder
 
-function buildApp({ mode = "real", responses = fullResponses(), failTransport = false, withDemo = true } = {}) {
+function buildApp({ mode = "real", responses = fullResponses(), failTransport = false, withDemo = true, canonicalClient = null } = {}) {
   const connection = fakeConnection({ responses, failTransport });
   const client = CA_API.createFrontendApiClient({ connection, configEntryId: "entry-1", timeoutMs: 1000 });
   const dataSource = CA_API.createRealDataSource(client);
@@ -155,14 +155,111 @@ function buildApp({ mode = "real", responses = fullResponses(), failTransport = 
     topbarStatusRoot: topbar,
     modeRoot: modeEl,
     renderRoot: root,
+    canonicalClient,
+    actor: "home_assistant:test-admin",
+    now: () => "2026-08-28T10:00:00Z",
+    idFactory: (prefix) => `${prefix}-test`,
   });
   return { app, root, navRoot, viewRoot, wizardRoot, topbar, modeEl, connection };
 }
 
 /** Await all in-flight domain loads so the view has re-rendered. */
 async function settle(app) {
-  const pending = Object.values(app.state.domains).map((d) => d.inflight).filter(Boolean);
+  const pending = [
+    ...Object.values(app.state.domains).map((d) => d.inflight),
+    app.state.canonical && app.state.canonical.inflight,
+  ].filter(Boolean);
   if (pending.length) await Promise.all(pending);
+}
+
+function canonicalDocument(target = 22) {
+  const area = { provider: "home_assistant", provider_instance_id: "ha-home", object_kind: "home_assistant.area", native_id: "living", identity_quality: "STABLE", current_locator: null };
+  const sensor = { provider: "home_assistant", provider_instance_id: "ha-home", object_kind: "home_assistant.entity", native_id: "sensor-id", identity_quality: "STABLE", current_locator: "sensor.living_temperature" };
+  const source = { provider: "home_assistant", provider_instance_id: "ha-home", object_kind: "home_assistant.entity", native_id: "source-id", identity_quality: "STABLE", current_locator: "switch.boiler" };
+  return {
+    heating: {
+      global: { maximum_future_skew_seconds: 30 },
+      zones: [{
+        zone_id: "main_zone", display_name: "Living room", topology: { area_reference: area, floor_reference: null },
+        primary_temperature_sensor: { sensor_id: "primary_temperature_sensor", display_name: "Living temperature", provider_reference: sensor },
+        demand_policy: {
+          target_temperature_celsius: target, heating_turn_on_differential_celsius: 0.3,
+          heating_turn_off_differential_celsius: 0.1, heat_demand_confirmation_seconds: 120,
+          primary_measurement_max_age_seconds: 900,
+        },
+      }],
+      heat_sources: [{
+        heat_source_id: "main_heat_source", display_name: "Boiler permission", provider_reference: source,
+        command_strategy: {
+          mode: "simple",
+          enable_permission: { domain: "switch", service: "turn_on", command_target_reference: source },
+          disable_permission: { domain: "switch", service: "turn_off", command_target_reference: source },
+        },
+        observations: { reported_actuator_state_reference: source, physical_operation_reference: null },
+        protection: {
+          indeterminate_grace_period_seconds: 120, indeterminate_timeout_action: "disable_heating",
+          minimum_heating_on_seconds: 600, minimum_heating_off_seconds: 300,
+        },
+      }],
+      heat_delivery: [{ zone_id: "main_zone", mode: "unmanaged", actuator_reference: null, ownership: "device_owned", assist_policy: "no_assist", assist_target_celsius: 30 }],
+    },
+    diagnostics: { steady_profile: "detailed", debug_policy: { configured_duration_seconds: 1200, until_changed: true } },
+    notifications: { enabled: false, recipients: [], maximum_per_window: 7, rate_window_seconds: 60, critical_maximum_per_window: 3, critical_rate_window_seconds: 60, history_capacity: 99 },
+  };
+}
+
+function fakeCanonicalClient({ existingDraft = false } = {}) {
+  const calls = [];
+  let scopes = canonicalDocument();
+  let activeRevision = {
+    schema_version: 3, configuration_id: "heating-config", revision_id: "canonical-active-22", revision: 4,
+    semantic_configuration_fingerprint: "a".repeat(64), ...scopes,
+  };
+  let active = {
+    active_reference: { canonical_revision_id: activeRevision.revision_id, semantic_configuration_fingerprint: activeRevision.semantic_configuration_fingerprint, generation: 7 },
+    canonical_revision: activeRevision, configuration_scopes: scopes, provenance: {}, reference_health: [], runtime_evidence: {},
+  };
+  let draft = existingDraft ? {
+    schema_version: 3, draft_id: "shared-draft", revision: 2, configuration_id: "heating-config",
+    base_active_revision_id: "canonical-active-22", base_active_generation: 7, canonical_revision: 5,
+    created_at: "2026-08-28T09:00:00Z", updated_at: "2026-08-28T09:30:00Z", ...scopes,
+  } : null;
+  let candidate = null;
+  return {
+    calls,
+    discover(request) { calls.push(["discovery", request]); return Promise.resolve({ snapshot_id: request.snapshot_id }); },
+    defaults() { calls.push(["defaults", {}]); return Promise.resolve({ core_version: "0.15.0", integration_version: "0.13.0" }); },
+    readActive(request) { calls.push(["active", request]); return Promise.resolve(active); },
+    listDrafts() { calls.push(["drafts", {}]); return Promise.resolve(draft ? [draft] : []); },
+    editDraft(request) {
+      calls.push(["edit", request]);
+      draft = { schema_version: 3, draft_id: request.draft_id, revision: 1, configuration_id: "heating-config", base_active_revision_id: active.active_reference.canonical_revision_id, base_active_generation: active.active_reference.generation, canonical_revision: 5, created_at: request.created_at, updated_at: request.created_at, ...scopes };
+      return Promise.resolve(draft);
+    },
+    reopenDraft(request) { calls.push(["reopen", request]); return Promise.resolve(draft); },
+    updateDraft(request) {
+      calls.push(["update", request]);
+      scopes = request.configuration_scopes;
+      draft = { ...draft, revision: draft.revision + 1, updated_at: request.updated_at, ...scopes };
+      return Promise.resolve(draft);
+    },
+    validateDraft(request) {
+      calls.push(["validate", request]);
+      return Promise.resolve({ report_id: request.report_id, draft_id: draft.draft_id, draft_revision: draft.revision, activation_ready: true, issue_codes: [], reference_health: [] });
+    },
+    canonicalizeDraft(request) {
+      calls.push(["canonicalize", request]);
+      candidate = { schema_version: 3, configuration_id: "heating-config", revision_id: request.revision_id, revision: 5, semantic_configuration_fingerprint: "b".repeat(64), ...scopes };
+      return Promise.resolve(candidate);
+    },
+    activateRevision(request) {
+      calls.push(["activate", request]);
+      activeRevision = candidate;
+      active = { ...active, active_reference: { canonical_revision_id: candidate.revision_id, semantic_configuration_fingerprint: candidate.semantic_configuration_fingerprint, generation: 8 }, canonical_revision: candidate, configuration_scopes: scopes };
+      draft = null;
+      return Promise.resolve({ generation: 8, canonical_revision_id: candidate.revision_id });
+    },
+  };
 }
 
 // ---------------------------------------------------------------- navigation
@@ -348,14 +445,67 @@ test("diagnostics shows health, level filtering and the activity list", async ()
   assert.equal(rows.length, 2, "debug level shows all events");
 });
 
-test("settings reflects the real readiness state and keeps placeholders", async () => {
-  const { app, viewRoot } = buildApp();
+test("settings reflects readiness, canonical authority and keeps placeholders", async () => {
+  const canonicalClient = fakeCanonicalClient();
+  const { app, viewRoot } = buildApp({ canonicalClient });
   app.navigate("settings");
   await settle(app);
   assert.ok(viewRoot.textContent.includes("Heating configuration"));
   assert.ok(viewRoot.textContent.includes("Incomplete"), "real readiness state on the heating row");
+  assert.ok(viewRoot.textContent.includes("canonical-active-22"), "active canonical revision is shown");
+  assert.ok(viewRoot.textContent.includes("22"), "active canonical target is shown");
   assert.ok(viewRoot.textContent.includes("Notifications"), "placeholder row kept");
-  assert.ok(viewRoot.findButton("Continue setup"), "links to setup");
+  assert.ok(viewRoot.findButton("Edit configuration"), "canonical edit action is available");
+});
+
+test("Heating edits through the explicit canonical-v3 lifecycle without mutating active authority", async () => {
+  const canonicalClient = fakeCanonicalClient();
+  const { app, viewRoot } = buildApp({ canonicalClient });
+  app.navigate("heating");
+  await settle(app);
+
+  assert.ok(viewRoot.textContent.includes("canonical-active-22"));
+  assert.equal(CA.canonicalHeatingValues(app.state.canonical.active.configuration_scopes).target_temperature_celsius, 22);
+
+  await app.editCanonical();
+  assert.equal(canonicalClient.calls.filter(([name]) => name === "edit").length, 1, "active authority was cloned to a draft");
+  app.setCanonicalValue("heating_turn_on_differential_celsius", "0.5");
+  assert.equal(CA.canonicalHeatingValues(app.state.canonical.active.configuration_scopes).heating_turn_on_differential_celsius, 0.3, "active revision remains immutable while editing");
+  assert.ok(viewRoot.textContent.includes("Unsaved changes"));
+
+  await app.saveCanonicalDraft();
+  const update = canonicalClient.calls.find(([name]) => name === "update")[1];
+  assert.equal(update.configuration_scopes.heating.zones[0].demand_policy.heating_turn_on_differential_celsius, 0.5);
+  assert.equal(update.configuration_scopes.heating.zones[0].demand_policy.target_temperature_celsius, 22, "unchanged canonical values are preserved");
+  assert.equal(update.configuration_scopes.heating.heat_sources[0].observations.physical_operation_reference, null, "deferred field is preserved, not edited");
+
+  await app.validateCanonicalDraft();
+  await app.canonicalizeCanonicalDraft();
+  await app.activateCanonicalRevision();
+  await settle(app);
+
+  assert.deepEqual(
+    canonicalClient.calls.filter(([name]) => ["edit", "update", "validate", "canonicalize", "activate"].includes(name)).map(([name]) => name),
+    ["edit", "update", "validate", "canonicalize", "activate"]
+  );
+  const canonicalize = canonicalClient.calls.find(([name]) => name === "canonicalize")[1];
+  assert.equal(canonicalize.source, "controlel_heating_settings");
+  assert.equal(canonicalize.change_kind, "UPDATE");
+  assert.equal(app.state.canonical.active.active_reference.generation, 8);
+  assert.equal(CA.canonicalHeatingValues(app.state.canonical.active.configuration_scopes).heating_turn_on_differential_celsius, 0.5);
+});
+
+test("Heating reopens a compatible persisted canonical draft", async () => {
+  const canonicalClient = fakeCanonicalClient({ existingDraft: true });
+  const { app, viewRoot } = buildApp({ canonicalClient });
+  app.navigate("heating");
+  await settle(app);
+  assert.ok(viewRoot.findButton("Reopen draft"));
+
+  await app.editCanonical();
+  assert.equal(canonicalClient.calls.filter(([name]) => name === "reopen").length, 1);
+  assert.equal(canonicalClient.calls.filter(([name]) => name === "edit").length, 0);
+  assert.equal(app.state.canonical.session.draft_id, "shared-draft");
 });
 
 test("setup view shows real readiness, missing config and validation", async () => {

@@ -129,6 +129,60 @@
     missing: { label: "Missing", tone: "neutral", key: "state.missing" },
   };
 
+  const CANONICAL_HEATING_FIELDS = [
+    { name: "target_temperature_celsius", key: "wizard.target_temperature", unit: "°C", min: null, step: "0.1", owner: "zone" },
+    { name: "heating_turn_on_differential_celsius", key: "wizard.turn_on_differential", unit: "°C", min: 0, step: "0.1", owner: "zone" },
+    { name: "heating_turn_off_differential_celsius", key: "wizard.turn_off_differential", unit: "°C", min: 0, step: "0.1", owner: "zone" },
+    { name: "heat_demand_confirmation_seconds", key: "wizard.demand_confirmation", unitKey: "wizard.seconds", min: 0, step: "1", owner: "zone" },
+    { name: "primary_measurement_max_age_seconds", key: "wizard.measurement_max_age", unitKey: "wizard.seconds", min: 1, step: "1", owner: "zone" },
+    { name: "maximum_future_skew_seconds", key: "wizard.maximum_future_skew", unitKey: "wizard.seconds", min: 0, step: "1", owner: "global" },
+    { name: "indeterminate_grace_period_seconds", key: "wizard.indeterminate_grace", unitKey: "wizard.seconds", min: 0, step: "1", owner: "source" },
+    { name: "minimum_heating_on_seconds", key: "wizard.minimum_on_time", unitKey: "wizard.seconds", min: 0, step: "1", owner: "source" },
+    { name: "minimum_heating_off_seconds", key: "wizard.minimum_off_time", unitKey: "wizard.seconds", min: 0, step: "1", owner: "source" },
+  ];
+
+  function deepCopy(value) {
+    return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
+  }
+
+  function canonicalHeatingValues(document) {
+    const heating = document && document.heating;
+    const zone = heating && heating.zones && heating.zones[0];
+    const source = heating && heating.heat_sources && heating.heat_sources[0];
+    if (!heating || !zone || !source || heating.zones.length !== 1 || heating.heat_sources.length !== 1) return null;
+    return {
+      target_temperature_celsius: zone.demand_policy.target_temperature_celsius,
+      heating_turn_on_differential_celsius: zone.demand_policy.heating_turn_on_differential_celsius,
+      heating_turn_off_differential_celsius: zone.demand_policy.heating_turn_off_differential_celsius,
+      heat_demand_confirmation_seconds: zone.demand_policy.heat_demand_confirmation_seconds,
+      primary_measurement_max_age_seconds: zone.demand_policy.primary_measurement_max_age_seconds,
+      maximum_future_skew_seconds: heating.global.maximum_future_skew_seconds,
+      indeterminate_grace_period_seconds: source.protection.indeterminate_grace_period_seconds,
+      minimum_heating_on_seconds: source.protection.minimum_heating_on_seconds,
+      minimum_heating_off_seconds: source.protection.minimum_heating_off_seconds,
+    };
+  }
+
+  function canonicalScopesWithHeatingValues(session, values) {
+    const scopes = {
+      heating: deepCopy(session.heating),
+      diagnostics: deepCopy(session.diagnostics),
+      notifications: deepCopy(session.notifications),
+    };
+    const zone = scopes.heating.zones[0];
+    const source = scopes.heating.heat_sources[0];
+    zone.demand_policy.target_temperature_celsius = values.target_temperature_celsius;
+    zone.demand_policy.heating_turn_on_differential_celsius = values.heating_turn_on_differential_celsius;
+    zone.demand_policy.heating_turn_off_differential_celsius = values.heating_turn_off_differential_celsius;
+    zone.demand_policy.heat_demand_confirmation_seconds = values.heat_demand_confirmation_seconds;
+    zone.demand_policy.primary_measurement_max_age_seconds = values.primary_measurement_max_age_seconds;
+    scopes.heating.global.maximum_future_skew_seconds = values.maximum_future_skew_seconds;
+    source.protection.indeterminate_grace_period_seconds = values.indeterminate_grace_period_seconds;
+    source.protection.minimum_heating_on_seconds = values.minimum_heating_on_seconds;
+    source.protection.minimum_heating_off_seconds = values.minimum_heating_off_seconds;
+    return scopes;
+  }
+
   /**
    * {label, tone} for a state string (public contract; unknown states stay
    * neutral). The map entries also carry a translation `key`, which the
@@ -234,7 +288,17 @@
     modeRoot,
     renderRoot,
     onSetupState,
+    canonicalClient,
+    actor,
+    now,
+    idFactory,
   }) {
+    let idSequence = 0;
+    const canonicalNow = typeof now === "function" ? now : () => new Date().toISOString();
+    const makeId = typeof idFactory === "function" ? idFactory : (prefix) => {
+      idSequence += 1;
+      return `${prefix}-${Date.now()}-${idSequence}`;
+    };
     const state = {
       route: DEFAULT_ROUTE,
       mode,
@@ -246,6 +310,11 @@
         heating: freshDomain(),
         diagnostics: freshDomain(),
         setup: freshDomain(),
+      },
+      canonical: {
+        status: "idle", error: null, inflight: null, active: null, availableDraft: null,
+        session: null, form: null, dirty: false, validation: null, candidateRevision: null,
+        activation: null, snapshot: null, defaults: null, editing: false, operation: null,
       },
     };
 
@@ -261,7 +330,7 @@
         // Fresh data per view visit (read-only, event-driven). The setup
         // domain is kept cached because it drives the global topbar.
         for (const d of neededDomains(next)) {
-          if (d !== "setup") state.domains[d] = freshDomain();
+          if (d !== "setup" && d !== "canonical") state.domains[d] = freshDomain();
         }
         render();
       },
@@ -287,8 +356,16 @@
       },
       refresh() {
         for (const k of Object.keys(state.domains)) state.domains[k] = freshDomain();
+        state.canonical.status = "idle";
+        state.canonical.error = null;
         render();
       },
+      editCanonical: () => editCanonical(),
+      setCanonicalValue: (name, value) => setCanonicalValue(name, value),
+      saveCanonicalDraft: () => saveCanonicalDraft(),
+      validateCanonicalDraft: () => validateCanonicalDraft(),
+      canonicalizeCanonicalDraft: () => canonicalizeCanonicalDraft(),
+      activateCanonicalRevision: () => activateCanonicalRevision(),
       enableDemo() {
         if (!demoFactory) return;
         state.mode = "demo";
@@ -302,15 +379,16 @@
       switch (route) {
         case "overview": return ["overview", "setup"];
         case "modules": return ["overview"];
-        case "heating": return ["heating", "setup", "diagnostics"];
+        case "heating": return ["heating", "setup", "diagnostics", "canonical"];
         case "diagnostics": return ["diagnostics"];
-        case "settings": return ["setup"];
+        case "settings": return ["setup", "canonical"];
         case "setup": return ["setup"];
         default: return [];
       }
     }
 
     function loadDomain(domain) {
+      if (domain === "canonical") return loadCanonical();
       if (!state.dataSource) return Promise.resolve();
       const d = state.domains[domain];
       if (d.inflight) return d.inflight;
@@ -339,6 +417,186 @@
       );
       d.inflight = p;
       return p;
+    }
+
+    function canonicalContext() {
+      return { snapshot_id: makeId("heating-settings-snapshot"), captured_at: canonicalNow() };
+    }
+
+    function compatibleDraft(draft, active) {
+      return Boolean(draft && active && draft.configuration_id === active.canonical_revision.configuration_id &&
+        draft.base_active_revision_id === active.active_reference.canonical_revision_id &&
+        draft.base_active_generation === active.active_reference.generation);
+    }
+
+    function loadCanonical() {
+      const c = state.canonical;
+      if (!canonicalClient || c.inflight || c.status !== "idle") return c.inflight || Promise.resolve();
+      c.status = "loading";
+      c.error = null;
+      const context = canonicalContext();
+      const p = Promise.all([
+        canonicalClient.discover(context), canonicalClient.defaults(), canonicalClient.readActive(context), canonicalClient.listDrafts(),
+      ]).then(([snapshot, defaults, active, drafts]) => {
+        c.snapshot = snapshot;
+        c.defaults = defaults;
+        c.active = active;
+        c.availableDraft = drafts.filter((draft) => compatibleDraft(draft, active))
+          .sort((left, right) => String(right.updated_at).localeCompare(String(left.updated_at)))[0] || null;
+        c.status = "loaded";
+        c.error = null;
+        c.inflight = null;
+        render();
+        return active;
+      }, (error) => {
+        c.status = "error";
+        c.error = error;
+        c.inflight = null;
+        render();
+        return null;
+      });
+      c.inflight = p;
+      return p;
+    }
+
+    function applyCanonicalSession(session) {
+      const values = canonicalHeatingValues(session);
+      if (!values) throw new Error(t("canonical.single_zone_only"));
+      const c = state.canonical;
+      c.session = session;
+      c.form = values;
+      c.dirty = false;
+      c.validation = null;
+      c.candidateRevision = null;
+      c.activation = null;
+      c.editing = true;
+    }
+
+    async function canonicalOperation(name, operation) {
+      const c = state.canonical;
+      if (!canonicalClient || c.status === "saving") return null;
+      c.status = "saving";
+      c.operation = name;
+      c.error = null;
+      render();
+      try {
+        const result = await operation();
+        if (c.status === "saving") c.status = "loaded";
+        c.operation = null;
+        render();
+        return result;
+      } catch (error) {
+        c.status = "error";
+        c.operation = name;
+        c.error = error;
+        render();
+        return null;
+      }
+    }
+
+    function editCanonical() {
+      const c = state.canonical;
+      if (!c.active) return null;
+      return canonicalOperation("edit", async () => {
+        const session = c.availableDraft
+          ? await canonicalClient.reopenDraft({ draft_id: c.availableDraft.draft_id })
+          : await canonicalClient.editDraft({
+              draft_id: makeId("heating-settings-draft"),
+              created_at: canonicalNow(),
+              expected_active_generation: c.active.active_reference.generation,
+            });
+        applyCanonicalSession(session);
+        return session;
+      });
+    }
+
+    function setCanonicalValue(name, rawValue) {
+      const c = state.canonical;
+      if (!c.form || !CANONICAL_HEATING_FIELDS.some((field) => field.name === name)) return;
+      const value = Number(rawValue);
+      if (!Number.isFinite(value)) return;
+      c.form[name] = value;
+      c.dirty = true;
+      c.validation = null;
+      c.candidateRevision = null;
+      render();
+    }
+
+    function saveCanonicalDraft() {
+      const c = state.canonical;
+      if (!c.session || !c.form) return null;
+      return canonicalOperation("update", async () => {
+        const session = await canonicalClient.updateDraft({
+          draft_id: c.session.draft_id,
+          expected_revision: c.session.revision,
+          updated_at: canonicalNow(),
+          configuration_scopes: canonicalScopesWithHeatingValues(c.session, c.form),
+        });
+        applyCanonicalSession(session);
+        c.availableDraft = session;
+        return session;
+      });
+    }
+
+    function validateCanonicalDraft() {
+      const c = state.canonical;
+      if (!c.session || c.dirty || !c.snapshot) return null;
+      return canonicalOperation("validate", async () => {
+        const report = await canonicalClient.validateDraft({
+          draft_id: c.session.draft_id,
+          report_id: makeId("heating-settings-report"),
+          snapshot_id: c.snapshot.snapshot_id,
+          evaluated_at: canonicalNow(),
+        });
+        c.validation = report;
+        c.candidateRevision = null;
+        return report;
+      });
+    }
+
+    function canonicalizeCanonicalDraft() {
+      const c = state.canonical;
+      if (!c.session || !c.validation || !c.validation.activation_ready || c.dirty) return null;
+      return canonicalOperation("canonicalize", async () => {
+        const revision = await canonicalClient.canonicalizeDraft({
+          draft_id: c.session.draft_id,
+          validation_report_id: c.validation.report_id,
+          revision_id: makeId("heating-settings-canonical-v3"),
+          snapshot_id: c.snapshot.snapshot_id,
+          created_at: canonicalNow(),
+          actor: actor || "home_assistant:admin",
+          source: "controlel_heating_settings",
+          change_kind: "UPDATE",
+          reason: "heating_settings_edit",
+          core_version: c.defaults.core_version,
+          integration_version: c.defaults.integration_version,
+        });
+        c.candidateRevision = revision;
+        return revision;
+      });
+    }
+
+    function activateCanonicalRevision() {
+      const c = state.canonical;
+      if (!c.session || !c.candidateRevision) return null;
+      return canonicalOperation("activate", async () => {
+        const activation = await canonicalClient.activateRevision({
+          revision_id: c.candidateRevision.revision_id,
+          semantic_configuration_fingerprint: c.candidateRevision.semantic_configuration_fingerprint,
+          expected_active_revision_id: c.session.base_active_revision_id,
+          expected_active_generation: c.session.base_active_generation,
+          attempt_id: makeId("heating-settings-activation"),
+        });
+        c.activation = activation;
+        c.editing = false;
+        c.session = null;
+        c.form = null;
+        c.availableDraft = null;
+        c.status = "idle";
+        for (const domain of ["heating", "setup"]) state.domains[domain] = freshDomain();
+        render();
+        return activation;
+      });
     }
 
     function render() {
@@ -379,7 +637,8 @@
       if (viewRoot) viewRoot.replaceChildren(renderView(state.route));
 
       for (const domain of neededDomains(state.route)) {
-        if (state.domains[domain].status === "idle") loadDomain(domain);
+        const domainState = domain === "canonical" ? state.canonical : state.domains[domain];
+        if (domainState.status === "idle") loadDomain(domain);
       }
     }
 
@@ -583,6 +842,120 @@
       );
     }
 
+    function canonicalReferenceLabel(reference) {
+      if (!reference) return t("common.none");
+      return reference.current_locator || reference.native_id || t("common.unknown");
+    }
+
+    function canonicalField(field, values, editable) {
+      const unit = field.unitKey ? t(field.unitKey) : field.unit;
+      const value = values[field.name];
+      if (!editable) {
+        return metricCard({ label: t(field.key), value: String(value), unit });
+      }
+      return el("label", { class: "settings-field" },
+        el("span", { class: "settings-field__label" }, t(field.key)),
+        el("span", { class: "settings-field__control" },
+          el("input", {
+            class: "settings-field__input",
+            type: "number",
+            min: field.min,
+            step: field.step,
+            value,
+            disabled: state.canonical.status === "saving",
+            "data-canonical-field": field.name,
+            oninput: (event) => api.setCanonicalValue(field.name, event.target.value),
+          }),
+          el("span", { class: "settings-field__unit" }, unit)
+        )
+      );
+    }
+
+    function renderCanonicalConfiguration() {
+      const c = state.canonical;
+      if (!canonicalClient) return noteBox(t("canonical.unavailable"), "neutral");
+      if ((c.status === "idle" || c.status === "loading") && !c.active) {
+        return statePanel({ status: c.status, loadingLabel: t("canonical.loading") });
+      }
+      if (c.status === "error" && !c.active) {
+        return statePanel({
+          status: "error", error: c.error, errorTitle: t("canonical.load_failed"),
+          onRetry: () => { c.status = "idle"; c.error = null; render(); },
+        });
+      }
+
+      const document = c.editing ? c.session : c.active.configuration_scopes;
+      const values = c.editing ? c.form : canonicalHeatingValues(document);
+      if (!values) return noteBox(t("canonical.single_zone_only"), "warning");
+      const heating = document.heating;
+      const zone = heating.zones[0];
+      const source = heating.heat_sources[0];
+      const revision = c.active.canonical_revision;
+      const actions = [];
+      if (!c.editing) {
+        actions.push(el("button", {
+          class: "btn btn--primary", disabled: c.status === "saving", onclick: () => api.editCanonical(),
+        }, c.availableDraft ? t("canonical.reopen_draft") : t("canonical.edit")));
+      } else {
+        actions.push(
+          el("button", {
+            class: "btn btn--secondary", disabled: !c.dirty || c.status === "saving",
+            onclick: () => api.saveCanonicalDraft(),
+          }, t("canonical.save_draft")),
+          el("button", {
+            class: "btn btn--secondary", disabled: c.dirty || c.status === "saving",
+            onclick: () => api.validateCanonicalDraft(),
+          }, t("canonical.validate")),
+          el("button", {
+            class: "btn btn--secondary",
+            disabled: c.dirty || !c.validation || !c.validation.activation_ready || c.status === "saving",
+            onclick: () => api.canonicalizeCanonicalDraft(),
+          }, t("canonical.canonicalize")),
+          el("button", {
+            class: "btn btn--primary", disabled: !c.candidateRevision || c.status === "saving",
+            onclick: () => api.activateCanonicalRevision(),
+          }, t("canonical.activate"))
+        );
+      }
+
+      const lifecycle = c.editing
+        ? el("div", { class: "canonical-lifecycle" },
+            el("div", { class: "section__badges" },
+              badge(t("canonical.draft_revision", { revision: c.session.revision }), "info"),
+              c.dirty ? badge(t("canonical.unsaved"), "warning") : badge(t("canonical.saved"), "positive"),
+              c.validation ? badge(c.validation.activation_ready ? t("canonical.valid") : t("canonical.invalid"), c.validation.activation_ready ? "positive" : "negative") : null,
+              c.candidateRevision ? badge(t("canonical.candidate_ready"), "info") : null
+            ),
+            c.validation && c.validation.issue_codes.length
+              ? noteBox(t("canonical.validation_issues", { codes: c.validation.issue_codes.join(", ") }), "warning")
+              : null,
+            c.candidateRevision
+              ? noteBox(t("canonical.candidate_note", { revision: c.candidateRevision.revision_id }), "info")
+              : null
+          )
+        : null;
+
+      return el("div", { class: "canonical-configuration" },
+        el("div", { class: "kv-grid" },
+          kvRow(t("canonical.active_revision"), revision.revision_id),
+          kvRow(t("canonical.revision_number"), String(revision.revision)),
+          kvRow(t("canonical.generation"), String(c.active.active_reference.generation)),
+          kvRow(t("canonical.zone"), zone.display_name),
+          kvRow(t("canonical.temperature_sensor"), canonicalReferenceLabel(zone.primary_temperature_sensor.provider_reference)),
+          kvRow(t("canonical.heat_source_permission"), canonicalReferenceLabel(source.command_strategy.enable_permission.command_target_reference))
+        ),
+        c.availableDraft && !c.editing ? noteBox(t("canonical.draft_available"), "info") : null,
+        lifecycle,
+        el("div", { class: c.editing ? "settings-grid" : "metric-grid" },
+          CANONICAL_HEATING_FIELDS.map((field) => canonicalField(field, values, c.editing))
+        ),
+        noteBox(t("canonical.noneditable_note"), "neutral"),
+        c.status === "saving" ? noteBox(t("canonical.working", { operation: c.operation }), "info") : null,
+        c.status === "error" ? noteBox((c.error && c.error.message) || t("common.request_failed"), "warning") : null,
+        el("div", { class: "section__actions" }, actions)
+      );
+    }
+
     function renderHeating() {
       const setup = state.domains.setup;
 
@@ -598,6 +971,12 @@
           subtitle: t("heating.subtitle"),
           badges,
           actions: headerActions,
+        }),
+
+        section({
+          title: t("canonical.title"),
+          lead: t("canonical.lead"),
+          children: renderCanonicalConfiguration(),
         }),
 
         domainSection({
@@ -755,7 +1134,7 @@
           label: t("settings.heating_config"),
           description: t("settings.heating_config_desc"),
           state: readiness ? readiness.state : "unknown",
-          action: { label: t("action.continue_setup"), route: "setup" },
+          action: { label: t("canonical.edit"), callback: () => api.editCanonical() },
           order: 1,
           hidden: false,
         },
@@ -827,7 +1206,11 @@
         s.id === "language"
           ? languageControl()
           : s.action
-            ? el("button", { class: "btn btn--secondary btn--sm", onclick: () => api.navigate(s.action.route) }, s.action.label)
+            ? el("button", {
+                class: "btn btn--secondary btn--sm",
+                disabled: s.id === "heating-config" && (!state.canonical.active || state.canonical.editing),
+                onclick: () => s.action.callback ? s.action.callback() : api.navigate(s.action.route),
+              }, s.action.label)
             : el("span", { class: "hint" }, t("settings.placeholder"))
       ));
 
@@ -835,6 +1218,11 @@
         pageHeader({
           title: t("navigation.settings"),
           subtitle: t("settings.subtitle"),
+        }),
+        section({
+          title: t("canonical.title"),
+          lead: t("canonical.lead"),
+          children: renderCanonicalConfiguration(),
         }),
         section({ title: t("settings.overview"), children: el("div", { class: "settings-list" }, rendered) }),
         noteBox(t("settings.note"), "info")
@@ -1008,6 +1396,8 @@
       onSetupState: setupWizard && typeof setupWizard.setEntryState === "function"
         ? (entryState) => setupWizard.setEntryState(entryState)
         : null,
+      canonicalClient: setupWizardClient,
+      actor: `home_assistant:${env.userId || "admin"}`,
     });
 
     if (setupWizard) app.setupWizard = setupWizard;
@@ -1045,6 +1435,9 @@
     metaOf,
     toModuleCard,
     toActivityEvent,
+    CANONICAL_HEATING_FIELDS,
+    canonicalHeatingValues,
+    canonicalScopesWithHeatingValues,
     createApp,
     bootstrap,
   };
