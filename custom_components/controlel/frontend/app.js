@@ -37,7 +37,7 @@
 
   // ------------------------------------------------------------- pure logic
 
-  const ROUTES = ["overview", "modules", "heating", "diagnostics", "settings", "setup"];
+  const ROUTES = ["overview", "modules", "heating", "water-safety", "diagnostics", "settings", "setup"];
   const DEFAULT_ROUTE = "overview";
 
   /**
@@ -49,9 +49,10 @@
     { id: "overview", label: "Overview", key: "navigation.overview", order: 1, hidden: false },
     { id: "modules", label: "Modules", key: "navigation.modules", order: 2, hidden: false },
     { id: "heating", label: "Heating", key: "navigation.heating", order: 3, hidden: false },
-    { id: "diagnostics", label: "Diagnostics", key: "navigation.diagnostics", order: 4, hidden: false },
-    { id: "settings", label: "Settings", key: "navigation.settings", order: 5, hidden: false },
-    { id: "setup", label: "Setup", key: "navigation.setup", order: 6, hidden: false },
+    { id: "water-safety", label: "Water Safety", key: "navigation.water_safety", order: 4, hidden: false },
+    { id: "diagnostics", label: "Diagnostics", key: "navigation.diagnostics", order: 5, hidden: false },
+    { id: "settings", label: "Settings", key: "navigation.settings", order: 6, hidden: false },
+    { id: "setup", label: "Setup", key: "navigation.setup", order: 7, hidden: false },
   ];
 
   /** Parse a location hash ("#/heating", "#/heating?x=1") into a known route. */
@@ -129,6 +130,34 @@
     missing: { label: "Missing", tone: "neutral", key: "state.missing" },
   };
 
+  const WATER_STATE_META = {
+    OK: { label: "OK", tone: "positive", key: "water.state.ok" },
+    WET: { label: "Wet", tone: "negative", key: "water.state.wet" },
+    SENSOR_FAULT: { label: "Sensor fault", tone: "negative", key: "water.state.sensor_fault" },
+    DISABLED: { label: "Disabled", tone: "neutral", key: "water.state.disabled" },
+  };
+
+  const WATER_ASSESSMENT_META = {
+    CONFIRMED: { label: "Confirmed", tone: "positive", key: "water.assessment.confirmed" },
+    INDETERMINATE_GRACE: { label: "Indeterminate", tone: "warning", key: "water.assessment.indeterminate_grace" },
+    DISABLED: { label: "Disabled", tone: "neutral", key: "water.assessment.disabled" },
+  };
+
+  /** Never present UNKNOWN/UNAVAILABLE moisture evidence as dry or OK. */
+  function waterSensorLabel(sensorCondition, assessmentStatus) {
+    if (assessmentStatus === "INDETERMINATE_GRACE") return t("water.assessment.indeterminate_grace");
+    if (sensorCondition === null || sensorCondition === undefined) return t("common.unknown");
+    if (sensorCondition === "UNAVAILABLE" || sensorCondition === "UNKNOWN") return t("common.unknown");
+    if (sensorCondition === "DRY") return t("water.state.sensor_dry");
+    if (sensorCondition === "WET") return t("water.state.sensor_wet");
+    return t("common.unknown");
+  }
+
+  function waterPrimaryStateLabel(state, assessmentStatus) {
+    if (assessmentStatus === "INDETERMINATE_GRACE") return t("water.assessment.indeterminate_grace");
+    return stateLabel(state, WATER_STATE_META);
+  }
+
   /**
    * {label, tone} for a state string (public contract; unknown states stay
    * neutral). The map entries also carry a translation `key`, which the
@@ -168,6 +197,7 @@
     let primaryAction = null;
     if (m.status === "error") primaryAction = { label: t("action.review_issues"), route: "diagnostics" };
     else if (m.module_id === "heating") primaryAction = { label: t("action.open_heating"), route: "heating" };
+    else if (m.module_id === "water_safety") primaryAction = { label: t("action.open_water_safety"), route: "water-safety" };
     return {
       id: m.module_id,
       label: m.module_id,
@@ -234,6 +264,7 @@
     modeRoot,
     renderRoot,
     onSetupState,
+    onWaterSafetyAction,
   }) {
     const state = {
       route: DEFAULT_ROUTE,
@@ -246,7 +277,9 @@
         heating: freshDomain(),
         diagnostics: freshDomain(),
         setup: freshDomain(),
+        waterSafety: freshDomain(),
       },
+      waterActionPending: null,
     };
 
     function freshDomain() {
@@ -281,6 +314,21 @@
         state.domains[domain] = freshDomain();
         loadDomain(domain);
       },
+      async runWaterSafetyAction(action) {
+        if (!onWaterSafetyAction || state.waterActionPending) return;
+        state.waterActionPending = action;
+        render();
+        try {
+          await onWaterSafetyAction(action);
+          state.domains.waterSafety = freshDomain();
+          await loadDomain("waterSafety");
+        } catch (_error) {
+          // The view re-renders from domain state; action errors stay on the connection layer.
+        } finally {
+          state.waterActionPending = null;
+          render();
+        }
+      },
       setLanguage(pref) {
         if (CI18N && typeof CI18N.setLanguage === "function") CI18N.setLanguage(pref);
         render();
@@ -303,6 +351,7 @@
         case "overview": return ["overview", "setup"];
         case "modules": return ["overview"];
         case "heating": return ["heating", "setup", "diagnostics"];
+        case "water-safety": return ["waterSafety"];
         case "diagnostics": return ["diagnostics"];
         case "settings": return ["setup"];
         case "setup": return ["setup"];
@@ -408,6 +457,7 @@
         case "overview": return renderOverview();
         case "modules": return renderModules();
         case "heating": return renderHeating();
+        case "water-safety": return renderWaterSafety();
         case "diagnostics": return renderDiagnostics();
         case "settings": return renderSettings();
         case "setup": return renderSetup();
@@ -665,6 +715,88 @@
         }),
 
         noteBox(t("heating.readonly_note"), "neutral")
+      );
+    }
+
+    function renderWaterSafety() {
+      const pending = state.waterActionPending;
+      return el("div", { class: "view" },
+        pageHeader({
+          title: t("navigation.water_safety"),
+          subtitle: t("water.subtitle"),
+        }),
+        domainSection({
+          domain: "waterSafety",
+          title: t("water.current_state"),
+          lead: t("water.current_lead"),
+          loaded: (data) => {
+            const assessmentTone = data.assessment_status === "INDETERMINATE_GRACE"
+              ? "warning"
+              : data.assessment_status === "CONFIRMED" && data.state === "OK"
+                ? "positive"
+                : data.state === "DISABLED"
+                  ? "neutral"
+                  : "negative";
+            const actions = [];
+            if (data.actions_available.includes("silence")) {
+              actions.push(el("button", {
+                class: "btn btn--secondary",
+                disabled: Boolean(pending),
+                onclick: () => api.runWaterSafetyAction("silence"),
+              }, pending === "silence" ? t("water.actions.pending") : t("water.actions.silence")));
+            }
+            if (data.actions_available.includes("disable")) {
+              actions.push(el("button", {
+                class: "btn btn--secondary",
+                disabled: Boolean(pending),
+                onclick: () => api.runWaterSafetyAction("disable"),
+              }, pending === "disable" ? t("water.actions.pending") : t("water.actions.disable")));
+            }
+            if (data.actions_available.includes("enable")) {
+              actions.push(el("button", {
+                class: "btn btn--primary",
+                disabled: Boolean(pending),
+                onclick: () => api.runWaterSafetyAction("enable"),
+              }, pending === "enable" ? t("water.actions.pending") : t("water.actions.enable")));
+            }
+            return el("div", { class: "water-current" },
+              el("div", { class: "section__badges" },
+                badge(waterPrimaryStateLabel(data.state, data.assessment_status), assessmentTone),
+                badge(stateLabel(data.assessment_status, WATER_ASSESSMENT_META), assessmentTone)
+              ),
+              el("div", { class: "metric-grid" },
+                metricCard({
+                  label: t("water.sensor_condition"),
+                  value: waterSensorLabel(data.sensor_condition, data.assessment_status),
+                  sub: t("water.sensor_sub"),
+                  tone: assessmentTone,
+                }),
+                metricCard({
+                  label: t("water.area"),
+                  value: data.area_name || t("common.unknown"),
+                  sub: data.zone_name ? t("water.zone_named", { name: data.zone_name }) : t("water.zone_unknown"),
+                }),
+                metricCard({
+                  label: t("water.incident"),
+                  value: data.active_incident ? t("water.incident_active") : t("water.incident_none"),
+                  sub: data.incident_silenced ? t("water.incident_silenced") : t("water.incident_not_silenced"),
+                  tone: data.active_incident ? "negative" : "neutral",
+                })
+              ),
+              el("div", { class: "kv-grid" },
+                kvRow(t("water.processing"), data.processing_enabled ? t("state.active") : t("state.inactive")),
+                kvRow(t("water.siren_count"), String(data.owned_siren_count)),
+                kvRow(
+                  t("water.last_siren_outcome"),
+                  data.last_siren_command_outcome ? data.last_siren_command_outcome : t("common.none")
+                )
+              ),
+              actions.length ? el("div", { class: "panel__actions" }, ...actions) : null,
+              noteBox(t("water.truth_note"), "neutral")
+            );
+          },
+          onRetry: () => api.retryDomain("waterSafety"),
+        })
       );
     }
 
@@ -968,15 +1100,20 @@
     let dataSource = null;
     let setupWriteClient = null;
 
+    let frontendClient = null;
     if (env.available) {
       mode = "real";
       try {
-        const client = CA_API.createFrontendApiClient({ connection: env.connection, configEntryId: env.configEntryId });
-        dataSource = CA_API.createRealDataSource(client);
-        setupWriteClient = CA_API.createSetupWriteClient({ connection: env.connection, configEntryId: env.configEntryId });
+        frontendClient = CA_API.createFrontendApiClient({ connection: env.connection, configEntryId: env.configEntryId });
+        dataSource = CA_API.createRealDataSource(frontendClient);
+        setupWriteClient = CA_API.createSetupWriteClient({
+          connection: env.connection,
+          configEntryId: env.configEntryId,
+        });
       } catch (_err) {
         mode = "unavailable";
         dataSource = null;
+        frontendClient = null;
       }
     } else {
       // No HA environment: real data is unavailable. Do NOT silently fall
@@ -993,6 +1130,8 @@
         })
       : null;
 
+    const waterSafetyClient = frontendClient;
+
     const app = createApp({
       mode,
       dataSource,
@@ -1005,6 +1144,9 @@
       renderRoot: root,
       onSetupState: setupWizard && typeof setupWizard.setEntryState === "function"
         ? (entryState) => setupWizard.setEntryState(entryState)
+        : null,
+      onWaterSafetyAction: waterSafetyClient && typeof waterSafetyClient.waterSafetyAction === "function"
+        ? (action) => waterSafetyClient.waterSafetyAction(action)
         : null,
     });
 
@@ -1037,6 +1179,10 @@
     READINESS_META,
     DEMAND_META,
     MEASUREMENT_META,
+    WATER_STATE_META,
+    WATER_ASSESSMENT_META,
+    waterSensorLabel,
+    waterPrimaryStateLabel,
     parseRoute,
     filterEvents,
     visibleItems,

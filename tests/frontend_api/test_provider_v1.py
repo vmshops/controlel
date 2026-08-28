@@ -20,6 +20,7 @@ from controlel.frontend_api.v1 import (
     SetupEvidenceV1,
     SystemEvidenceV1,
     ValidationMessageEvidenceV1,
+    WaterSafetyEvidenceV1,
     ZoneEvidenceV1,
     frontend_response_to_dict,
 )
@@ -77,7 +78,14 @@ def _normal_evidence() -> FrontendApiEvidenceV1:
             operating_mode="NORMAL",
             operating_mode_since=NOW - timedelta(hours=8),
         ),
-        modules=(ModuleEvidenceV1(module_id="heating", status="active"),),
+        modules=(
+            ModuleEvidenceV1(module_id="heating", status="active"),
+            ModuleEvidenceV1(
+                module_id="water_safety",
+                status="inactive",
+                reason="water_safety_not_configured",
+            ),
+        ),
         attention=(
             AttentionEvidenceV1(
                 attention_id="attention:1",
@@ -135,7 +143,10 @@ def test_normal_dto_generation_is_versioned_bounded_and_json_safe() -> None:
 
     assert overview["frontend_api_version"] == 1
     assert overview["generated_at"] == NOW.isoformat()
-    assert overview["modules"] == [{"module_id": "heating", "status": "active", "reason": None}]
+    assert overview["modules"] == [
+        {"module_id": "heating", "status": "active", "reason": None},
+        {"module_id": "water_safety", "status": "inactive", "reason": "water_safety_not_configured"},
+    ]
     assert heating["zones"][0]["measurement_state"] == "fresh"
     assert heating["zones"][0]["measurement_age_seconds"] == 42.0
     assert heating["zones"][0]["demand_state"] == "heat_required"
@@ -324,3 +335,48 @@ def test_stable_ids_are_ordered_and_raw_entity_locator_cannot_leak_as_identity()
     assert diagnostics["decision_trace"]["sensor_id"] == "sensor:living-room-temperature"
     assert "entity_id" not in serialized
     assert "sensor.living_room_temperature" not in serialized
+
+
+def test_water_safety_projection_preserves_assessment_and_actions() -> None:
+    evidence = FrontendApiEvidenceV1(
+        system=SystemEvidenceV1(status="active", operating_mode="NORMAL"),
+        water_safety=WaterSafetyEvidenceV1(
+            state="WET",
+            assessment_status="CONFIRMED",
+            sensor_condition="WET",
+            area_name="Bathroom",
+            zone_name="Bathroom",
+            active_incident=True,
+            incident_silenced=False,
+            processing_enabled=True,
+            owned_siren_count=1,
+            last_siren_command_outcome="accepted",
+            actions_available=("disable", "silence", "test_notification", "test_siren"),
+        ),
+    )
+    payload = frontend_response_to_dict(_provider(evidence).water_safety())
+    assert payload["state"] == "WET"
+    assert payload["sensor_condition"] == "WET"
+    assert payload["actions_available"] == ["disable", "silence", "test_notification", "test_siren"]
+
+
+def test_missing_water_safety_evidence_projects_disabled_module_state() -> None:
+    evidence = FrontendApiEvidenceV1(
+        system=SystemEvidenceV1(status="active", operating_mode="NORMAL"),
+        modules=(
+            ModuleEvidenceV1(module_id="heating", status="active"),
+            ModuleEvidenceV1(
+                module_id="water_safety",
+                status="inactive",
+                reason="water_safety_not_configured",
+            ),
+        ),
+    )
+    provider = _provider(evidence)
+    payload = frontend_response_to_dict(provider.water_safety())
+    overview = frontend_response_to_dict(provider.overview())
+    assert payload["state"] == "DISABLED"
+    assert payload["sensor_condition"] is None
+    assert payload["actions_available"] == []
+    water_module = next(item for item in overview["modules"] if item["module_id"] == "water_safety")
+    assert water_module["status"] == "inactive"

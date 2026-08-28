@@ -31,6 +31,15 @@
     heating: "controlel/frontend_api/v1/heating",
     diagnostics: "controlel/frontend_api/v1/diagnostics",
     setup: "controlel/frontend_api/v1/setup",
+    waterSafety: "controlel/frontend_api/v1/water_safety",
+  };
+
+  const WATER_SAFETY_ACTION_COMMANDS = {
+    silence: "controlel/water_safety/v1/silence",
+    disable: "controlel/water_safety/v1/disable",
+    enable: "controlel/water_safety/v1/enable",
+    test_notification: "controlel/water_safety/v1/test_notification",
+    test_siren: "controlel/water_safety/v1/test_siren",
   };
 
   const SETUP_WRITE_COMMANDS = {
@@ -238,6 +247,25 @@
     };
   }
 
+  function normalizeWaterSafety(raw) {
+    const r = _checkVersion(raw, "water_safety");
+    return {
+      frontend_api_version: 1,
+      generated_at: _strOrNull(r.generated_at),
+      state: r.state,
+      assessment_status: r.assessment_status,
+      sensor_condition: r.sensor_condition === undefined ? null : r.sensor_condition,
+      area_name: _strOrNull(r.area_name),
+      zone_name: _strOrNull(r.zone_name),
+      active_incident: Boolean(r.active_incident),
+      incident_silenced: Boolean(r.incident_silenced),
+      processing_enabled: Boolean(r.processing_enabled),
+      owned_siren_count: _numOrNull(r.owned_siren_count) || 0,
+      last_siren_command_outcome: r.last_siren_command_outcome === undefined ? null : r.last_siren_command_outcome,
+      actions_available: _arr(r.actions_available, "water_safety.actions_available").slice(),
+    };
+  }
+
   function normalizeSetup(raw) {
     const r = _checkVersion(raw, "setup");
     const readiness = _obj(r.readiness, "setup.readiness");
@@ -261,6 +289,7 @@
     heating: normalizeHeating,
     diagnostics: normalizeDiagnostics,
     setup: normalizeSetup,
+    waterSafety: normalizeWaterSafety,
   };
 
   // ------------------------------------------------------------- client
@@ -336,6 +365,51 @@
       heating: () => call("heating"),
       diagnostics: () => call("diagnostics"),
       setup: () => call("setup"),
+      waterSafety: () => call("waterSafety"),
+      waterSafetyAction(action) {
+        const command = WATER_SAFETY_ACTION_COMMANDS[action];
+        if (!command) {
+          return Promise.reject(new ApiError("error", `Unsupported Water Safety action: ${action}`, "waterSafety"));
+        }
+        return new Promise((resolve, reject) => {
+          let settled = false;
+          const timer = setTimeout(() => {
+            fail(new ApiError("timeout", "The Water Safety action timed out before a response arrived", "waterSafety"));
+          }, timeoutMs);
+
+          function fail(err) {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            reject(err);
+          }
+
+          function succeed(value) {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            resolve(value);
+          }
+
+          try {
+            connection.sendMessagePromise({
+              type: command,
+              config_entry_id: configEntryId,
+            }).then(
+              (result) => succeed(result && typeof result === "object" ? result : {}),
+              (err) => {
+                const message =
+                  (err && err.error && err.error.message) ||
+                  (err && err.message) ||
+                  "The Water Safety action failed";
+                fail(new ApiError("error", message, "waterSafety"));
+              }
+            );
+          } catch (err) {
+            fail(new ApiError("disconnected", (err && err.message) || String(err), "waterSafety"));
+          }
+        });
+      },
     };
   }
 
@@ -420,7 +494,7 @@
    * validation operations only: there is deliberately no canonicalize,
    * activate, runtime, or Home Assistant service-call method.
    */
-  function createSetupWriteClient({ connection, configEntryId, timeoutMs = 15000 }) {
+  function createSetupWriteClient({ connection, configEntryId, moduleKey = "heating", timeoutMs = 15000 }) {
     if (!connection || typeof connection.sendMessagePromise !== "function") {
       throw new ApiError("disconnected", "No Home Assistant connection is available");
     }
@@ -453,6 +527,7 @@
           ...(payload && typeof payload === "object" ? payload : {}),
           type: SETUP_WRITE_COMMANDS[operation],
           config_entry_id: configEntryId,
+          module_key: moduleKey,
         };
         try {
           connection.sendMessagePromise(message).then(
@@ -553,6 +628,7 @@
       heating: make("heating"),
       diagnostics: make("diagnostics"),
       setup: make("setup"),
+      waterSafety: make("waterSafety"),
     };
   }
 
@@ -677,7 +753,25 @@
       })),
     };
 
-    return { overview, heating: heatingModel, diagnostics, setup };
+    return { overview, heating: heatingModel, diagnostics, setup, waterSafety: _defaultWaterSafetyModel(generatedAt) };
+  }
+
+  function _defaultWaterSafetyModel(generatedAt) {
+    return {
+      frontend_api_version: 1,
+      generated_at: generatedAt,
+      state: "DISABLED",
+      assessment_status: "DISABLED",
+      sensor_condition: null,
+      area_name: null,
+      zone_name: null,
+      active_incident: false,
+      incident_silenced: false,
+      processing_enabled: false,
+      owned_siren_count: 0,
+      last_siren_command_outcome: null,
+      actions_available: [],
+    };
   }
 
   /**
@@ -693,11 +787,13 @@
       heating: make("heating"),
       diagnostics: make("diagnostics"),
       setup: make("setup"),
+      waterSafety: make("waterSafety"),
     };
   }
 
   global.CA_API = {
     COMMANDS,
+    WATER_SAFETY_ACTION_COMMANDS,
     SETUP_WRITE_COMMANDS,
     DOMAINS,
     SEVERITY_LEVEL,
@@ -706,6 +802,7 @@
     normalizeHeating,
     normalizeDiagnostics,
     normalizeSetup,
+    normalizeWaterSafety,
     normalizeDiscoverySnapshot,
     normalizeRecommendations,
     normalizeSetupSession,

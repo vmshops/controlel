@@ -49,9 +49,11 @@ PLATFORMS = ("sensor", "binary_sensor")
 @dataclass
 class ControlelEntryRuntime:
     host: HomeAssistantControlelHost | None
+    water_safety_host: object | None
     config: HomeAssistantIntegrationConfig
     reloading: bool = False
     frontend_api_unregister: Callable[[], None] | None = None
+    water_safety_action_unregister: Callable[[], None] | None = None
 
 
 if TYPE_CHECKING:
@@ -104,6 +106,7 @@ async def async_setup_entry(
 
     executor = HomeAssistantRuntimeExecutor()
     host: HomeAssistantControlelHost | None = None
+    water_safety_host = None
     failure_sink: HomeAssistantScheduledFailureSink | None = None
     try:
         bridge = HomeAssistantEventLoopBridge(hass.loop)
@@ -250,8 +253,17 @@ async def async_setup_entry(
         )
         failure_sink.bind_fatal_handler(host.request_fatal_shutdown)
         await host.async_initialize()
+        from .water_safety_activation import WaterSafetyActivationService
+
+        water_safety_host = await WaterSafetyActivationService().async_start_from_active_reference(
+            hass,
+            entry,
+            bridge=bridge,
+        )
     except BaseException:
         try:
+            if water_safety_host is not None:
+                await water_safety_host.async_stop()
             if host is not None:
                 host.clear_transient_issues()
                 await host.async_stop()
@@ -263,27 +275,49 @@ async def async_setup_entry(
             LOGGER.exception("Failed to clean up a partially constructed Controlel host")
         raise
 
-    from .frontend_api_websocket import register_frontend_api_provider_v1
+    from .frontend_api_websocket import (
+        register_frontend_api_provider_v1,
+        register_water_safety_action_handler_v1,
+    )
 
     frontend_api_unregister = register_frontend_api_provider_v1(
         hass,
         entry.entry_id,
-        create_frontend_api_provider_v1(host),
+        create_frontend_api_provider_v1(host, water_safety_host=water_safety_host),
+    )
+
+    async def _water_safety_action(action: str) -> dict[str, object]:
+        if water_safety_host is None:
+            raise RuntimeError("Water Safety is not configured for this entry")
+        return await water_safety_host.async_frontend_api_water_safety_action(action)
+
+    water_safety_action_unregister = register_water_safety_action_handler_v1(
+        hass,
+        entry.entry_id,
+        _water_safety_action,
     )
     entry.runtime_data = ControlelEntryRuntime(
         host=host,
+        water_safety_host=water_safety_host,
         config=config,
         frontend_api_unregister=frontend_api_unregister,
+        water_safety_action_unregister=water_safety_action_unregister,
     )
     try:
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     except BaseException:
         frontend_api_unregister()
+        water_safety_action_unregister()
+        if water_safety_host is not None:
+            await water_safety_host.async_stop()
         await host.async_stop()
         entry.runtime_data.host = None
+        entry.runtime_data.water_safety_host = None
         entry.runtime_data.frontend_api_unregister = None
+        entry.runtime_data.water_safety_action_unregister = None
         raise
     entry.async_on_unload(frontend_api_unregister)
+    entry.async_on_unload(water_safety_action_unregister)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
     from .panel import async_register_controlel_panel
@@ -313,7 +347,15 @@ async def async_unload_entry(
     if unregister is not None:
         unregister()
         runtime_data.frontend_api_unregister = None
+    water_safety_action_unregister = runtime_data.water_safety_action_unregister
+    if water_safety_action_unregister is not None:
+        water_safety_action_unregister()
+        runtime_data.water_safety_action_unregister = None
     host = runtime_data.host
+    water_safety_host = runtime_data.water_safety_host
+    if water_safety_host is not None:
+        await water_safety_host.async_stop()
+        runtime_data.water_safety_host = None
     if host is not None:
         await host.async_stop()
         runtime_data.host = None

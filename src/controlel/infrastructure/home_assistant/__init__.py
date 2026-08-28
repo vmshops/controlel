@@ -20,6 +20,12 @@ from controlel.infrastructure.home_assistant.setup_persistence import (
     HomeAssistantSetupRepository,
     SetupStorageIntegrityError,
 )
+from controlel.infrastructure.home_assistant.water_safety_discovery import async_snapshot_with_notify_services
+from controlel.infrastructure.home_assistant.water_safety_setup_host import (
+    WaterSafetyBindingSelectionRequest,
+    WaterSafetySetupHostService,
+    WaterSafetySetupSessionDTO,
+)
 
 __all__ = [
     "HomeAssistantDiscoveryAdapter",
@@ -36,4 +42,8 @@ __all__ = [
     "LegacyConfigurationStatusDTO",
     "SetupStorageIntegrityError",
     "SetupValidationStatus",
+    "WaterSafetyBindingSelectionRequest",
+    "WaterSafetySetupHostService",
+    "WaterSafetySetupSessionDTO",
+    "async_snapshot_with_notify_services",
 ]

@@ -17,6 +17,11 @@ type DecisionAction = Literal["enable_heating", "disable_heating", "observe_only
 type MeasurementState = Literal["fresh", "expired", "future_dated", "missing"]
 type SetupState = Literal["ready", "incomplete", "invalid", "unknown"]
 type SetupSeverity = Literal["error", "warning", "info"]
+type WaterSafetyStateV1 = Literal["OK", "WET", "SENSOR_FAULT", "DISABLED"]
+type WaterSafetyAssessmentStatusV1 = Literal["CONFIRMED", "INDETERMINATE_GRACE", "DISABLED"]
+type MoistureConditionV1 = Literal["DRY", "WET", "UNAVAILABLE", "UNKNOWN"]
+type SirenCommandOutcomeV1 = Literal["accepted", "failed"]
+type WaterSafetyActionV1 = Literal["silence", "disable", "enable", "test_notification", "test_siren"]
 type EvidenceScalar = str | int | float | bool | None
 
 
@@ -210,6 +215,27 @@ class SetupEvidenceV1:
 
 
 @dataclass(frozen=True, slots=True)
+class WaterSafetyEvidenceV1:
+    state: WaterSafetyStateV1
+    assessment_status: WaterSafetyAssessmentStatusV1
+    sensor_condition: MoistureConditionV1 | None
+    area_name: str | None
+    zone_name: str | None
+    active_incident: bool
+    incident_silenced: bool
+    processing_enabled: bool
+    owned_siren_count: int
+    last_siren_command_outcome: SirenCommandOutcomeV1 | None
+    actions_available: tuple[WaterSafetyActionV1, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.owned_siren_count < 0:
+            raise ValueError("owned_siren_count must not be negative")
+        if self.actions_available != tuple(sorted(set(self.actions_available))):
+            raise ValueError("actions_available must be unique and sorted")
+
+
+@dataclass(frozen=True, slots=True)
 class FrontendApiEvidenceV1:
     """One host-created, read-only evidence snapshot consumed by the provider."""
 
@@ -223,6 +249,7 @@ class FrontendApiEvidenceV1:
     retained_decision_count: int = 0
     total_decisions: int = 0
     setup: SetupEvidenceV1 = SetupEvidenceV1()
+    water_safety: WaterSafetyEvidenceV1 | None = None
 
     def __post_init__(self) -> None:
         if not 0 <= self.retained_decision_count <= self.total_decisions:
@@ -394,6 +421,21 @@ class SetupResponseV1(FrontendResponseV1):
     readiness: ReadinessV1
     missing_configuration: tuple[MissingConfigurationV1, ...]
     validation_messages: tuple[ValidationMessageV1, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class WaterSafetyResponseV1(FrontendResponseV1):
+    state: WaterSafetyStateV1
+    assessment_status: WaterSafetyAssessmentStatusV1
+    sensor_condition: MoistureConditionV1 | None
+    area_name: str | None
+    zone_name: str | None
+    active_incident: bool
+    incident_silenced: bool
+    processing_enabled: bool
+    owned_siren_count: int
+    last_siren_command_outcome: SirenCommandOutcomeV1 | None
+    actions_available: tuple[WaterSafetyActionV1, ...]
 
 
 def frontend_response_to_dict(response: FrontendResponseV1) -> dict[str, Any]:

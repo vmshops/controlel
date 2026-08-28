@@ -61,6 +61,7 @@ from controlel.domain.operating_mode import SafeHeatingTemperatureEvidence
 from controlel.domain.operational_events import MeasurementEventCondition
 from controlel.domain.runtime_supervision import CommandAuthority
 from controlel.domain.source_control import ReportedSourceEvidence, ReportedSourceState
+from controlel.frontend_api.v1 import WaterSafetyEvidenceV1
 
 from .config import HomeAssistantIntegrationConfig
 from .const import INTEGRATION_VERSION
@@ -285,6 +286,18 @@ class HomeAssistantControlelHost:
         """Report only the completed loaded-entry lifecycle as ready Setup evidence."""
 
         return self._initialized and self._accepting and not self._stopping and not self._stopped
+
+    @property
+    def frontend_api_water_safety_evidence(self) -> WaterSafetyEvidenceV1 | None:
+        """Return Water Safety evidence when a runtime is active; otherwise None."""
+
+        return None
+
+    async def async_frontend_api_water_safety_action(self, action: str) -> dict[str, str]:
+        """Dispatch one Water Safety user action; unavailable when runtime is absent."""
+
+        del action
+        raise RuntimeError("Water Safety is not configured for this entry")
 
     async def async_initialize(self) -> None:
         async with self._lifecycle_lock:
