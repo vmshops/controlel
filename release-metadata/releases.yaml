@@ -7,6 +7,29 @@
 metadata_version: 1
 
 releases:
+  - release_id: controlel-core-0.16.0
+    component: core
+    title: "Controlel Core 0.16.0"
+    version: "0.16.0"
+    status: candidate
+    tag: null
+    commit_sha: null
+    summary: "Canonical configuration v3 backend for Configure, Setup Wizard, and Heating settings"
+    highlights:
+      - "Versioned canonical configuration schema v3 with explicit field ownership and editability"
+      - "Draft, validation, conversion, and activation lifecycle with reference health checks"
+      - "Greenfield authoring and deterministic v2-to-v3 Heating migration"
+      - "Frontend-neutral lifecycle contracts consumed by Home Assistant adapter surfaces"
+    compatibility:
+      home_assistant_development_composition: "0.13.0"
+      python: ">=3.13"
+      pydantic: ">=2.0"
+    notes:
+      - "Unreleased development candidate; no tag, publication, or public artifact identity exists yet."
+      - "No runtime control algorithm, activation behavior change, or automatic migration beyond explicit v2-to-v3 conversion is included."
+      - "Published Core 0.15.0 records and any future public artifact identities remain unchanged until separate publication."
+      - "Home Assistant integration manifest dependency pin remains on published Core 0.15.0 until a separate integration release."
+
   - release_id: controlel-core-0.15.0
     component: core
     title: "Controlel Core 0.15.0"

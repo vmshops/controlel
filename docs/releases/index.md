@@ -5,7 +5,8 @@ repository's canonical release metadata (release-metadata/releases.yaml).
 
 See individual release pages for details and highlights.
 
-- Unreleased Core candidate: see core-0.15.0.md
+- Unreleased Core candidate: see core-0.16.0.md
+- Previous unreleased Core candidate: see core-0.15.0.md
 - Published Core release: see core-0.14.0.md
 - Home Assistant integration candidate: see home-assistant-0.13.0.md
 - Previous published Home Assistant integration: see home-assistant-0.12.0.md

@@ -214,7 +214,7 @@ def _v2_revision(
         source="setup_api",
         change_kind="UPDATE",
         reason="v2_fixture",
-        core_version="0.15.0",
+        core_version="0.16.0",
         integration_version="0.13.0",
     )
 

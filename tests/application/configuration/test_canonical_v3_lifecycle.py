@@ -138,7 +138,7 @@ def active_v3():
         source="test",
         change_kind="CREATE",
         reason="fixture",
-        core_version="0.15.0",
+        core_version="0.16.0",
     )
     return migrate_heating_v2_revision_to_v3(
         canonical_revision,
@@ -192,7 +192,7 @@ async def _one_field_edit_and_unchanged_round_trip_are_semantically_exact(active
         source="test",
         change_kind="UPDATE",
         reason="unchanged_round_trip",
-        core_version="0.15.0",
+        core_version="0.16.0",
         fresh_reference_health=_resolved_reference_health(draft),
     )
     assert unchanged.semantic_configuration_fingerprint == active_v3.semantic_configuration_fingerprint
@@ -264,7 +264,7 @@ async def _generation_and_lineage_conflicts_are_rejected(active_v3) -> None:
             source="test",
             change_kind="UPDATE",
             reason="stale",
-            core_version="0.15.0",
+            core_version="0.16.0",
             fresh_reference_health=_resolved_reference_health(draft),
         )
     assert "must-not-exist" not in repository.revisions
@@ -306,7 +306,7 @@ async def _greenfield_draft_completes_lifecycle_without_existing_authority(activ
         source="configuration_v3_api",
         change_kind="CREATE",
         reason="greenfield",
-        core_version="0.15.0",
+        core_version="0.16.0",
         fresh_reference_health=_resolved_reference_health(draft),
     )
 
@@ -350,7 +350,7 @@ async def _pre_authoring_metadata_v3_draft_keeps_existing_edit_lineage(active_v3
         source="test",
         change_kind="UPDATE",
         reason="backward_compatible_draft",
-        core_version="0.15.0",
+        core_version="0.16.0",
         fresh_reference_health=_resolved_reference_health(restored),
     )
 
@@ -495,7 +495,7 @@ async def _canonicalization_rechecks_complete_fresh_reference_health(active_v3) 
             source="test",
             change_kind="UPDATE",
             reason="reference_removed",
-            core_version="0.15.0",
+            core_version="0.16.0",
             fresh_reference_health=tuple(missing),
         )
     assert "must-not-canonicalize" not in repository.revisions

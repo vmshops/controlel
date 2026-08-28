@@ -3,8 +3,8 @@
 The development composition is a local-test artifact that keeps one integration
 ZIP and its exact Core wheel together. It is intentionally non-publishable. The
 source integration manifest continues to require immutable, published
-`controlel==0.14.0`; only the integration copy inside this bundle is overlaid to
-require candidate Core `controlel==0.15.0`.
+`controlel==0.15.0`; only the integration copy inside this bundle is overlaid to
+require candidate Core `controlel==0.16.0`.
 
 ## Build
 
@@ -19,12 +19,12 @@ export SOURCE_DATE_EPOCH="$(git.exe show -s --format=%ct HEAD | tr -d '\r')"
   --source-ref "$source_ref"
 ```
 
-The result is `dist/development/controlel-dev-0.15.0.zip`. Its
+The result is `dist/development/controlel-dev-0.16.0.zip`. Its
 `composition.json` binds the SHA-256 of both contained artifacts:
 
-- `core/controlel-0.15.0-py3-none-any.whl`
+- `core/controlel-0.16.0-py3-none-any.whl`
 - `integration/controlel.zip`, whose copied manifest pins
-  `controlel==0.15.0`
+  `controlel==0.16.0`
 
 For an uncommitted worktree, append an honest label such as `+working-tree` to
 `source_ref`; the artifact hashes remain the exact content identity.
@@ -39,7 +39,7 @@ HA_PYTHON=/path/to/home-assistant/python
 HA_CONFIG=/path/to/home-assistant/config
 
 "$HA_PYTHON" -m pip install --force-reinstall --no-deps \
-  core/controlel-0.15.0-py3-none-any.whl
+  core/controlel-0.16.0-py3-none-any.whl
 unzip -oq integration/controlel.zip -d "$HA_CONFIG/custom_components/controlel"
 find "$HA_CONFIG/custom_components/controlel" -type d -name __pycache__ \
   -prune -exec rm -rf -- {} +
@@ -47,8 +47,8 @@ find "$HA_CONFIG/custom_components/controlel" -type d -name __pycache__ \
   "import importlib.metadata; print(importlib.metadata.version('controlel'))"
 ```
 
-The version check must print `0.15.0`. Start Home Assistant and confirm that its
-log loads integration `0.13.0` with requirement `controlel==0.15.0`, then run
+The version check must print `0.16.0`. Start Home Assistant and confirm that its
+log loads integration `0.13.0` with requirement `controlel==0.16.0`, then run
 the Setup Wizard smoke flow. A restart of an existing Docker container retains
 the wheel; recreating the container does not, so reinstall the wheel after a
 container recreation.

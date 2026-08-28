@@ -193,7 +193,7 @@ async def _ws_validate_canonicalize_activate(
             "source": source,
             "change_kind": change_kind,
             "reason": attempt_id,
-            "core_version": "0.15.0",
+            "core_version": "0.16.0",
             "integration_version": "0.13.0",
         }
     )

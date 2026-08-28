@@ -38,7 +38,7 @@ def test_project_metadata_and_runtime_dependencies_match_release_contract() -> N
     project = load_pyproject()["project"]
 
     assert project["name"] == "controlel"
-    assert project["version"] == "0.15.0"
+    assert project["version"] == "0.16.0"
     assert project["readme"] == "README.md"
     assert project["requires-python"] == ">=3.13"
     assert project["license"] == "MIT"
@@ -86,7 +86,7 @@ def test_project_version_is_the_only_release_version_source() -> None:
         path for path in (ROOT / "src" / "controlel").rglob("*.py") if "__version__" in path.read_text(encoding="utf-8")
     ]
 
-    assert project_version == "0.15.0"
+    assert project_version == "0.16.0"
     assert controlel.__version__ == project_version
     assert importlib.metadata.version("controlel") == project_version
     assert version_files == [ROOT / "src" / "controlel" / "__init__.py"]
@@ -95,11 +95,11 @@ def test_project_version_is_the_only_release_version_source() -> None:
     assert project_version not in package_source
 
 
-def test_release_manifest_pins_the_current_public_core() -> None:
+def test_release_manifest_keeps_published_core_while_source_prepares_next_core() -> None:
     manifest = json.loads((ROOT / "custom_components" / "controlel" / "manifest.json").read_text(encoding="utf-8"))
     core_version = load_pyproject()["project"]["version"]
 
-    assert core_version == "0.15.0"
+    assert core_version == "0.16.0"
     assert manifest["requirements"] == ["controlel==0.15.0"]
     assert manifest["version"] == "0.13.0"
     assert manifest["version"] != core_version
@@ -164,6 +164,16 @@ def test_core_artifact_verification_binds_representative_public_contracts() -> N
         "HeatingPerformanceMonitor",
         "heating_performance_snapshot_to_dict",
         "CanonicalConfigurationRevision",
+        "CANONICAL_CONFIGURATION_SCHEMA_VERSION_V3",
+        "ActiveCanonicalConfigurationV3",
+        "CanonicalConfigurationDraftV3",
+        "CanonicalConfigurationLifecycleV3",
+        "CanonicalConfigurationRevisionV3",
+        "CanonicalConfigurationValidationV3",
+        "ConfigurationScopesV3",
+        "author_greenfield_heating_scopes_v3",
+        "migrate_heating_v2_revision_to_v3",
+        "new_configuration_id_v3",
         "DiscoverySnapshot",
         "DraftRevision",
         "ValidationReport",
@@ -229,6 +239,13 @@ def test_core_artifact_verification_binds_representative_public_contracts() -> N
         "application/setup/model.py",
         "application/setup/activation.py",
         "application/configuration/heating_setup_adapter.py",
+        "application/configuration/canonical_v3.py",
+        "application/configuration/canonical_v3_authoring.py",
+        "application/configuration/canonical_v3_conversion.py",
+        "application/configuration/canonical_v3_lifecycle.py",
+        "application/configuration/canonical_v3_migration.py",
+        "application/configuration/canonical_defaults.py",
+        "application/configuration/__init__.py",
         "infrastructure/home_assistant/setup_discovery.py",
         "infrastructure/home_assistant/setup_host.py",
         "infrastructure/home_assistant/setup_persistence.py",
@@ -267,11 +284,13 @@ def test_release_metadata_records_published_core_and_unpublished_ha_boundary() -
     integration_note = (ROOT / "docs" / "releases" / "home-assistant-0.13.0.md").read_text(encoding="utf-8")
 
     assert "release_id: controlel-core-0.14.0" in metadata
+    assert "release_id: controlel-core-0.16.0" in metadata
     assert "release_id: controlel-core-0.15.0" in metadata
     assert "release_id: controlel-core-0.13.0" in metadata
     assert "release_id: controlel-core-0.12.0" in metadata
     assert "release_id: controlel-home_assistant-0.13.0" in metadata
     assert "release_id: controlel-home_assistant-0.12.0" in metadata
+    assert metadata.count('version: "0.16.0"') == 1
     assert metadata.count('version: "0.15.0"') == 1
     assert metadata.count('version: "0.14.0"') == 1
     assert metadata.count('version: "0.13.0"') == 2
@@ -279,6 +298,7 @@ def test_release_metadata_records_published_core_and_unpublished_ha_boundary() -
     assert metadata.count("status: published") >= 5
     assert metadata.count("status: candidate") >= 1
     assert 'tag: "core-v0.14.0"' in metadata
+    assert 'title: "Controlel Core 0.16.0"' in metadata
     assert 'title: "Controlel Core 0.15.0"' in metadata
     assert "status: candidate" in metadata
     assert 'commit_sha: "3c42d487a72682068e090097036b2d79cca30b23"' in metadata
@@ -301,9 +321,12 @@ def test_release_metadata_records_published_core_and_unpublished_ha_boundary() -
     assert "Frontend API v1" in integration_note
     assert "authenticated read-only WebSocket" in integration_note
     assert "No write APIs" in integration_note
-    candidate_note = (ROOT / "docs" / "releases" / "core-0.15.0.md").read_text(encoding="utf-8")
+    candidate_note = (ROOT / "docs" / "releases" / "core-0.16.0.md").read_text(encoding="utf-8")
     assert "unreleased development candidate" in candidate_note
-    assert "Published Core 0.14.0 artifacts" in candidate_note
+    assert "canonical configuration v3" in candidate_note.casefold()
+    previous_candidate_note = (ROOT / "docs" / "releases" / "core-0.15.0.md").read_text(encoding="utf-8")
+    assert "unreleased development candidate" in previous_candidate_note
+    assert "Published Core 0.14.0 artifacts" in previous_candidate_note
 
 
 def test_development_composition_matches_the_public_release_boundary() -> None:
@@ -311,7 +334,7 @@ def test_development_composition_matches_the_public_release_boundary() -> None:
     manifest = json.loads((ROOT / "custom_components" / "controlel" / "manifest.json").read_text(encoding="utf-8"))
 
     assert manifest["requirements"] == ["controlel==0.15.0"]
-    assert 'DEVELOPMENT_CORE_VERSION = "0.15.0"' in builder
+    assert 'DEVELOPMENT_CORE_VERSION = "0.16.0"' in builder
     assert '"publishable": False' in builder
     assert '"integration/controlel.zip"' in builder
     assert "development integration manifest has the wrong Core pin" in builder

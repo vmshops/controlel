@@ -33,7 +33,7 @@ else:
 
 ROOT = Path(__file__).parents[2]
 COMPOSITION_SCHEMA_VERSION = 1
-DEVELOPMENT_CORE_VERSION = "0.15.0"
+DEVELOPMENT_CORE_VERSION = "0.16.0"
 ARCHIVE_PREFIX = "controlel-dev"
 
 

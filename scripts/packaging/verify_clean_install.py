@@ -69,6 +69,18 @@ from controlel.application.state.runtime_supervision_state import (
     RuntimeSupervisionDiagnosticsV1,
     RuntimeSupervisionState,
 )
+from controlel.application.configuration import (
+    CANONICAL_CONFIGURATION_SCHEMA_VERSION_V3,
+    ActiveCanonicalConfigurationV3,
+    CanonicalConfigurationDraftV3,
+    CanonicalConfigurationLifecycleV3,
+    CanonicalConfigurationRevisionV3,
+    CanonicalConfigurationValidationV3,
+    ConfigurationScopesV3,
+    author_greenfield_heating_scopes_v3,
+    migrate_heating_v2_revision_to_v3,
+    new_configuration_id_v3,
+)
 from controlel.application.setup import (
     ActivationCoordinator,
     ActiveReference,
@@ -319,6 +331,25 @@ assert hasattr(HeatingSetupHostService, "canonicalize_heating_draft")
 assert not hasattr(HeatingSetupHostService, "activate")
 assert not hasattr(HeatingSetupHostService, "activate_heating_draft")
 assert not any(name == "homeassistant" or name.startswith("homeassistant.") for name in sys.modules)
+
+canonical_v3_contracts = (
+    ActiveCanonicalConfigurationV3,
+    CanonicalConfigurationDraftV3,
+    CanonicalConfigurationLifecycleV3,
+    CanonicalConfigurationRevisionV3,
+    CanonicalConfigurationValidationV3,
+    ConfigurationScopesV3,
+    author_greenfield_heating_scopes_v3,
+    migrate_heating_v2_revision_to_v3,
+    new_configuration_id_v3,
+)
+for contract in canonical_v3_contracts:
+    module_path = Path(importlib.import_module(contract.__module__).__file__).resolve()
+    assert module_path.is_relative_to(package_path.parent)
+assert CANONICAL_CONFIGURATION_SCHEMA_VERSION_V3 == 3
+configuration_id = new_configuration_id_v3()
+assert configuration_id.startswith("heating_")
+assert CanonicalConfigurationLifecycleV3 is not None
 
 frontend_api_contracts = (
     BuildingEvidenceV1,

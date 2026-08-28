@@ -282,7 +282,7 @@ async def test_wrong_config_entry_and_missing_draft_are_deterministically_reject
             "source": "test",
             "change_kind": "CREATE",
             "reason": "authority_gate",
-            "core_version": "0.15.0",
+            "core_version": "0.16.0",
         },
         {
             "type": SETUP_WRITE_V1_ACTIVATE,
@@ -346,7 +346,7 @@ async def test_existing_v2_draft_remains_reopen_validate_delete_compatible(
     defaults_response = await client.receive_json()
     assert defaults_response["success"] is True
     defaults = defaults_response["result"]["result"]
-    assert defaults["core_version"] == "0.15.0"
+    assert defaults["core_version"] == "0.16.0"
     assert defaults["integration_version"] == "0.13.0"
     assert defaults["settings"]["target_temperature_celsius"] == 21.0
     assert defaults["settings"]["primary_measurement_max_age_seconds"] == 900.0
