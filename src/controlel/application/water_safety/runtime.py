@@ -36,6 +36,7 @@ from controlel.domain.water_safety import (
     MoistureObservation,
     WaterIncident,
     WaterIncidentStatus,
+    WaterSafetyAssessmentStatus,
     WaterSafetySnapshot,
     WaterSafetyState,
 )
@@ -113,6 +114,11 @@ class WaterSafetyRuntime:
         return self._snapshot.state
 
     @property
+    def assessment_status(self) -> WaterSafetyAssessmentStatus:
+        self._require_started()
+        return self._snapshot.assessment_status
+
+    @property
     def snapshot(self) -> WaterSafetySnapshot:
         self._require_started()
         return self._snapshot
@@ -140,7 +146,9 @@ class WaterSafetyRuntime:
             zone_id=self._config.zone_id,
             area_id=self._config.area_id,
             critical_sensor=self._config.critical_sensor,
+            assessment_status=self._snapshot.assessment_status,
             latest_observation=self._snapshot.latest_observation,
+            last_confirmed_observation=self._snapshot.last_confirmed_observation,
             active_incident=self._snapshot.active_incident,
             last_incident=self._snapshot.last_incident,
             fault_deadline=self._snapshot.fault_deadline,
@@ -330,7 +338,14 @@ class WaterSafetyRuntime:
         reassert_wet_outputs: bool = False,
     ) -> None:
         previous = self._snapshot.state
-        self._snapshot = replace(self._snapshot, latest_observation=observation)
+        last_confirmed = self._snapshot.last_confirmed_observation
+        if observation.condition in {MoistureCondition.DRY, MoistureCondition.WET}:
+            last_confirmed = observation
+        self._snapshot = replace(
+            self._snapshot,
+            latest_observation=observation,
+            last_confirmed_observation=last_confirmed,
+        )
         self._emit(
             events,
             observation.observed_at,
@@ -353,6 +368,7 @@ class WaterSafetyRuntime:
         results: list[WaterOutputCommandResult],
     ) -> None:
         previous = self._snapshot.state
+        grace_pending = self._snapshot.fault_deadline is not None
         if previous is WaterSafetyState.SENSOR_FAULT:
             self._emit(
                 events,
@@ -380,6 +396,16 @@ class WaterSafetyRuntime:
             fault_deadline=None,
             next_fault_notification_at=None,
         )
+        if grace_pending:
+            self._emit(
+                events,
+                observation.observed_at,
+                WaterSafetyEventCode.SENSOR_GRACE_CANCELLED,
+                previous,
+                WaterSafetyState.OK,
+                observation=observation,
+                incident_id=None if recovered is None else recovered.incident_id,
+            )
         if recovered is not None:
             self._emit(
                 events,
@@ -410,6 +436,7 @@ class WaterSafetyRuntime:
         reassert_outputs: bool,
     ) -> None:
         previous = self._snapshot.state
+        grace_pending = self._snapshot.fault_deadline is not None
         if previous is WaterSafetyState.SENSOR_FAULT:
             self._emit(
                 events,
@@ -441,6 +468,16 @@ class WaterSafetyRuntime:
             fault_deadline=None,
             next_fault_notification_at=None,
         )
+        if grace_pending:
+            self._emit(
+                events,
+                observation.observed_at,
+                WaterSafetyEventCode.SENSOR_GRACE_CANCELLED,
+                previous,
+                WaterSafetyState.WET,
+                observation=observation,
+                incident_id=incident.incident_id,
+            )
         if is_new:
             self._emit(
                 events,
@@ -472,7 +509,7 @@ class WaterSafetyRuntime:
     ) -> None:
         if self._snapshot.state is WaterSafetyState.SENSOR_FAULT:
             return
-        immediate = self._config.critical_sensor or self._config.unavailable_grace_seconds == 0
+        immediate = self._config.unavailable_grace_seconds == 0
         if immediate:
             self._enter_sensor_fault(observation.observed_at, events, results)
             return
@@ -507,7 +544,7 @@ class WaterSafetyRuntime:
         if self._snapshot.state is WaterSafetyState.SENSOR_FAULT:
             return
         previous = self._snapshot.state
-        interval = self._config.fault_repeat_interval_seconds
+        interval = self._config.fault_repeat_interval_seconds if self._config.critical_sensor else None
         self._snapshot = replace(
             self._snapshot,
             state=WaterSafetyState.SENSOR_FAULT,
@@ -525,7 +562,8 @@ class WaterSafetyRuntime:
             incident_id=self._active_incident_id,
             details={"critical_sensor": self._config.critical_sensor},
         )
-        self._notify_fault(at, events, results, repeated=False)
+        if self._config.critical_sensor:
+            self._notify_fault(at, events, results, repeated=False)
 
     def _notify_fault(
         self,

@@ -19,9 +19,19 @@ class MoistureCondition(StrEnum):
 
 
 class WaterSafetyState(StrEnum):
+    """Primary state; consult assessment status before presenting OK as confirmed."""
+
     OK = "OK"
     WET = "WET"
     SENSOR_FAULT = "SENSOR_FAULT"
+    DISABLED = "DISABLED"
+
+
+class WaterSafetyAssessmentStatus(StrEnum):
+    """Whether the primary state is currently supported by usable sensor evidence."""
+
+    CONFIRMED = "CONFIRMED"
+    INDETERMINATE_GRACE = "INDETERMINATE_GRACE"
     DISABLED = "DISABLED"
 
 
@@ -90,6 +100,7 @@ class WaterSafetySnapshot:
     state: WaterSafetyState
     processing_enabled: bool
     latest_observation: MoistureObservation | None = None
+    last_confirmed_observation: MoistureObservation | None = None
     active_incident: WaterIncident | None = None
     last_incident: WaterIncident | None = None
     unavailable_since: datetime | None = None
@@ -124,6 +135,11 @@ class WaterSafetySnapshot:
             raise ValueError("OK state cannot retain an active incident")
         if self.last_incident is not None and self.last_incident.status is not WaterIncidentStatus.RECOVERED:
             raise ValueError("last_incident must have RECOVERED status")
+        if self.last_confirmed_observation is not None and self.last_confirmed_observation.condition not in {
+            MoistureCondition.DRY,
+            MoistureCondition.WET,
+        }:
+            raise ValueError("last_confirmed_observation must be DRY or WET")
         if (self.unavailable_since is None) != (self.fault_deadline is None):
             raise ValueError("unavailable_since and fault_deadline must be present together")
         if self.fault_deadline is not None and self.state not in {WaterSafetyState.OK, WaterSafetyState.WET}:
@@ -145,6 +161,14 @@ class WaterSafetySnapshot:
         ):
             if sequence_value < 1:
                 raise ValueError(f"{sequence_label} must be positive")
+
+    @property
+    def assessment_status(self) -> WaterSafetyAssessmentStatus:
+        if not self.processing_enabled:
+            return WaterSafetyAssessmentStatus.DISABLED
+        if self.fault_deadline is not None:
+            return WaterSafetyAssessmentStatus.INDETERMINATE_GRACE
+        return WaterSafetyAssessmentStatus.CONFIRMED
 
 
 def _require_aware(value: datetime, label: str) -> None:

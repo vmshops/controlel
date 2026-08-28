@@ -26,7 +26,13 @@ from controlel.application.water_safety import (
     WaterSafetyEventCode,
     WaterSafetyRuntime,
 )
-from controlel.domain.water_safety import MoistureCondition, MoistureObservation, WaterSafetySnapshot, WaterSafetyState
+from controlel.domain.water_safety import (
+    MoistureCondition,
+    MoistureObservation,
+    WaterSafetyAssessmentStatus,
+    WaterSafetySnapshot,
+    WaterSafetyState,
+)
 
 T0 = datetime(2026, 8, 29, 8, 0, tzinfo=UTC)
 NOTIFY_HOME = "water_safety.notification.home"
@@ -252,19 +258,50 @@ def test_unavailable_and_unknown_share_one_grace_and_never_become_dry() -> None:
     assert fault.state is WaterSafetyState.SENSOR_FAULT
     assert fault.snapshot.active_incident.incident_id == incident_id
     assert WaterOutputAction.NOTIFY_RECOVERY not in _actions(output)
-    assert _actions(output).count(WaterOutputAction.NOTIFY_SENSOR_FAULT) == 2
+    assert _actions(output).count(WaterOutputAction.NOTIFY_SENSOR_FAULT) == 0
 
 
-def test_critical_sensor_faults_immediately_and_repeats_from_actual_delivery_time() -> None:
+def test_critical_sensor_unavailable_before_grace_is_indeterminate_without_alarm() -> None:
     output = RecordingOutput()
-    runtime = _runtime(output, effective=_effective(critical=True, grace=999.0, repeat=60.0))
+    runtime = _runtime(output, effective=_effective(critical=True, grace=30.0, repeat=60.0))
     runtime.start(_observation(MoistureCondition.DRY, T0), started_at=T0)
 
-    fault = runtime.observe(_observation(MoistureCondition.UNKNOWN, T0 + timedelta(seconds=1)))
-    late_repeat = runtime.tick(T0 + timedelta(seconds=90))
+    pending = runtime.observe(_observation(MoistureCondition.UNAVAILABLE, T0 + timedelta(seconds=1)))
+    before = runtime.tick(T0 + timedelta(seconds=30, milliseconds=999))
+
+    assert pending.state is WaterSafetyState.OK
+    assert pending.assessment_status is WaterSafetyAssessmentStatus.INDETERMINATE_GRACE
+    assert before.assessment_status is WaterSafetyAssessmentStatus.INDETERMINATE_GRACE
+    assert pending.snapshot.latest_observation.condition is MoistureCondition.UNAVAILABLE
+    assert pending.snapshot.last_confirmed_observation.condition is MoistureCondition.DRY
+    assert _actions(output).count(WaterOutputAction.NOTIFY_SENSOR_FAULT) == 0
+
+
+def test_critical_sensor_faults_exactly_at_configured_grace() -> None:
+    output = RecordingOutput()
+    runtime = _runtime(output, effective=_effective(critical=True, grace=30.0, repeat=60.0))
+    runtime.start(_observation(MoistureCondition.DRY, T0), started_at=T0)
+    runtime.observe(_observation(MoistureCondition.UNKNOWN, T0 + timedelta(seconds=1)))
+
+    fault = runtime.tick(T0 + timedelta(seconds=31))
 
     assert fault.state is WaterSafetyState.SENSOR_FAULT
+    assert fault.assessment_status is WaterSafetyAssessmentStatus.CONFIRMED
     assert fault.snapshot.fault_deadline is None
+    assert _actions(output).count(WaterOutputAction.NOTIFY_SENSOR_FAULT) == 2
+    assert fault.snapshot.next_fault_notification_at == T0 + timedelta(seconds=91)
+
+
+def test_critical_sensor_faults_after_configured_grace_and_repeats_from_delivery_time() -> None:
+    output = RecordingOutput()
+    runtime = _runtime(output, effective=_effective(critical=True, grace=30.0, repeat=60.0))
+    runtime.start(_observation(MoistureCondition.DRY, T0), started_at=T0)
+    runtime.observe(_observation(MoistureCondition.UNKNOWN, T0 + timedelta(seconds=1)))
+
+    late_fault = runtime.tick(T0 + timedelta(seconds=40))
+    late_repeat = runtime.tick(T0 + timedelta(seconds=110))
+
+    assert late_fault.state is WaterSafetyState.SENSOR_FAULT
     assert _actions(output).count(WaterOutputAction.NOTIFY_SENSOR_FAULT) == 4
     assert all(
         command.custom_message == "Custom fault"
@@ -272,7 +309,44 @@ def test_critical_sensor_faults_immediately_and_repeats_from_actual_delivery_tim
         if command.action is WaterOutputAction.NOTIFY_SENSOR_FAULT
     )
     assert any(command.repeated for command in output.commands)
-    assert late_repeat.snapshot.next_fault_notification_at == T0 + timedelta(seconds=150)
+    assert late_repeat.snapshot.next_fault_notification_at == T0 + timedelta(seconds=170)
+
+
+def test_critical_sensor_recovery_before_grace_cancels_pending_fault() -> None:
+    output = RecordingOutput()
+    runtime = _runtime(output, effective=_effective(critical=True, grace=30.0, repeat=60.0))
+    runtime.start(_observation(MoistureCondition.DRY, T0), started_at=T0)
+    runtime.observe(_observation(MoistureCondition.UNKNOWN, T0 + timedelta(seconds=1)))
+
+    recovered = runtime.observe(_observation(MoistureCondition.DRY, T0 + timedelta(seconds=20)))
+    after_original_deadline = runtime.tick(T0 + timedelta(seconds=31))
+
+    assert recovered.state is WaterSafetyState.OK
+    assert recovered.assessment_status is WaterSafetyAssessmentStatus.CONFIRMED
+    assert recovered.snapshot.fault_deadline is None
+    assert after_original_deadline.state is WaterSafetyState.OK
+    assert _actions(output).count(WaterOutputAction.NOTIFY_SENSOR_FAULT) == 0
+    assert all(event.code is not WaterSafetyEventCode.SENSOR_FAULT_STARTED for event in recovered.events)
+    assert any(event.code is WaterSafetyEventCode.SENSOR_GRACE_CANCELLED for event in recovered.events)
+
+
+def test_critical_sensor_recovery_after_fault_closes_fault_and_cancels_repeats() -> None:
+    output = RecordingOutput()
+    runtime = _runtime(output, effective=_effective(critical=True, grace=30.0, repeat=60.0))
+    runtime.start(_observation(MoistureCondition.DRY, T0), started_at=T0)
+    runtime.observe(_observation(MoistureCondition.UNAVAILABLE, T0 + timedelta(seconds=1)))
+    runtime.tick(T0 + timedelta(seconds=31))
+
+    recovered = runtime.observe(_observation(MoistureCondition.DRY, T0 + timedelta(seconds=32)))
+    command_count = len(output.commands)
+    after_repeat_deadline = runtime.tick(T0 + timedelta(seconds=100))
+
+    assert recovered.state is WaterSafetyState.OK
+    assert recovered.assessment_status is WaterSafetyAssessmentStatus.CONFIRMED
+    assert recovered.snapshot.next_fault_notification_at is None
+    assert any(event.code is WaterSafetyEventCode.SENSOR_FAULT_RECOVERED for event in recovered.events)
+    assert after_repeat_deadline.output_results == ()
+    assert len(output.commands) == command_count
 
 
 def test_sirens_and_fault_repeats_are_independently_optional() -> None:

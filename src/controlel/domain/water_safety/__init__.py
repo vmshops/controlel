@@ -5,6 +5,7 @@ from controlel.domain.water_safety.model import (
     MoistureObservation,
     WaterIncident,
     WaterIncidentStatus,
+    WaterSafetyAssessmentStatus,
     WaterSafetySnapshot,
     WaterSafetyState,
 )
@@ -14,6 +15,7 @@ __all__ = [
     "MoistureObservation",
     "WaterIncident",
     "WaterIncidentStatus",
+    "WaterSafetyAssessmentStatus",
     "WaterSafetySnapshot",
     "WaterSafetyState",
 ]
