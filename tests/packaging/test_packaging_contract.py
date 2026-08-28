@@ -375,7 +375,7 @@ def test_packaging_ci_builds_and_validates_without_publishing() -> None:
     assert "token" not in workflow.casefold()
 
 
-def test_ci_validates_ha_candidate_against_the_exact_public_core() -> None:
+def test_ci_validates_ha_candidate_against_the_repository_core() -> None:
     workflow = (ROOT / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8")
 
     assert "tests/domain" in workflow
@@ -388,9 +388,10 @@ def test_ci_validates_ha_candidate_against_the_exact_public_core() -> None:
     assert "home-assistant-public:" in workflow
     assert "home-assistant-framework-public:" in workflow
     assert "home-assistant-candidate:" not in workflow
-    assert "CONTROLEL_FRAMEWORK_COMPOSITION: public" in workflow
-    assert workflow.count("python -m pip install --no-cache-dir controlel==0.15.0") == 2
-    assert workflow.count("python scripts/ci/verify_public_core.py") == 2
+    assert "CONTROLEL_FRAMEWORK_COMPOSITION: candidate" in workflow
+    assert workflow.count("python -m pip install -e .") == 3
+    assert workflow.count("python scripts/ci/verify_ha_candidate_core.py") == 2
+    assert workflow.count("python scripts/ci/verify_public_core.py") == 0
     assert workflow.count("--asyncio-mode=auto") == 1
     assert "controlel==0.10.0" not in workflow
 

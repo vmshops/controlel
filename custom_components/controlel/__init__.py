@@ -12,8 +12,6 @@ if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant
 
-import homeassistant.helpers.config_validation as cv
-
 from controlel.application.ports.heat_source_port import HeatSourcePort
 from controlel.application.runtime.control_runtime import ControlRuntime
 from controlel.application.runtime.control_runtime_assembly import ControlRuntimeAssembly
@@ -50,7 +48,13 @@ from .scheduler import HomeAssistantScheduler
 
 LOGGER = logging.getLogger(__name__)
 PLATFORMS = ("sensor", "binary_sensor")
-CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+
+try:
+    import homeassistant.helpers.config_validation as cv
+
+    CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+except ModuleNotFoundError:  # Repository Core tests import custom_components without Home Assistant.
+    CONFIG_SCHEMA = None
 
 
 @dataclass

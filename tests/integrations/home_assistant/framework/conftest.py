@@ -31,8 +31,10 @@ MANIFEST_REQUIREMENT = json.loads(
     (ROOT / "custom_components" / "controlel" / "manifest.json").read_text(encoding="utf-8")
 )["requirements"][0]
 MANIFEST_CORE_VERSION = MANIFEST_REQUIREMENT.removeprefix("controlel==")
+CANDIDATE_CORE_VERSION = "0.16.0"
 FRAMEWORK_CORE_VERSION_BY_COMPOSITION = {
     "public": MANIFEST_CORE_VERSION,
+    "candidate": CANDIDATE_CORE_VERSION,
 }
 
 

@@ -67,11 +67,11 @@ jobs:
       - name: Install locked Home Assistant test dependencies
         run: python -m pip install --require-hashes -r requirements/ha-test.txt
 
-      - name: Install exact public core package
-        run: python -m pip install --no-cache-dir controlel==0.15.0
+      - name: Install repository Core candidate
+        run: python -m pip install -e .
 
-      - name: Verify public core composition and provenance
-        run: python scripts/ci/verify_public_core.py
+      - name: Verify Home Assistant candidate core composition
+        run: python scripts/ci/verify_ha_candidate_core.py
 
       - name: Run Home Assistant adapter tests
         run: |
@@ -83,7 +83,7 @@ jobs:
   home-assistant-framework-public:
     runs-on: ubuntu-latest
     env:
-      CONTROLEL_FRAMEWORK_COMPOSITION: public
+      CONTROLEL_FRAMEWORK_COMPOSITION: candidate
 
     steps:
       - name: Checkout repository
@@ -103,11 +103,11 @@ jobs:
       - name: Install locked Home Assistant test dependencies
         run: python -m pip install --require-hashes -r requirements/ha-test.txt
 
-      - name: Install exact public core package
-        run: python -m pip install --no-cache-dir controlel==0.15.0
+      - name: Install repository Core candidate
+        run: python -m pip install -e .
 
-      - name: Verify public core composition and provenance
-        run: python scripts/ci/verify_public_core.py
+      - name: Verify Home Assistant candidate core composition
+        run: python scripts/ci/verify_ha_candidate_core.py
 
       - name: Run Home Assistant framework tests
         run: python -m pytest tests/integrations/home_assistant/framework

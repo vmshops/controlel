@@ -139,17 +139,21 @@ async def test_reload_does_not_duplicate_panel(hass, entry_data, http_component)
 
 
 @pytest.mark.asyncio
-async def test_panel_registration_failure_is_not_fatal(hass, entry_data) -> None:
-    """Without the http component the integration still sets up (panel is a
-    UI convenience, not a core requirement)."""
+async def test_panel_registration_failure_is_not_fatal(hass, entry_data, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Panel registration failures are logged and do not block runtime setup."""
     entry = MockConfigEntry(domain=DOMAIN, title="Living room", data=entry_data)
     entry.add_to_hass(hass)
 
-    # No http component is loaded here, so panel registration cannot succeed.
-    assert hass.http is None
+    async def _raise_panel_failure(_hass, _config_entry_id: str) -> None:
+        raise RuntimeError("panel registration unavailable")
+
+    monkeypatch.setattr(
+        "custom_components.controlel.panel.async_register_controlel_panel",
+        _raise_panel_failure,
+    )
+
     assert await hass.config_entries.async_setup(entry.entry_id) is True
     assert entry.runtime_data.host is not None
-    # The panel is simply absent; the core integration is functional.
     assert frontend.async_panel_exists(hass, FRONTEND_URL_PATH) is False
 
 
