@@ -39,7 +39,16 @@
     "step": {
       "init": {
         "title": "Configure Controlel",
-        "description": "{configure_explanation} Choose Open Setup Wizard below to launch the guided Wizard."
+        "description": "{configure_explanation} Choose Open Setup Wizard below to launch the guided Wizard.",
+        "menu_options": {
+          "open_wizard": "Open Setup Wizard",
+          "start_greenfield": "Start manual canonical v3 configuration",
+          "edit_active": "Edit active canonical v3 configuration",
+          "convert_v2": "Convert active canonical v2 configuration",
+          "convert_legacy": "Convert legacy configuration to v3",
+          "resume_draft": "Resume a durable draft",
+          "abandon_draft": "Abandon a durable draft"
+        }
       },
       "start_greenfield": {
         "title": "Start canonical v3 configuration",
@@ -75,23 +84,19 @@
       "diagnostics": {"title": "Diagnostics", "data": {"diagnostic_steady_profile": "Steady diagnostic profile", "debug_configured_duration_seconds": "Debug duration"}},
       "notifications": {"title": "Notifications", "description": "Recipient IDs remain stable and are managed by Controlel; edit only delivery preferences here.", "data": {"notifications_enabled": "Enable notifications", "notification_recipients": "Recipients", "notification_maximum_per_window": "Maximum per window", "notification_rate_window_seconds": "Rate window", "critical_notification_maximum_per_window": "Critical maximum per window", "critical_notification_rate_window_seconds": "Critical rate window", "notification_history_capacity": "History capacity"}},
       "save_draft": {"title": "Save draft", "description": "Save these edits as a new durable draft revision? Saving does not validate, canonicalize, or activate."},
-      "draft_saved": {"title": "Draft saved", "description": "Draft {draft_id} is durable and inactive. Choose a separate next action."},
+      "draft_saved": {
+        "title": "Draft saved",
+        "description": "Draft {draft_id} is durable and inactive. Choose a separate next action.",
+        "menu_options": {
+          "validate": "Validate saved draft",
+          "continue_editing": "Continue editing",
+          "abandon_current": "Abandon this draft"
+        }
+      },
       "validate": {"title": "Validate draft", "description": "Validate the saved draft against a fresh Home Assistant discovery snapshot? Validation does not activate."},
       "validation_result": {"title": "Validation result", "description": "Issues: {validation_issues}. Continue only when activation-ready."},
       "canonicalize": {"title": "Create canonical revision", "description": "Create an immutable canonical revision from this validated draft? This still does not activate it."},
       "activate": {"title": "Activate canonical revision", "description": "Explicitly activate revision {revision_id}? This is the authority transition and reloads Controlel."}
-    },
-    "menu_options": {
-      "open_wizard": "Open Setup Wizard",
-      "start_greenfield": "Start manual canonical v3 configuration",
-      "edit_active": "Edit active canonical v3 configuration",
-      "convert_v2": "Convert active canonical v2 configuration",
-      "convert_legacy": "Convert legacy configuration to v3",
-      "resume_draft": "Resume a durable draft",
-      "abandon_draft": "Abandon a durable draft",
-      "validate": "Validate saved draft",
-      "continue_editing": "Continue editing",
-      "abandon_current": "Abandon this draft"
     },
     "error": {
       "invalid_configuration": "The configuration is invalid.",

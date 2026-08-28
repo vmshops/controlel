@@ -12,6 +12,8 @@ if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant
 
+import homeassistant.helpers.config_validation as cv
+
 from controlel.application.ports.heat_source_port import HeatSourcePort
 from controlel.application.runtime.control_runtime import ControlRuntime
 from controlel.application.runtime.control_runtime_assembly import ControlRuntimeAssembly
@@ -35,6 +37,7 @@ from controlel.infrastructure.time.system_clock import SystemClock
 
 from .canonical_runtime import async_select_runtime_configuration, staged_candidate_runtime
 from .config import HomeAssistantIntegrationConfig, integration_config_from_entry
+from .const import DOMAIN
 from .event_loop_bridge import HomeAssistantEventLoopBridge
 from .failure_sink import HomeAssistantScheduledFailureSink, clear_entry_issues
 from .frontend_api import create_frontend_api_provider_v1
@@ -47,6 +50,7 @@ from .scheduler import HomeAssistantScheduler
 
 LOGGER = logging.getLogger(__name__)
 PLATFORMS = ("sensor", "binary_sensor")
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 
 @dataclass
