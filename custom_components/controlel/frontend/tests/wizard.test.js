@@ -452,3 +452,140 @@ test("backend failures stay explicit with no mock fallback", async () => {
   assert.equal(validation.wizard.state.status, "error");
   assert.ok(validation.panel.textContent.includes("validation unavailable"));
 });
+
+function haosSnapshot() {
+  return snapshot({
+    snapshot_id: "snapshot-haos",
+    objects: [
+      object("home_assistant.area", "tiskacka", null),
+      object("home_assistant.entity", "synology-teplota-registry", "sensor.synology_teplota", "tiskacka"),
+      object("home_assistant.entity", "smart-wifi-plug-registry", "switch.smart_wi_fi_plug", "tiskacka"),
+    ],
+    object_counts: { "home_assistant.area": 1, "home_assistant.entity": 2 },
+  });
+}
+
+function haosRecommendations() {
+  const sensor = candidate(
+    IDS.sensor, W.PRIMARY_TEMPERATURE_ROLE, "synology-teplota-registry", "sensor.synology_teplota", "sensor"
+  );
+  const source = candidate(
+    IDS.enable, W.SOURCE_ENABLE_TARGET_ROLE, "smart-wifi-plug-registry", "switch.smart_wi_fi_plug", "switch"
+  );
+  const disable = candidate(
+    IDS.disable, W.SOURCE_DISABLE_TARGET_ROLE, "smart-wifi-plug-registry", "switch.smart_wi_fi_plug", "switch"
+  );
+  return [
+    { role: W.PRIMARY_TEMPERATURE_ROLE, recommended: sensor, alternatives: [], explicit_confirmation_required: true },
+    { role: W.SOURCE_ENABLE_TARGET_ROLE, recommended: source, alternatives: [], explicit_confirmation_required: true },
+    { role: W.SOURCE_DISABLE_TARGET_ROLE, recommended: disable, alternatives: [], explicit_confirmation_required: true },
+  ];
+}
+
+function haosClient(overrides = {}) {
+  const calls = [];
+  const client = {
+    calls,
+    discover() { calls.push(["discovery", {}]); return Promise.resolve(haosSnapshot()); },
+    recommendations() { calls.push(["recommendations", {}]); return Promise.resolve(haosRecommendations()); },
+    defaults() { calls.push(["defaults", {}]); return Promise.resolve(defaults()); },
+    listDrafts() { calls.push(["drafts", {}]); return Promise.resolve([]); },
+    reopenDraft(request) { calls.push(["draft", request]); return Promise.reject(apiError("not_found")); },
+    readActive() { return Promise.reject(apiError("setup_conflict")); },
+    editDraft() { return Promise.reject(apiError("setup_conflict")); },
+    startDraft(request) { calls.push(["start", request]); return Promise.resolve(draftFromBindings(request)); },
+    updateDraft(request) {
+      calls.push(["update", request]);
+      return Promise.resolve(canonicalDraft({
+        revision: request.expected_revision + 1,
+        draftId: request.draft_id,
+        scopes: request.configuration_scopes,
+      }));
+    },
+    validateDraft(request) {
+      calls.push(["validate", request]);
+      const update = calls.find(([operation]) => operation === "update");
+      const revision = update ? update[1].expected_revision + 1 : 1;
+      return Promise.resolve({
+        report_id: request.report_id,
+        draft_id: request.draft_id,
+        draft_revision: revision,
+        draft_fingerprint: "d".repeat(64),
+        evaluated_at: NOW,
+        reference_health: [],
+        activation_ready: true,
+        issue_codes: [],
+      });
+    },
+    canonicalizeDraft(request) {
+      calls.push(["canonicalize", request]);
+      return Promise.resolve({ ...canonicalDraft(), revision_id: request.revision_id, semantic_configuration_fingerprint: "e".repeat(64) });
+    },
+    activateRevision(request) {
+      calls.push(["activate", request]);
+      return Promise.resolve({ generation: 1, canonical_revision_id: request.revision_id });
+    },
+    abandonDraft(request) {
+      calls.push(["abandon", request]);
+      return Promise.resolve({ draft_id: request.draft_id, abandoned_revision: request.expected_revision });
+    },
+    ...overrides,
+  };
+  return client;
+}
+
+function selectHaosIntent(wizard) {
+  wizard.state.draft.areaId = "tiskacka";
+  wizard.state.draft.areaTouched = true;
+  wizard.state.draft.selections = {
+    [W.PRIMARY_TEMPERATURE_ROLE]: IDS.sensor,
+    [W.SOURCE_ENABLE_TARGET_ROLE]: IDS.enable,
+    [W.SOURCE_DISABLE_TARGET_ROLE]: IDS.disable,
+  };
+  wizard.state.draft.confirmations = {
+    [W.PRIMARY_TEMPERATURE_ROLE]: true,
+    [W.SOURCE_ENABLE_TARGET_ROLE]: true,
+    [W.SOURCE_DISABLE_TARGET_ROLE]: true,
+  };
+  wizard.state.draft.settings.target_temperature_celsius = 21;
+  wizard.state.dirty = true;
+}
+
+test("HAOS greenfield validate persists confirmed bindings before validation", async () => {
+  const client = haosClient();
+  const { wizard } = create(client);
+  await wizard.startDiscovery();
+  selectHaosIntent(wizard);
+  wizard.goToStep(5);
+  await wizard.validateDraft();
+
+  assert.equal(wizard.state.dirty, false);
+  assert.equal(wizard.state.validation.draft_revision, wizard.state.session.revision);
+  assert.equal(wizard.state.validation.activation_ready, true);
+  assert.deepEqual(client.calls.slice(-3).map(([operation]) => operation), ["start", "update", "validate"]);
+  const update = client.calls.find(([operation]) => operation === "update")[1];
+  const sensor = update.configuration_scopes.heating.zones[0].primary_temperature_sensor.provider_reference;
+  const enable = update.configuration_scopes.heating.heat_sources[0].command_strategy.enable_permission.command_target_reference;
+  assert.equal(sensor.current_locator, "sensor.synology_teplota");
+  assert.equal(enable.current_locator, "switch.smart_wi_fi_plug");
+  assert.equal(update.configuration_scopes.heating.zones[0].demand_policy.target_temperature_celsius, 21);
+});
+
+test("confirmed bindings persist when touchedRoles were cleared before update", async () => {
+  const staleSensor = reference("stale-sensor-registry", "sensor.stale_temperature");
+  const staleDraft = canonicalDraft({ revision: 3, sensorReference: staleSensor });
+  const client = fakeClient({ drafts: [staleDraft] });
+  const { wizard } = create(client);
+  await wizard.startDiscovery();
+
+  wizard.state.draft.selections[W.PRIMARY_TEMPERATURE_ROLE] = IDS.sensor;
+  wizard.state.draft.confirmations[W.PRIMARY_TEMPERATURE_ROLE] = true;
+  wizard.state.draft.touchedRoles = {};
+  wizard.state.dirty = true;
+  await wizard.saveDraft();
+
+  const update = client.calls.find(([operation]) => operation === "update")[1];
+  const sensor = update.configuration_scopes.heating.zones[0].primary_temperature_sensor.provider_reference;
+  assert.equal(sensor.current_locator, "sensor.living_temperature");
+  assert.equal(wizard.state.dirty, false);
+});

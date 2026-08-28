@@ -479,6 +479,50 @@
       return providerReference(candidate(role, state.draft.selections[role]));
     }
 
+    function referenceKey(reference) {
+      if (!reference) return null;
+      if (reference.native_id) return `native:${reference.native_id}`;
+      if (reference.current_locator) return `locator:${reference.current_locator}`;
+      return null;
+    }
+
+    function sessionBindingReference(role) {
+      if (!state.session) return null;
+      const zone = state.session.heating.zones[0];
+      const source = state.session.heating.heat_sources[0];
+      if (role === PRIMARY_TEMPERATURE_ROLE) return zone.primary_temperature_sensor.provider_reference;
+      if (role === SOURCE_ENABLE_TARGET_ROLE) {
+        return source.command_strategy.enable_permission.command_target_reference;
+      }
+      if (role === SOURCE_DISABLE_TARGET_ROLE) {
+        return source.command_strategy.disable_permission.command_target_reference;
+      }
+      return null;
+    }
+
+    function bindingNeedsPersistence(role) {
+      if (!state.draft.confirmations[role]) return false;
+      const reference = selectedReference(role);
+      if (!reference) return false;
+      if (!state.session) return true;
+      return referenceKey(reference) !== referenceKey(sessionBindingReference(role));
+    }
+
+    function sourceBindingsNeedPersistence() {
+      return bindingNeedsPersistence(SOURCE_ENABLE_TARGET_ROLE)
+        || bindingNeedsPersistence(SOURCE_DISABLE_TARGET_ROLE);
+    }
+
+    function areaNeedsPersistence() {
+      if (!state.draft.areaId) return false;
+      const selectedArea = areas().find((item) => item.native_id === state.draft.areaId);
+      const areaReference = providerReference(selectedArea);
+      if (!areaReference) return false;
+      if (!state.session) return true;
+      const persistedArea = state.session.heating.zones[0].topology.area_reference;
+      return referenceKey(areaReference) !== referenceKey(persistedArea);
+    }
+
     function greenfieldBindings() {
       const area = areas().find((item) => item.native_id === state.draft.areaId);
       const sensor = candidate(PRIMARY_TEMPERATURE_ROLE, state.draft.selections[PRIMARY_TEMPERATURE_ROLE]);
@@ -529,18 +573,20 @@
       source.protection.indeterminate_grace_period_seconds = settings.indeterminate_grace_period_seconds;
       source.protection.minimum_heating_on_seconds = settings.minimum_heating_on_seconds;
       source.protection.minimum_heating_off_seconds = settings.minimum_heating_off_seconds;
-      if (state.draft.areaTouched) {
-        zone.topology.area_reference = providerReference(
+      if (state.draft.areaTouched || areaNeedsPersistence()) {
+        const areaReference = providerReference(
           areas().find((item) => item.native_id === state.draft.areaId)
         );
+        if (!areaReference) throw new Error(t("wizard.complete_before_save"));
+        zone.topology.area_reference = areaReference;
       }
-      if (state.draft.touchedRoles[PRIMARY_TEMPERATURE_ROLE]) {
+      if (bindingNeedsPersistence(PRIMARY_TEMPERATURE_ROLE)) {
         const reference = selectedReference(PRIMARY_TEMPERATURE_ROLE);
         if (!reference || !state.draft.confirmations[PRIMARY_TEMPERATURE_ROLE]) throw new Error(t("wizard.complete_before_save"));
         zone.primary_temperature_sensor.provider_reference = reference;
         zone.primary_temperature_sensor.display_name = reference.current_locator || reference.native_id;
       }
-      if (state.draft.touchedRoles[SOURCE_ENABLE_TARGET_ROLE] || state.draft.touchedRoles[SOURCE_DISABLE_TARGET_ROLE]) {
+      if (sourceBindingsNeedPersistence()) {
         const enable = candidate(SOURCE_ENABLE_TARGET_ROLE, state.draft.selections[SOURCE_ENABLE_TARGET_ROLE]);
         const disable = candidate(SOURCE_DISABLE_TARGET_ROLE, state.draft.selections[SOURCE_DISABLE_TARGET_ROLE]);
         const enableReference = selectedReference(SOURCE_ENABLE_TARGET_ROLE);
@@ -585,8 +631,10 @@
         if (!base) {
           const bindings = greenfieldBindings();
           if (!bindings) {
+            state.status = "error";
+            state.error = new Error(t("wizard.complete_before_save"));
+            state.errorOperation = "update";
             state.step = earliestCorrectionStep();
-            state.status = "loaded";
             render();
             return null;
           }
@@ -597,7 +645,6 @@
             bindings,
           });
           storeDraftId(base.draft_id);
-          applySession(base);
           state.draft.settings = desiredSettings;
         }
         const session = await client.updateDraft({
@@ -623,8 +670,12 @@
     async function validateDraft() {
       let session = state.session;
       const savedBeforeValidation = state.dirty;
-      if (savedBeforeValidation) session = await saveDraft();
-      if (!session || (savedBeforeValidation && state.status === "error")) return;
+      if (savedBeforeValidation) {
+        const saved = await saveDraft();
+        if (state.status === "error") return;
+        session = saved || state.session;
+      }
+      if (!session) return;
       state.status = "saving";
       state.error = null;
       state.errorOperation = null;
