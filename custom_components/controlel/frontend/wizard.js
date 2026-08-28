@@ -268,6 +268,33 @@
         persistedReferences: {},
       };
       state.dirty = false;
+      state.step = 1;
+    }
+
+    function applyDiscoveryPrefill() {
+      if (state.session) return;
+      const sensorRecommendation = recommendation(PRIMARY_TEMPERATURE_ROLE);
+      const preferredAreaId = sensorRecommendation && sensorRecommendation.recommended
+        ? sensorRecommendation.recommended.area_id
+        : null;
+      if (preferredAreaId && areas().some((item) => item.native_id === preferredAreaId)) {
+        state.draft.areaId = preferredAreaId;
+      }
+      for (const role of [PRIMARY_TEMPERATURE_ROLE, SOURCE_ENABLE_TARGET_ROLE, SOURCE_DISABLE_TARGET_ROLE]) {
+        const item = recommendation(role);
+        const recommended = item && item.recommended;
+        if (recommended && isWizardCandidateCompatible(role, recommended)) {
+          state.draft.selections[role] = recommended.candidate_id;
+        }
+      }
+      const enableSelection = candidate(
+        SOURCE_ENABLE_TARGET_ROLE,
+        state.draft.selections[SOURCE_ENABLE_TARGET_ROLE]
+      );
+      if (enableSelection) {
+        const paired = pairedSourceSelection(SOURCE_ENABLE_TARGET_ROLE, enableSelection);
+        if (paired) state.draft.selections[SOURCE_DISABLE_TARGET_ROLE] = paired.candidate_id;
+      }
     }
 
     function earliestCorrectionStep() {
@@ -336,7 +363,8 @@
         if (session) {
           applySession(session);
           storeDraftId(session.draft_id);
-          state.step = earliestCorrectionStep();
+        } else {
+          applyDiscoveryPrefill();
         }
         state.status = "loaded";
       } catch (error) {
@@ -350,7 +378,6 @@
     function startNewDraft() {
       clearStoredDraftId();
       resetIntent();
-      state.step = 1;
       return startDiscovery({ forceNewDraft: true });
     }
 
@@ -368,7 +395,6 @@
         });
         clearStoredDraftId();
         resetIntent();
-        state.step = 1;
         await startDiscovery({ forceNewDraft: true });
         return abandoned;
       } catch (error) {
@@ -634,7 +660,6 @@
             state.status = "error";
             state.error = new Error(t("wizard.complete_before_save"));
             state.errorOperation = "update";
-            state.step = earliestCorrectionStep();
             render();
             return null;
           }
@@ -780,6 +805,13 @@
       render();
     }
 
+    function goToCorrectionStep() {
+      if (state.status !== "loaded") return;
+      const target = earliestCorrectionStep();
+      if (target === state.step) return;
+      goToStep(target);
+    }
+
     function renderStepper() {
       stepperNav.setAttribute("aria-label", t("panel.setup_steps"));
       stepperNav.replaceChildren(stepper(
@@ -809,7 +841,7 @@
                 ? "warning"
                 : "neutral";
           entryNote = el("div", { class: "panel" },
-            el("h3", { class: "panel__title" }, t("wizard.setup_entry")),
+            el("h3", { class: "panel__title" }, t("wizard.active_configuration")),
             el("div", { class: "section__badges" },
               badge(
                 readiness.state === "ready"
@@ -1054,6 +1086,7 @@
       const session = state.session;
       const issues = state.validation ? state.validation.issue_codes : [];
       const ready = draftIsReady();
+      const correctionStep = earliestCorrectionStep();
       const readinessMessage = !session
         ? t("wizard.not_ready_not_saved")
         : state.dirty
@@ -1063,12 +1096,45 @@
           : ready
             ? t("wizard.ready_not_active")
             : t("wizard.not_ready_blocking", { count: issues.length });
+      const entry = state.entryState;
+      const entryReadiness = entry && entry.status === "loaded" ? entry.readiness : null;
+      let activeConfigurationPanel = null;
+      if (entryReadiness) {
+        const messageKey = {
+          ready: "wizard.entry_ready",
+          incomplete: "wizard.entry_incomplete",
+          invalid: "wizard.entry_invalid",
+        }[entryReadiness.state] || "wizard.entry_unknown";
+        const tone = entryReadiness.state === "ready"
+          ? "positive"
+          : entryReadiness.state === "invalid"
+            ? "negative"
+            : entryReadiness.state === "incomplete"
+              ? "warning"
+              : "neutral";
+        activeConfigurationPanel = el("div", { class: "panel" },
+          el("h3", { class: "panel__title" }, t("wizard.active_configuration")),
+          el("div", { class: "section__badges" },
+            badge(
+              entryReadiness.state === "ready"
+                ? t("wizard.ready")
+                : entryReadiness.state === "unknown"
+                  ? t("common.unknown")
+                  : t("wizard.not_ready"),
+              entryReadiness.state === "ready" ? "positive" : entryReadiness.state === "unknown" ? "neutral" : "warning"
+            ),
+            entryReadiness.reason_code ? badge(entryReadiness.reason_code, "neutral") : null
+          ),
+          noteBox(t(messageKey), tone)
+        );
+      }
 
       return el("div", { class: "step" },
         el("h2", { class: "step__title" }, t("wizard.review_title")),
         el("p", { class: "step__lead" }, t("wizard.review_persisted_lead")),
+        activeConfigurationPanel,
         el("div", { class: "panel" },
-          el("h3", { class: "panel__title" }, t("wizard.draft_review")),
+          el("h3", { class: "panel__title" }, t("wizard.current_draft")),
           el("div", { class: "review-row" },
             el("span", { class: "review-row__label" }, t("wizard.zone")),
             state.draft.areaId || (session ? t("common.none") : badge(t("wizard.not_selected"), "warning"))
@@ -1092,7 +1158,7 @@
           !session ? noteBox(t("wizard.complete_before_save"), "warning") : null
         ),
         el("div", { class: "panel" },
-          el("h3", { class: "panel__title" }, t("wizard.validation_report")),
+          el("h3", { class: "panel__title" }, t("wizard.current_draft_validation")),
           el("div", { class: `readiness-summary readiness-summary--${ready ? "ready" : "not-ready"}` },
             badge(ready ? t("wizard.ready") : t("wizard.not_ready"), ready ? "positive" : "negative"),
             el("span", { class: "readiness-summary__message" }, readinessMessage)
@@ -1109,7 +1175,13 @@
                 el("h4", { class: "validation-group__title" }, t("wizard.blocking_issues")),
                 el("ul", { class: "validation-list validation-list--blocking" }, issues.map((code) =>
                   validationItem({ severity: "blocking", code, message: code, details: "" })
-                ))
+                )),
+                correctionStep < 5
+                  ? el("button", {
+                      class: "btn btn--secondary",
+                      onclick: goToCorrectionStep,
+                    }, t("wizard.fix_blocking_issues"))
+                  : null
               )
             : noteBox(t("wizard.no_blocking_issues"), ready ? "positive" : "neutral"),
           noteBox(t("wizard.validation_preparation"), "neutral"),
@@ -1129,6 +1201,7 @@
       }
       draftStatus.hidden = false;
       draftStatus.replaceChildren(
+        el("span", { class: "draft-status__label" }, t("wizard.current_draft")),
         badge(draftIsReady() ? t("wizard.ready") : t("wizard.not_ready"), draftIsReady() ? "positive" : "negative"),
         badge(t("wizard.canonical_v3_draft"), "info"),
         el("span", { class: "draft-status__text" },
@@ -1233,6 +1306,7 @@
       canonicalizeDraft,
       activateRevision,
       goToStep,
+      goToCorrectionStep,
       render,
     };
     render();

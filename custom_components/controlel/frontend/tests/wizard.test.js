@@ -311,17 +311,17 @@ test("Wizard resumes a canonical draft created by HA Configure without a browser
   await wizard.startDiscovery();
 
   assert.equal(wizard.state.session.draft_id, "ha-configure-draft");
-  assert.equal(wizard.state.step, 5);
+  assert.equal(wizard.state.step, 1);
   assert.equal(storage.values.get("controlel.configuration.draft.v3.entry-real"), "ha-configure-draft");
 });
 
-test("invalid resumed references open at the earliest binding correction step", async () => {
+test("invalid resumed references stay on step 1 with prefilled session data", async () => {
   const missing = reference("missing-sensor", "sensor.removed");
   const client = fakeClient({ drafts: [canonicalDraft({ sensorReference: missing })] });
   const { wizard } = create(client);
   await wizard.startDiscovery();
 
-  assert.equal(wizard.state.step, 3);
+  assert.equal(wizard.state.step, 1);
   assert.equal(wizard.state.draft.selections[W.PRIMARY_TEMPERATURE_ROLE], undefined);
 });
 
@@ -588,4 +588,65 @@ test("confirmed bindings persist when touchedRoles were cleared before update", 
   const sensor = update.configuration_scopes.heating.zones[0].primary_temperature_sensor.provider_reference;
   assert.equal(sensor.current_locator, "sensor.living_temperature");
   assert.equal(wizard.state.dirty, false);
+});
+
+test("discovery keeps step 1 and explicit Next advances one step at a time", async () => {
+  const client = fakeClient();
+  const { wizard } = create(client);
+  await wizard.startDiscovery();
+
+  assert.equal(wizard.state.step, 1);
+  assert.equal(wizard.state.session, null);
+  assert.equal(wizard.state.draft.selections[W.PRIMARY_TEMPERATURE_ROLE], IDS.sensor);
+  assert.equal(wizard.state.draft.confirmations[W.PRIMARY_TEMPERATURE_ROLE], undefined);
+
+  wizard.goToStep(2);
+  assert.equal(wizard.state.step, 2);
+  wizard.goToStep(3);
+  assert.equal(wizard.state.step, 3);
+  wizard.goToStep(4);
+  assert.equal(wizard.state.step, 4);
+  wizard.goToStep(5);
+  assert.equal(wizard.state.step, 5);
+});
+
+test("delete draft resets navigation to step 1 without restoring review position", async () => {
+  const client = fakeClient({ drafts: [canonicalDraft({ revision: 6 })] });
+  const { wizard } = create(client, memoryStorage(), { confirm: () => true });
+  await wizard.startDiscovery();
+  wizard.goToStep(5);
+  await wizard.deleteDraft();
+
+  assert.equal(wizard.state.step, 1);
+  assert.equal(wizard.state.session, null);
+  assert.equal(wizard.state.validation, null);
+});
+
+test("resumed complete draft stays on step 1 until explicit navigation", async () => {
+  const client = fakeClient({ drafts: [canonicalDraft({ revision: 4 })] });
+  const { wizard } = create(client);
+  await wizard.startDiscovery();
+
+  assert.equal(wizard.state.step, 1);
+  assert.equal(wizard.state.draft.confirmations[W.PRIMARY_TEMPERATURE_ROLE], true);
+  for (let step = 1; step < 5; step += 1) {
+    wizard.goToStep(step + 1);
+    assert.equal(wizard.state.step, step + 1);
+  }
+});
+
+test("validation correction navigates only after an explicit fix action", async () => {
+  const missing = reference("missing-sensor", "sensor.removed");
+  const client = fakeClient({ drafts: [canonicalDraft({ sensorReference: missing })], validationReady: false });
+  const { panel, wizard } = create(client);
+  await wizard.startDiscovery();
+  assert.equal(wizard.state.step, 1);
+  wizard.goToStep(5);
+  await wizard.validateDraft();
+
+  assert.equal(wizard.state.step, 5);
+  assert.ok(panel.textContent.includes("canonical_v3.reference.missing"));
+
+  wizard.goToCorrectionStep();
+  assert.equal(wizard.state.step, 3);
 });

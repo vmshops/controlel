@@ -748,7 +748,7 @@ test("bootstrap resolves shell nodes inside the supplied shadow root", async () 
   assert.ok(navRoot.findAll("app-nav__item").length > 0, "shadow-root navigation rendered");
   assert.ok(viewRoot.textContent.includes("Overview"), "shadow-root view rendered");
   assert.ok(app.setupWizard, "the setup write wizard is attached");
-  assert.ok(stepPanel.textContent.includes("Current backend setup state"), "read-only readiness reaches wizard entry");
+  assert.ok(stepPanel.textContent.includes("Active configuration"), "read-only readiness reaches wizard entry");
   assert.ok(stepPanel.textContent.includes("Not Ready"), "incomplete backend state guides the wizard entry");
   assert.equal(modeRoot.textContent, "Frontend API v1 · live");
   assert.equal(decoyNav.children.length, 0, "outer document navigation was untouched");

@@ -410,6 +410,10 @@
         check_readiness: "Check readiness",
         cannot_activate: "An incomplete setup cannot become active.",
         draft_review: "Draft review",
+        active_configuration: "Active configuration",
+        current_draft: "Current draft",
+        current_draft_validation: "Current draft validation",
+        fix_blocking_issues: "Fix blocking issues",
         zone: "Zone",
         validation_report: "Validation report",
         validation_note:
@@ -865,6 +869,10 @@
         check_readiness: "Zkontrolovat připravenost",
         cannot_activate: "Nekompletní nastavení nemůže být aktivní.",
         draft_review: "Kontrola konceptu",
+        active_configuration: "Aktivní konfigurace",
+        current_draft: "Aktuální koncept",
+        current_draft_validation: "Validace aktuálního konceptu",
+        fix_blocking_issues: "Opravit blokující problémy",
         zone: "Zóna",
         validation_report: "Zpráva o validaci",
         validation_note:

@@ -71,6 +71,11 @@
   font-size: 0.85rem;
 }
 
+.draft-status__label {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
 /* ---------------------------------------------------------------- wizard */
 
 .wizard {
