@@ -257,6 +257,21 @@ function selectCompleteIntent(wizard) {
   wizard.state.dirty = true;
 }
 
+function advanceToStep(wizard, target) {
+  while (wizard.state.step < target) {
+    assert.equal(wizard.advanceStep(), true);
+  }
+}
+
+function stepperStepNodes(stepperNav, stepNumber) {
+  return [...stepperNav.walk()].filter((node) =>
+    node.className && node.className.includes("stepper__step") &&
+    [...node.walk()].some((child) =>
+      child.className === "stepper__index" && child.textContent === String(stepNumber)
+    )
+  );
+}
+
 test("greenfield discovery is read-only until required bindings are explicitly saved", async () => {
   const client = fakeClient();
   const { footer, panel, wizard, storage } = create(client);
@@ -391,7 +406,7 @@ test("blocking validation stays Not Ready and cannot canonicalize", async () => 
   const client = fakeClient({ drafts: [canonicalDraft({ revision: 2 })], validationReady: false });
   const { panel, wizard } = create(client);
   await wizard.startDiscovery();
-  wizard.goToStep(5);
+  advanceToStep(wizard, 5);
   await wizard.validateDraft();
 
   assert.ok(panel.textContent.includes("Not Ready"));
@@ -425,7 +440,7 @@ test("one switch selection pairs enable and disable while confirmation remains e
   const client = fakeClient();
   const { panel, wizard } = create(client);
   await wizard.startDiscovery();
-  wizard.goToStep(3);
+  advanceToStep(wizard, 3);
   const switchRadio = panel.walk().find((node) =>
     node.tagName === "INPUT" && node.getAttribute("type") === "radio" && node.getAttribute("name") === IDS.enable
   );
@@ -447,7 +462,7 @@ test("backend failures stay explicit with no mock fallback", async () => {
     drafts: [canonicalDraft({ revision: 2 })], failures: { validate: new Error("validation unavailable") },
   }));
   await validation.wizard.startDiscovery();
-  validation.wizard.goToStep(5);
+  advanceToStep(validation.wizard, 5);
   await validation.wizard.validateDraft();
   assert.equal(validation.wizard.state.status, "error");
   assert.ok(validation.panel.textContent.includes("validation unavailable"));
@@ -556,7 +571,7 @@ test("HAOS greenfield validate persists confirmed bindings before validation", a
   const { wizard } = create(client);
   await wizard.startDiscovery();
   selectHaosIntent(wizard);
-  wizard.goToStep(5);
+  advanceToStep(wizard, 5);
   await wizard.validateDraft();
 
   assert.equal(wizard.state.dirty, false);
@@ -600,21 +615,22 @@ test("discovery keeps step 1 and explicit Next advances one step at a time", asy
   assert.equal(wizard.state.draft.selections[W.PRIMARY_TEMPERATURE_ROLE], IDS.sensor);
   assert.equal(wizard.state.draft.confirmations[W.PRIMARY_TEMPERATURE_ROLE], undefined);
 
-  wizard.goToStep(2);
+  assert.equal(wizard.advanceStep(), true);
   assert.equal(wizard.state.step, 2);
-  wizard.goToStep(3);
+  assert.equal(wizard.advanceStep(), true);
   assert.equal(wizard.state.step, 3);
-  wizard.goToStep(4);
+  assert.equal(wizard.advanceStep(), true);
   assert.equal(wizard.state.step, 4);
-  wizard.goToStep(5);
+  assert.equal(wizard.advanceStep(), true);
   assert.equal(wizard.state.step, 5);
+  assert.equal(wizard.advanceStep(), false);
 });
 
 test("delete draft resets navigation to step 1 without restoring review position", async () => {
   const client = fakeClient({ drafts: [canonicalDraft({ revision: 6 })] });
   const { wizard } = create(client, memoryStorage(), { confirm: () => true });
   await wizard.startDiscovery();
-  wizard.goToStep(5);
+  advanceToStep(wizard, 5);
   await wizard.deleteDraft();
 
   assert.equal(wizard.state.step, 1);
@@ -629,9 +645,9 @@ test("resumed complete draft stays on step 1 until explicit navigation", async (
 
   assert.equal(wizard.state.step, 1);
   assert.equal(wizard.state.draft.confirmations[W.PRIMARY_TEMPERATURE_ROLE], true);
-  for (let step = 1; step < 5; step += 1) {
-    wizard.goToStep(step + 1);
-    assert.equal(wizard.state.step, step + 1);
+  for (let expected = 2; expected <= 5; expected += 1) {
+    assert.equal(wizard.advanceStep(), true);
+    assert.equal(wizard.state.step, expected);
   }
 });
 
@@ -641,7 +657,7 @@ test("validation correction navigates only after an explicit fix action", async 
   const { panel, wizard } = create(client);
   await wizard.startDiscovery();
   assert.equal(wizard.state.step, 1);
-  wizard.goToStep(5);
+  advanceToStep(wizard, 5);
   await wizard.validateDraft();
 
   assert.equal(wizard.state.step, 5);
@@ -649,4 +665,24 @@ test("validation correction navigates only after an explicit fix action", async 
 
   wizard.goToCorrectionStep();
   assert.equal(wizard.state.step, 3);
+});
+
+test("stepper clicks cannot jump forward from step 1", async () => {
+  const client = fakeClient();
+  const { stepper, wizard } = create(client);
+  await wizard.startDiscovery();
+  assert.equal(wizard.state.step, 1);
+
+  for (const stepNumber of [4, 5]) {
+    const nodes = stepperStepNodes(stepper, stepNumber);
+    assert.equal(nodes.length, 1);
+    assert.equal(nodes[0].listeners.click, undefined);
+    nodes[0].dispatch("click");
+    assert.equal(wizard.state.step, 1, `stepper step ${stepNumber} must not advance the wizard`);
+  }
+
+  assert.equal(wizard.advanceStep(), true);
+  assert.equal(wizard.state.step, 2);
+  assert.equal(wizard.retreatStep(), true);
+  assert.equal(wizard.state.step, 1);
 });

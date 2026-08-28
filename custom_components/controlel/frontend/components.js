@@ -111,14 +111,14 @@
     return card;
   }
 
-  /** Step indicator. steps: [{id, label}], currentId: number. */
-  function stepper(steps, currentId, onStepClick) {
-    return el("ol", { class: "stepper__list" },
+  /** Informational step indicator. Forward navigation is explicit via Next only. */
+  function stepper(steps, currentId) {
+    return el("ol", { class: "stepper__list stepper__list--informational", role: "list" },
       steps.map((s) => {
         const state = s.id < currentId ? "done" : s.id === currentId ? "current" : "upcoming";
         return el("li", {
-          class: `stepper__step stepper__step--${state}`,
-          onclick: () => onStepClick(s.id),
+          class: `stepper__step stepper__step--${state} stepper__step--informational`,
+          "aria-current": s.id === currentId ? "step" : null,
         },
           el("span", { class: "stepper__index" }, s.id),
           el("span", { class: "stepper__label" }, s.label),

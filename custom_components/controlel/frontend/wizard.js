@@ -794,30 +794,48 @@
       return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
     }
 
-    function goToStep(step) {
+    function setStep(step, reason) {
       if (state.status === "error" && state.session) {
         state.status = "loaded";
         state.error = null;
         state.errorOperation = null;
       }
-      if (state.status !== "loaded" && step !== 1) return;
+      if (state.status !== "loaded" && step !== 1) return false;
+      const current = state.step;
+      if (reason === "next") {
+        if (step !== current + 1 || step > STEPS.length) return false;
+      } else if (reason === "back") {
+        if (step !== current - 1 || step < 1) return false;
+      } else if (reason === "correction") {
+        if (step >= current || step < 1) return false;
+      } else {
+        return false;
+      }
       state.step = step;
       render();
+      return true;
+    }
+
+    function advanceStep() {
+      return setStep(state.step + 1, "next");
+    }
+
+    function retreatStep() {
+      return setStep(state.step - 1, "back");
     }
 
     function goToCorrectionStep() {
       if (state.status !== "loaded") return;
       const target = earliestCorrectionStep();
-      if (target === state.step) return;
-      goToStep(target);
+      if (target >= state.step) return;
+      setStep(target, "correction");
     }
 
     function renderStepper() {
       stepperNav.setAttribute("aria-label", t("panel.setup_steps"));
       stepperNav.replaceChildren(stepper(
         STEPS.map((item) => ({ id: item.id, label: t(item.key) })),
-        state.step,
-        goToStep
+        state.step
       ));
     }
 
@@ -1222,7 +1240,7 @@
       const back = el("button", {
         class: "btn btn--secondary btn--back",
         disabled: state.step === 1 || !loaded,
-        onclick: () => goToStep(state.step - 1),
+        onclick: () => retreatStep(),
       }, t("wizard.back"));
       const save = el("button", {
         class: "btn btn--secondary",
@@ -1237,7 +1255,7 @@
       const next = el("button", {
         class: "btn btn--primary",
         disabled: !loaded,
-        onclick: state.step < 5 ? () => goToStep(state.step + 1) : validateDraft,
+        onclick: state.step < 5 ? () => advanceStep() : validateDraft,
       }, state.step < 5 ? t("wizard.continue") : t("wizard.validate_draft"));
       const canonicalize = el("button", {
         class: "btn btn--secondary",
@@ -1305,7 +1323,8 @@
       validateDraft,
       canonicalizeDraft,
       activateRevision,
-      goToStep,
+      advanceStep,
+      retreatStep,
       goToCorrectionStep,
       render,
     };

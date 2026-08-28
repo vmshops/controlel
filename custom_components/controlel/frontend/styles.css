@@ -109,6 +109,19 @@
 
 .stepper__step:hover { border-color: var(--accent); }
 
+.stepper__list--informational .stepper__step {
+  cursor: default;
+  pointer-events: none;
+}
+
+.stepper__list--informational .stepper__step:hover {
+  border-color: var(--border);
+}
+
+.stepper__list--informational .stepper__step--current:hover {
+  border-color: var(--accent);
+}
+
 .stepper__index {
   display: grid;
   place-items: center;
