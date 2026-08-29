@@ -4,6 +4,7 @@ import pytest
 
 from controlel.application.configuration.water_safety_setup_adapter import (
     WATER_SAFETY_SENSOR_ROLE,
+    WATER_SAFETY_SETUP_SCHEMA_VERSION,
     WaterSafetySetupAdapter,
 )
 from controlel.application.setup import (
@@ -185,7 +186,11 @@ def test_water_uses_shared_draft_validate_canonicalize_activate_authority() -> N
     )
     repository = InMemorySetupRepository()
     repository.add_canonical_revision(canonical)
-    coordinator = ActivationCoordinator(repository, repository)
+    coordinator = ActivationCoordinator(
+        repository,
+        repository,
+        supported_module_schema_versions={"water_safety": WATER_SAFETY_SETUP_SCHEMA_VERSION},
+    )
     prepared = coordinator.prepare(canonical.revision_id, attempt_id="activate-water", prepared_at=NOW)
     coordinator.begin_applying(prepared.attempt_id, applying_at=NOW)
     coordinator.record_candidate_runtime_ready(

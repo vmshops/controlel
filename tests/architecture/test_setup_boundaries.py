@@ -145,6 +145,7 @@ def test_public_write_transport_makes_v3_the_sole_new_authoring_and_activation_a
     tree = ast.parse(SETUP_WRITE_TRANSPORT.read_text(encoding="utf-8"), filename=str(SETUP_WRITE_TRANSPORT))
     functions = {node.name: ast.unparse(node) for node in tree.body if isinstance(node, ast.AsyncFunctionDef)}
 
-    for handler in ("_start", "_update", "_canonicalize", "_activate"):
+    for handler in ("_start", "_update", "_canonicalize"):
         assert "_reject_v2_write" in functions[handler]
+    assert "_activate_water_setup" in functions["_activate"]
     assert "get_canonical_revision_v3" in functions["_configuration_v3_activate"]

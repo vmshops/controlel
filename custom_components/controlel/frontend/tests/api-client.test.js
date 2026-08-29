@@ -593,3 +593,78 @@ test("canonical validation, canonicalization, and activation remain distinct req
     "controlel/configuration/v3/activate",
   ]);
 });
+
+// ------------------------------------------------------ setup write client (water)
+
+function setupSessionRaw(revision) {
+  return {
+    draft_id: "draft-real",
+    draft_revision: revision,
+    module_instance_id: "main-water",
+    incomplete: true,
+    activation_ready: false,
+    validation_status: "CURRENT",
+    validation_report_id: "report-real",
+    blocking_issue_count: 1,
+    warning_count: 0,
+    settings: {},
+    selections: [],
+    recommendations: [],
+    validation_issues: [],
+    discovery: discoveryRaw(),
+    canonical_revision_id: null,
+    active_revision_id: null,
+    legacy_configuration: { present: false, conversion_available: false, silently_merged: false, reason_code: null },
+  };
+}
+
+test("normalizeWaterSafety preserves null sensor condition", () => {
+  const model = CA_API.normalizeWaterSafety({
+    frontend_api_version: 1,
+    generated_at: "2026-08-22T10:00:00+02:00",
+    state: "DISABLED",
+    assessment_status: "DISABLED",
+    sensor_condition: null,
+    area_name: null,
+    zone_name: null,
+    active_incident: false,
+    incident_silenced: false,
+    processing_enabled: false,
+    owned_siren_count: 0,
+    last_siren_command_outcome: null,
+    actions_available: [],
+  });
+  assert.equal(model.sensor_condition, null);
+});
+
+test("setup write client includes module_key for water safety", async () => {
+  const connection = setupWriteConnection((message) => Promise.resolve({
+    setup_write_api_version: 1,
+    operation: "discovery",
+    result: discoveryRaw(),
+  }));
+  const client = CA_API.createSetupWriteClient({
+    connection,
+    configEntryId: "entry-setup",
+    moduleKey: "water_safety",
+  });
+
+  await client.discover({ snapshot_id: "snapshot-water", captured_at: "2026-08-24T12:00:00Z" });
+  assert.equal(connection.sent[0].module_key, "water_safety");
+});
+
+test("setup write client exposes lifecycle operations for water safety", async () => {
+  const connection = setupWriteConnection((message) => Promise.resolve({
+    setup_write_api_version: 1,
+    operation: message.type.endsWith("/canonicalize") ? "canonicalize" : "activate",
+    result: setupSessionRaw(3),
+  }));
+  const client = CA_API.createSetupWriteClient({
+    connection,
+    configEntryId: "entry-setup",
+    moduleKey: "water_safety",
+  });
+
+  assert.equal(typeof client.canonicalizeDraft, "function");
+  assert.equal(typeof client.activateDraft, "function");
+});

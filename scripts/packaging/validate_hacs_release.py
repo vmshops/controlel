@@ -32,6 +32,7 @@ EXPECTED_ARCHIVE_FILES = frozenset(
         "config.py",
         "config_flow.py",
         "const.py",
+        "core_capabilities.py",
         "diagnostics.py",
         "entity.py",
         "event_loop_bridge.py",
@@ -56,6 +57,11 @@ EXPECTED_ARCHIVE_FILES = frozenset(
         "setup_write_websocket.py",
         "strings.json",
         "translations/en.json",
+        "water_safety_activation.py",
+        "water_safety_host.py",
+        "water_safety_moisture.py",
+        "water_safety_output.py",
+        "water_safety_persistence.py",
         # Runtime frontend assets required by the HA panel (see panel.py).
         "frontend/ha-panel.js",
         "frontend/app.js",
@@ -64,6 +70,7 @@ EXPECTED_ARCHIVE_FILES = frozenset(
         "frontend/i18n.js",
         "frontend/styles.css",
         "frontend/wizard.js",
+        "frontend/water-wizard.js",
     }
 )
 
@@ -74,6 +81,7 @@ DEV_ONLY_ARCHIVE_FILES = frozenset(
     {
         "frontend/index.html",
         "frontend/wizard.html",
+        "frontend/water-wizard.html",
         "frontend/README.md",
         "frontend/mock-data.js",
         "frontend/mock-app-data.js",

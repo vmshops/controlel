@@ -104,9 +104,10 @@ async def test_contract_routes_every_operation_to_existing_host_service(
         }
     )
 
-    async def get_service(hass_object, target_entry):
+    async def get_service(hass_object, target_entry, *, module_key="heating"):
         assert hass_object is hass
         assert target_entry is entry
+        assert module_key == "heating"
         return service
 
     monkeypatch.setattr(setup_transport, "async_get_setup_service", get_service)

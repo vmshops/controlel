@@ -1,4 +1,4 @@
-"""Passive provider for the four read-only Frontend API v1 domains."""
+"""Passive provider for the read-only Frontend API v1 domains."""
 
 from datetime import datetime, timedelta
 from typing import Protocol
@@ -28,6 +28,8 @@ from controlel.frontend_api.v1.models import (
     SetupResponseV1,
     SystemV1,
     ValidationMessageV1,
+    WaterSafetyEvidenceV1,
+    WaterSafetyResponseV1,
     ZoneEvidenceV1,
     ZoneV1,
 )
@@ -167,6 +169,10 @@ class FrontendApiProviderV1:
             ),
         )
 
+    def water_safety(self) -> WaterSafetyResponseV1:
+        evidence, now = self._read()
+        return _water_safety(evidence.water_safety, now)
+
     def _read(self) -> tuple[FrontendApiEvidenceV1, datetime]:
         evidence = self._source.snapshot()
         now = self._clock.now()
@@ -255,3 +261,37 @@ def _event(item: OperationalEventEvidenceV1) -> OperationalEventV1:
 
 def _timestamp(value: datetime | None) -> str | None:
     return value.isoformat() if value is not None else None
+
+
+def _water_safety(item: WaterSafetyEvidenceV1 | None, now: datetime) -> WaterSafetyResponseV1:
+    if item is None:
+        return WaterSafetyResponseV1(
+            frontend_api_version=FRONTEND_API_VERSION,
+            generated_at=now.isoformat(),
+            state="DISABLED",
+            assessment_status="DISABLED",
+            sensor_condition=None,
+            area_name=None,
+            zone_name=None,
+            active_incident=False,
+            incident_silenced=False,
+            processing_enabled=False,
+            owned_siren_count=0,
+            last_siren_command_outcome=None,
+            actions_available=(),
+        )
+    return WaterSafetyResponseV1(
+        frontend_api_version=FRONTEND_API_VERSION,
+        generated_at=now.isoformat(),
+        state=item.state,
+        assessment_status=item.assessment_status,
+        sensor_condition=item.sensor_condition,
+        area_name=item.area_name,
+        zone_name=item.zone_name,
+        active_incident=item.active_incident,
+        incident_silenced=item.incident_silenced,
+        processing_enabled=item.processing_enabled,
+        owned_siren_count=item.owned_siren_count,
+        last_siren_command_outcome=item.last_siren_command_outcome,
+        actions_available=item.actions_available,
+    )

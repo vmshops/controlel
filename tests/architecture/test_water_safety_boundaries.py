@@ -4,19 +4,13 @@ from pathlib import Path
 ROOT = Path(__file__).parents[2]
 WATER_DOMAIN = ROOT / "src" / "controlel" / "domain" / "water_safety"
 WATER_APPLICATION = ROOT / "src" / "controlel" / "application" / "water_safety"
-WATER_SETUP_ADAPTER = (
-    ROOT / "src" / "controlel" / "application" / "configuration" / "water_safety_setup_adapter.py"
-)
+WATER_SETUP_ADAPTER = ROOT / "src" / "controlel" / "application" / "configuration" / "water_safety_setup_adapter.py"
 SHARED_SETUP = ROOT / "src" / "controlel" / "application" / "setup"
 
 
 def _imports(path: Path) -> set[str]:
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    return {
-        node.module
-        for node in ast.walk(tree)
-        if isinstance(node, ast.ImportFrom) and node.module is not None
-    }
+    return {node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom) and node.module is not None}
 
 
 def test_water_domain_is_host_neutral_and_does_not_depend_on_application() -> None:

@@ -28,6 +28,7 @@ const SCRIPTS = [
   "api-client.js",
   "components.js",
   "wizard.js",
+  "water-wizard.js",
   "app.js",
 ];
 const CSS_URL = SCRIPT_BASE + "styles.css";

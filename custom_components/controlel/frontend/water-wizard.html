@@ -1,9 +1,9 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Controlel — Setup Wizard</title>
+  <title>Controlel ÔÇö Water Safety Setup</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -12,58 +12,49 @@
       <span class="app-logo" aria-hidden="true">C</span>
       <div>
         <h1 data-i18n="page.wizard_header">Controlel Setup</h1>
-        <p class="app-subtitle">Heating module · Canonical v3 lifecycle · Explicit activation</p>
+        <p class="app-subtitle">Water Safety module ┬Ě Real backend setup drafts ┬Ě No activation</p>
+        <p class="app-subtitle"><a href="wizard.html">Heating setup wizard</a> ┬Ě <a href="index.html">App shell</a></p>
       </div>
     </div>
-    <div id="draft-status" class="draft-status" hidden></div>
+    <div id="water-draft-status" class="draft-status" hidden></div>
   </header>
 
   <main class="wizard">
-    <footer id="wizard-footer" class="wizard-footer"></footer>
-    <nav id="stepper" class="stepper" aria-label="Setup steps"></nav>
-    <section id="step-panel" class="step-panel" aria-live="polite"></section>
-    <p class="hint"><a href="water-wizard.html">Water Safety setup wizard</a></p>
+    <nav id="water-stepper" class="stepper" aria-label="Setup steps"></nav>
+    <section id="water-step-panel" class="step-panel" aria-live="polite"></section>
+    <footer id="water-wizard-footer" class="wizard-footer"></footer>
   </main>
 
   <script src="i18n.js"></script>
   <script src="api-client.js"></script>
   <script src="components.js"></script>
-  <script src="wizard.js"></script>
+  <script src="water-wizard.js"></script>
   <script>
     const setupEnvironment = window.CA_API.detectHaEnvironment(window);
     const unavailable = () => Promise.reject(
       new window.CA_API.ApiError("disconnected", "No authenticated Home Assistant setup connection is available")
     );
     const setupClient = setupEnvironment.available
-      ? window.CA_API.createSetupWizardClient({
+      ? window.CA_API.createSetupWriteClient({
           connection: setupEnvironment.connection,
           configEntryId: setupEnvironment.configEntryId,
+          moduleKey: "water_safety",
         })
       : {
           discover: unavailable,
-          defaults: unavailable,
           recommendations: unavailable,
-          listDrafts: unavailable,
-          readActive: unavailable,
           startDraft: unavailable,
-          editDraft: unavailable,
           reopenDraft: unavailable,
           updateDraft: unavailable,
           validateDraft: unavailable,
-          canonicalizeDraft: unavailable,
-          activateRevision: unavailable,
-          abandonDraft: unavailable,
         };
-    window.CONTROLEL_SETUP_WIZARD = window.CA_WIZARD.createSetupWizard({
+    window.CONTROLEL_WATER_SETUP_WIZARD = window.CA_WATER_WIZARD.createSetupWaterWizard({
       client: setupClient,
       configEntryId: setupEnvironment.configEntryId || "unavailable",
-      actor: `home_assistant:${setupEnvironment.userId || "admin"}`,
       root: document,
       storage: window.localStorage,
     });
 
-    // Translate the static page chrome (wizard.js renders its own strings
-    // through the i18n layer at render time).
     if (window.CI18N && typeof window.CI18N.applyI18n === "function") {
       window.CI18N.applyI18n(document);
     }

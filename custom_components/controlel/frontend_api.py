@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
-from typing import Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from controlel.application.services.operational_event_stream import (
     OperationalEventStreamSnapshot,
@@ -28,6 +28,12 @@ from controlel.frontend_api.v1 import (
     ZoneEvidenceV1,
 )
 from controlel.infrastructure.time.system_clock import SystemClock
+
+from .core_capabilities import water_safety_core_available
+
+if TYPE_CHECKING:
+    from controlel.application.state.water_safety_diagnostics import WaterSafetyDiagnosticsSnapshotV1
+    from controlel.frontend_api.v1 import WaterSafetyEvidenceV1
 
 from .operational import (
     CommandOutcome,
@@ -58,8 +64,44 @@ class FrontendApiHostV1(Protocol):
     @property
     def frontend_api_setup_ready(self) -> bool: ...
 
+    @property
+    def frontend_api_water_safety_evidence(self) -> Any | None: ...
+
 
 SetupEvidenceSource = Callable[[], SetupEvidenceV1]
+
+
+@dataclass(frozen=True, slots=True)
+class HomeAssistantFrontendApiHostBridge:
+    """Expose heating and optional Water Safety evidence through one Frontend API host."""
+
+    heating_host: FrontendApiHostV1
+    water_safety_host: object | None = None
+
+    @property
+    def frontend_api_operational_evidence(
+        self,
+    ) -> tuple[
+        OperationalSnapshot,
+        tuple[DecisionTraceRecord, ...],
+        int,
+        OperationalEventStreamSnapshot,
+        tuple[str, str | None, datetime | None],
+        bool,
+        ReportedSourceEvidence | None,
+    ]:
+        return self.heating_host.frontend_api_operational_evidence
+
+    @property
+    def frontend_api_setup_ready(self) -> bool:
+        return self.heating_host.frontend_api_setup_ready
+
+    @property
+    def frontend_api_water_safety_evidence(self) -> Any | None:
+        if self.water_safety_host is None or not water_safety_core_available():
+            return None
+        snapshot = self.water_safety_host.frontend_api_water_safety_evidence
+        return _water_safety_snapshot_to_evidence(snapshot)
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,20 +117,24 @@ class HomeAssistantFrontendApiEvidenceSourceV1:
         )
         latest = _latest_decision(trace, operational.zone_id, operational.sensor_id)
         status = _runtime_status(operational)
-        return FrontendApiEvidenceV1(
+        water_safety = self.host.frontend_api_water_safety_evidence if water_safety_core_available() else None
+        modules = [
+            ModuleEvidenceV1(
+                module_id="heating",
+                status=("active" if status == "active" else "error" if status == "degraded" else "inactive"),
+                reason=_module_reason(operational),
+            ),
+        ]
+        if water_safety_core_available():
+            modules.append(_water_safety_module(water_safety))
+        evidence = FrontendApiEvidenceV1(
             system=SystemEvidenceV1(
                 status=status,
                 operating_mode=mode[0],
                 operating_mode_reason=mode[1],
                 operating_mode_since=mode[2],
             ),
-            modules=(
-                ModuleEvidenceV1(
-                    module_id="heating",
-                    status=("active" if status == "active" else "error" if status == "degraded" else "inactive"),
-                    reason=_module_reason(operational),
-                ),
-            ),
+            modules=tuple(modules),
             building=BuildingEvidenceV1(
                 demand_status=(operational.zone_heat_demand.value if normal_authority else "indeterminate"),
                 demand_reason_code=(operational.active_demand_cause.value if normal_authority else None),
@@ -133,20 +179,62 @@ class HomeAssistantFrontendApiEvidenceSourceV1:
                 )
             ),
         )
+        if water_safety_core_available() and water_safety is not None and hasattr(evidence, "water_safety"):
+            return replace(evidence, water_safety=water_safety)
+        return evidence
 
 
 def create_frontend_api_provider_v1(
     host: FrontendApiHostV1,
     *,
+    water_safety_host: object | None = None,
     setup_source: SetupEvidenceSource | None = None,
 ) -> FrontendApiProviderV1:
     """Compose the host-independent provider over one loaded HA entry."""
 
+    bridge = (
+        host
+        if isinstance(host, HomeAssistantFrontendApiHostBridge)
+        else HomeAssistantFrontendApiHostBridge(
+            heating_host=host,
+            water_safety_host=water_safety_host,
+        )
+    )
     source = HomeAssistantFrontendApiEvidenceSourceV1(
-        host=host,
+        host=bridge,
         setup_source=setup_source,
     )
     return FrontendApiProviderV1(source=source, clock=SystemClock())
+
+
+def _water_safety_snapshot_to_evidence(snapshot: WaterSafetyDiagnosticsSnapshotV1) -> WaterSafetyEvidenceV1:
+    from controlel.frontend_api.v1 import WaterSafetyEvidenceV1
+
+    actions = snapshot.actions_available
+    available: list[str] = []
+    if actions.silence:
+        available.append("silence")
+    if actions.disable:
+        available.append("disable")
+    if actions.enable:
+        available.append("enable")
+    if actions.test_notification:
+        available.append("test_notification")
+    if actions.test_siren:
+        available.append("test_siren")
+    return WaterSafetyEvidenceV1(
+        state=snapshot.state,
+        assessment_status=snapshot.assessment_status,
+        sensor_condition=snapshot.sensor_condition,
+        area_name=snapshot.area_name,
+        zone_name=snapshot.zone_name,
+        active_incident=snapshot.active_incident,
+        incident_silenced=snapshot.incident_silenced,
+        processing_enabled=snapshot.processing_enabled,
+        owned_siren_count=snapshot.owned_siren_count,
+        last_siren_command_outcome=snapshot.last_siren_command_outcome,
+        actions_available=tuple(sorted(available)),
+    )
 
 
 def _runtime_status(snapshot: OperationalSnapshot) -> str:
@@ -169,6 +257,16 @@ def _module_reason(snapshot: OperationalSnapshot) -> str | None:
     if snapshot.runtime_status is RuntimeStatus.STARTING:
         return "runtime_starting"
     return None
+
+
+def _water_safety_module(evidence: Any | None) -> ModuleEvidenceV1:
+    if evidence is None:
+        return ModuleEvidenceV1(module_id="water_safety", status="inactive", reason="water_safety_not_configured")
+    if not evidence.processing_enabled or evidence.state == "DISABLED":
+        return ModuleEvidenceV1(module_id="water_safety", status="inactive", reason="water_safety_disabled")
+    if evidence.state in {"WET", "SENSOR_FAULT"}:
+        return ModuleEvidenceV1(module_id="water_safety", status="error", reason=evidence.state.lower())
+    return ModuleEvidenceV1(module_id="water_safety", status="active", reason=None)
 
 
 def _permission(state: SourceControlState) -> str:

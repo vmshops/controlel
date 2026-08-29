@@ -106,8 +106,32 @@ function setupRaw() {
   };
 }
 
+function waterSafetyRaw() {
+  return {
+    frontend_api_version: 1,
+    generated_at: "2026-08-22T10:00:00+02:00",
+    state: "OK",
+    assessment_status: "CONFIRMED",
+    sensor_condition: "DRY",
+    area_name: "Bathroom",
+    zone_name: "Bathroom",
+    active_incident: false,
+    incident_silenced: false,
+    processing_enabled: true,
+    owned_siren_count: 0,
+    last_siren_command_outcome: null,
+    actions_available: ["disable", "test_notification"],
+  };
+}
+
 function fullResponses() {
-  return { overview: overviewRaw(), heating: heatingRaw(), diagnostics: diagnosticsRaw(), setup: setupRaw() };
+  return {
+    overview: overviewRaw(),
+    heating: heatingRaw(),
+    diagnostics: diagnosticsRaw(),
+    setup: setupRaw(),
+    waterSafety: waterSafetyRaw(),
+  };
 }
 
 // ------------------------------------------------------- fake connection
@@ -266,11 +290,36 @@ function fakeCanonicalClient({ existingDraft = false } = {}) {
 
 test("parseRoute maps known hashes to routes and falls back to overview", () => {
   assert.equal(CA.parseRoute("#/heating"), "heating");
+  assert.equal(CA.parseRoute("#/water-safety"), "water-safety");
   assert.equal(CA.parseRoute("#/diagnostics?x=1"), "diagnostics");
   assert.equal(CA.parseRoute("#/setup"), "setup");
   assert.equal(CA.parseRoute("#/bogus"), CA.DEFAULT_ROUTE);
   assert.equal(CA.parseRoute(""), CA.DEFAULT_ROUTE);
   assert.equal(CA.parseRoute(null), CA.DEFAULT_ROUTE);
+});
+
+test("navigation renders the water safety view", async () => {
+  const { app, viewRoot } = buildApp();
+  app.navigate("water-safety");
+  await settle(app);
+  assert.ok(viewRoot.textContent.includes("Water Safety"));
+  assert.ok(viewRoot.textContent.includes("Sensor condition"));
+  assert.ok(viewRoot.textContent.includes("Dry"));
+});
+
+test("water safety grace never renders unknown moisture as dry", async () => {
+  const responses = fullResponses();
+  responses.waterSafety = {
+    ...waterSafetyRaw(),
+    state: "OK",
+    assessment_status: "INDETERMINATE_GRACE",
+    sensor_condition: "UNAVAILABLE",
+  };
+  const { app, viewRoot } = buildApp({ responses });
+  app.navigate("water-safety");
+  await settle(app);
+  assert.ok(viewRoot.textContent.includes("Indeterminate"));
+  assert.ok(!viewRoot.textContent.includes("Dry"));
 });
 
 test("navigation renders the requested view and marks the current nav item", async () => {

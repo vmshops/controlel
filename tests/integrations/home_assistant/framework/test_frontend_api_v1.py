@@ -113,7 +113,10 @@ async def test_authenticated_reads_use_real_evidence_without_control_mutation(
 
     assert overview["frontend_api_version"] == 1
     assert overview["system"]["status"] == "active"
-    assert overview["modules"] == [{"module_id": "heating", "status": "active", "reason": None}]
+    assert overview["modules"] == [
+        {"module_id": "heating", "status": "active", "reason": None},
+        {"module_id": "water_safety", "status": "inactive", "reason": "water_safety_not_configured"},
+    ]
     assert heating["zones"][0]["zone_id"] == entry_data["zone_id"]
     assert heating["zones"][0]["current_temperature_c"] == 22.0
     assert heating["zones"][0]["measurement_state"] == "fresh"
