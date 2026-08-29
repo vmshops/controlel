@@ -50,11 +50,8 @@ def test_hacs_source_contract_is_exact() -> None:
     assert '"controlel/setup/write/v1/activate"' in api_client_source
     assert 'moduleKey === "water_safety"' in api_client_source or "moduleKey === 'water_safety'" in api_client_source
     for obsolete_route in ("start", "reopen", "update", "validate", "delete"):
-        assert 'createSetupWizardClient' in api_client_source
-        assert (
-            f'"controlel/setup/write/v1/{obsolete_route}"'
-            not in wizard_source
-        )
+        assert "createSetupWizardClient" in api_client_source
+        assert f'"controlel/setup/write/v1/{obsolete_route}"' not in wizard_source
     assert json.loads((ROOT / "hacs.json").read_text(encoding="utf-8")) == EXPECTED_HACS_MANIFEST
 
 
