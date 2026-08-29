@@ -11,9 +11,27 @@ releases:
     component: core
     title: "Controlel Core 0.17.0"
     version: "0.17.0"
-    status: candidate
-    tag: null
-    commit_sha: null
+    status: published
+    tag: "core-v0.17.0"
+    commit_sha: "6f9c34498ab09e6fc212d18b507c35c003bf1479"
+    tagged_at: "2026-08-29T20:34:36+02:00"
+    published_at: "2026-08-29T18:39:05Z"
+    provenance:
+      method: "tag-bound deterministic build verified against public PyPI bytes"
+      tag_object_sha: "d40ed21c1f2c75dc8bd900acd4530640f4f32772"
+      resolved_tag_commit: "6f9c34498ab09e6fc212d18b507c35c003bf1479"
+      verification_status: passed
+    artifacts:
+      wheel:
+        filename: "controlel-0.17.0-py3-none-any.whl"
+        size: 287747
+        sha256: "d818dd403b2aada29061662464ce9c0e3d37a5eea5d9059a1e3780cf13ffd3b6"
+        uploaded_at: "2026-08-29T18:39:05Z"
+      sdist:
+        filename: "controlel-0.17.0.tar.gz"
+        size: 203980
+        sha256: "9020487dd1325ff58ec3ac0e9e3541a78840eaaae803b05f9613f28525bd41bd"
+        uploaded_at: "2026-08-29T18:39:05Z"
     summary: "Water Safety V1 Core over the preserved Core 0.16 Heating and canonical-v3 baseline"
     highlights:
       - "Host-neutral Water Safety state, observation, incident, output-command, and persistence contracts"
@@ -22,13 +40,15 @@ releases:
       - "Presentation-neutral diagnostics, Frontend API v1 projection, and optional Home Assistant setup adapters"
     compatibility:
       previous_public_core: "0.16.0"
+      home_assistant_integration_candidate: "0.14.0"
       python: ">=3.13"
       pydantic: ">=2.0"
     notes:
-      - "Prepared but unpublished; no tag, PyPI upload, push, or Home Assistant release is part of this boundary."
       - "Heating runtime and canonical configuration v3 behavior from the current mainline are preserved unchanged."
       - "UNKNOWN and UNAVAILABLE moisture observations are never dry evidence."
       - "Accepted output requests are command outcomes and do not confirm physical siren or actuator state."
+      - "Published PyPI bytes match the deterministic final artifacts bound to core-v0.17.0."
+      - "Home Assistant integration 0.14.0 candidate pins this package exactly."
 
   - release_id: controlel-home_assistant-0.14.0
     component: home_assistant
@@ -37,19 +57,20 @@ releases:
     status: candidate
     tag: null
     commit_sha: null
-    summary: "Canonical configuration v3 Configure, Setup Wizard, and Heating settings over public Core 0.16.0"
+    summary: "Canonical configuration v3 Configure, Setup Wizard, Heating settings, and Water Safety over public Core 0.17.0"
     highlights:
       - "Configure flow, Setup Wizard, and Heating settings consume canonical configuration v3 lifecycle contracts"
+      - "Water Safety setup, activation, diagnostics, and Frontend API v1 projection over public Core 0.17.0"
       - "Deterministic v2-to-v3 Heating migration with explicit conversion review and activation"
       - "Authenticated WebSocket commands for canonicalize, activate, and read-only Frontend API v1 surfaces"
       - "Deterministic HACS release artifact prepared for real HAOS installation testing"
     compatibility:
-      required_core: "0.16.0"
+      required_core: "0.17.0"
       config_entry_version: 1
       home_assistant: "2026.7.3"
     notes:
       - "Existing version-1 config entries retain their runtime/configuration path without automatic migration."
-      - "The integration pins exactly controlel==0.16.0 from public PyPI; HA adapter and framework CI install that package, not editable source."
+      - "The integration pins exactly controlel==0.17.0 from public PyPI; HA adapter and framework CI install that package, not editable source."
       - "The integration remains unpublished pending real HAOS installation testing and separate release approval."
 
   - release_id: controlel-core-0.16.0

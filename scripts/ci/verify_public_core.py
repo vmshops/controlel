@@ -17,12 +17,42 @@ from controlel.application.configuration import (
     CanonicalConfigurationRevisionV3,
     migrate_heating_v2_revision_to_v3,
 )
+from controlel.application.configuration.water_safety_setup_adapter import (
+    WATER_SAFETY_MODULE_KEY,
+    WATER_SAFETY_SETUP_SCHEMA_VERSION,
+    WaterSafetySetupAdapter,
+    WaterSafetySetupPayload,
+)
+from controlel.application.services.water_safety_projector import WaterSafetyDiagnosticsProjector
 from controlel.application.setup import (
     ActiveReference,
     CanonicalConfigurationRevision,
     DiscoverySnapshot,
     DraftRevision,
     ValidationReport,
+)
+from controlel.application.state.water_safety_diagnostics import (
+    WATER_SAFETY_DIAGNOSTICS_SCHEMA_VERSION,
+    WaterSafetyActionsAvailableV1,
+    WaterSafetyDiagnosticsSnapshotV1,
+    water_safety_diagnostics_to_dict,
+)
+from controlel.application.water_safety import (
+    WaterOutputOutcome,
+    WaterSafetyDiagnostics,
+    WaterSafetyEvidencePort,
+    WaterSafetyOutputPort,
+    WaterSafetyRuntime,
+    WaterSafetyStatePort,
+)
+from controlel.domain.water_safety import (
+    MoistureCondition,
+    MoistureObservation,
+    WaterIncident,
+    WaterIncidentStatus,
+    WaterSafetyAssessmentStatus,
+    WaterSafetySnapshot,
+    WaterSafetyState,
 )
 from controlel.frontend_api.v1 import (
     FRONTEND_API_VERSION,
@@ -31,6 +61,8 @@ from controlel.frontend_api.v1 import (
     FrontendApiProviderV1,
     HeatSourceEvidenceV1,
     SystemEvidenceV1,
+    WaterSafetyEvidenceV1,
+    WaterSafetyResponseV1,
     frontend_response_to_dict,
 )
 from controlel.infrastructure.home_assistant import (
@@ -41,17 +73,21 @@ from controlel.infrastructure.home_assistant import (
     HeatingSetupSessionDTO,
     HomeAssistantDiscoveryAdapter,
     HomeAssistantSetupRepository,
+    WaterSafetyBindingSelectionRequest,
+    WaterSafetySetupHostService,
+    WaterSafetySetupSessionDTO,
+    async_snapshot_with_notify_services,
 )
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-CORE_VERSION = "0.16.0"
+CORE_VERSION = "0.17.0"
 CORE_REQUIREMENT = f"controlel=={CORE_VERSION}"
-PUBLIC_WHEEL_FILENAME = "controlel-0.16.0-py3-none-any.whl"
-PUBLIC_WHEEL_SIZE = 262_788
-PUBLIC_WHEEL_SHA256 = "1bd604429b8a655f6a4295f8b95378fafa194ff9c070eb884745a620cb3c0b8e"
-PUBLIC_SDIST_FILENAME = "controlel-0.16.0.tar.gz"
-PUBLIC_SDIST_SIZE = 185_466
-PUBLIC_SDIST_SHA256 = "6a132d3af66261b704d07e055305fe81d62c9648bbd075a3c66300c98cd3050a"
+PUBLIC_WHEEL_FILENAME = "controlel-0.17.0-py3-none-any.whl"
+PUBLIC_WHEEL_SIZE = 287_747
+PUBLIC_WHEEL_SHA256 = "d818dd403b2aada29061662464ce9c0e3d37a5eea5d9059a1e3780cf13ffd3b6"
+PUBLIC_SDIST_FILENAME = "controlel-0.17.0.tar.gz"
+PUBLIC_SDIST_SIZE = 203_980
+PUBLIC_SDIST_SHA256 = "9020487dd1325ff58ec3ac0e9e3541a78840eaaae803b05f9613f28525bd41bd"
 PYPI_METADATA_URL = f"https://pypi.org/pypi/controlel/{CORE_VERSION}/json"
 
 
@@ -148,12 +184,50 @@ def main() -> int:
         _contract_module_path(contract).is_relative_to(package_path.parent) for contract in canonical_v3_contracts
     )
 
+    water_setup_contracts = (
+        WATER_SAFETY_MODULE_KEY,
+        WATER_SAFETY_SETUP_SCHEMA_VERSION,
+        WaterSafetySetupAdapter,
+        WaterSafetySetupPayload,
+        WaterSafetyDiagnosticsProjector,
+        WATER_SAFETY_DIAGNOSTICS_SCHEMA_VERSION,
+        WaterSafetyActionsAvailableV1,
+        WaterSafetyDiagnosticsSnapshotV1,
+        water_safety_diagnostics_to_dict,
+        WaterOutputOutcome,
+        WaterSafetyDiagnostics,
+        WaterSafetyEvidencePort,
+        WaterSafetyOutputPort,
+        WaterSafetyRuntime,
+        WaterSafetyStatePort,
+        MoistureCondition,
+        MoistureObservation,
+        WaterIncident,
+        WaterIncidentStatus,
+        WaterSafetyAssessmentStatus,
+        WaterSafetySnapshot,
+        WaterSafetyState,
+        WaterSafetyBindingSelectionRequest,
+        WaterSafetySetupHostService,
+        WaterSafetySetupSessionDTO,
+        async_snapshot_with_notify_services,
+    )
+    assert WATER_SAFETY_MODULE_KEY == "water_safety"
+    assert WATER_SAFETY_SETUP_SCHEMA_VERSION == 1
+    assert WATER_SAFETY_DIAGNOSTICS_SCHEMA_VERSION == 1
+    assert all(
+        isinstance(contract, (str, int)) or _contract_module_path(contract).is_relative_to(package_path.parent)
+        for contract in water_setup_contracts
+    )
+
     frontend_api_contracts = (
         BuildingEvidenceV1,
         FrontendApiEvidenceV1,
         FrontendApiProviderV1,
         HeatSourceEvidenceV1,
         SystemEvidenceV1,
+        WaterSafetyEvidenceV1,
+        WaterSafetyResponseV1,
         frontend_response_to_dict,
     )
     assert all(
@@ -172,6 +246,19 @@ def main() -> int:
                         reported_state="UNKNOWN",
                     )
                 ),
+                water_safety=WaterSafetyEvidenceV1(
+                    state="SENSOR_FAULT",
+                    assessment_status="CONFIRMED",
+                    sensor_condition="UNKNOWN",
+                    area_name="Utility room",
+                    zone_name="Utility",
+                    active_incident=False,
+                    incident_silenced=False,
+                    processing_enabled=True,
+                    owned_siren_count=0,
+                    last_siren_command_outcome=None,
+                    actions_available=("disable", "test_notification"),
+                ),
             )
 
     class FrontendClock:
@@ -186,13 +273,18 @@ def main() -> int:
             frontend_provider.heating(),
             frontend_provider.diagnostics(),
             frontend_provider.setup(),
+            frontend_provider.water_safety(),
         )
     )
     frontend_heating = frontend_payloads[1]
+    frontend_water_safety = frontend_payloads[4]
     assert all(payload["frontend_api_version"] == 1 for payload in frontend_payloads)
     assert frontend_heating["building"]["heat_source"]["command_outcome"] == "held"
     assert frontend_heating["building"]["heat_source"]["reported_state"] == "UNKNOWN"
     assert frontend_heating["building"]["heat_source"]["physical_state"] == "unknown"
+    assert frontend_water_safety["state"] == "SENSOR_FAULT"
+    assert frontend_water_safety["sensor_condition"] == "UNKNOWN"
+    assert frontend_water_safety["actions_available"] == ["disable", "test_notification"]
     verify_public_artifact_metadata()
 
     print(

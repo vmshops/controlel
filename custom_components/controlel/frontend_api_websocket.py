@@ -178,7 +178,7 @@ async def _send_water_safety_action(
         connection.send_error(
             msg["id"],
             websocket_api.ERR_HOME_ASSISTANT_ERROR,
-            "Water Safety requires candidate Controlel core",
+            "Water Safety requires Controlel core with water_safety APIs",
         )
         return
     try:
@@ -227,7 +227,7 @@ async def _water_safety(hass: Any, connection: websocket_api.ActiveConnection, m
         connection.send_error(
             msg["id"],
             websocket_api.ERR_HOME_ASSISTANT_ERROR,
-            "Water Safety requires candidate Controlel core",
+            "Water Safety requires Controlel core with water_safety APIs",
         )
         return
     await _send(hass, connection, msg, "water_safety")

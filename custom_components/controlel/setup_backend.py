@@ -337,7 +337,7 @@ async def async_get_setup_service(
 
     if module_key == _WATER_SAFETY_MODULE_KEY:
         if not water_safety_core_available():
-            raise ValueError("Water Safety setup requires candidate core with water_safety APIs")
+            raise ValueError("Water Safety setup requires Controlel core with water_safety APIs")
         from controlel.infrastructure.home_assistant import WaterSafetySetupHostService
         from controlel.infrastructure.home_assistant.water_safety_discovery import async_snapshot_with_notify_services
 

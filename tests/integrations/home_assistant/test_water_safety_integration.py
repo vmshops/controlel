@@ -2,14 +2,8 @@
 
 from __future__ import annotations
 
-import importlib.util
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-
-import pytest
-
-if importlib.util.find_spec("controlel.application.water_safety") is None:
-    pytest.skip("requires candidate Water Safety core", allow_module_level=True)
 
 from controlel.application.configuration.water_safety_setup_adapter import (
     WATER_SAFETY_SENSOR_ROLE,
@@ -220,7 +214,7 @@ def test_configure_validate_canonicalize_and_activate_authority() -> None:
         source="setup",
         change_kind="CREATE",
         reason="initial",
-        core_version="0.16.0",
+        core_version="0.17.0",
     )
     repository = InMemorySetupRepository()
     repository.add_canonical_revision(canonical)

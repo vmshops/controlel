@@ -469,7 +469,7 @@ async def test_canonical_v3_edit_activate_read_and_restart_lifecycle(
             "source": "configuration_v3_api",
             "change_kind": "UPDATE",
             "reason": "adjust_target",
-            "core_version": "0.16.0",
+            "core_version": "0.17.0",
             "integration_version": "0.14.0",
         }
     )
@@ -751,7 +751,7 @@ async def test_v3_canonicalization_revalidates_live_reference_health(
             "source": "configuration_v3_api",
             "change_kind": "UPDATE",
             "reason": "reference_removed_after_validation",
-            "core_version": "0.16.0",
+            "core_version": "0.17.0",
             "integration_version": "0.14.0",
         }
     )
@@ -875,7 +875,7 @@ async def test_greenfield_v3_authoring_validates_canonicalizes_activates_and_res
             "source": "configuration_v3_api",
             "change_kind": "CREATE",
             "reason": "greenfield_setup",
-            "core_version": "0.16.0",
+            "core_version": "0.17.0",
             "integration_version": "0.14.0",
         }
     )
@@ -1008,7 +1008,7 @@ async def test_active_v2_conversion_is_idempotent_and_switches_wholly_on_explici
             "source": "canonical_v2_conversion_api",
             "change_kind": "MIGRATE",
             "reason": "explicit_v2_conversion",
-            "core_version": "0.16.0",
+            "core_version": "0.17.0",
             "integration_version": "0.14.0",
         }
     )
@@ -1083,7 +1083,7 @@ async def test_explicit_legacy_to_v2_to_v3_conversion_preserves_runtime_until_ac
         "projection_revision_id": "legacy-v3-projection",
         "snapshot_id": "legacy-v3-conversion",
         "created_at": NOW.isoformat(),
-        "core_version": "0.16.0",
+        "core_version": "0.17.0",
         "integration_version": "0.14.0",
     }
     await client.send_json_auto_id(conversion_request)
@@ -1140,7 +1140,7 @@ async def test_explicit_legacy_to_v2_to_v3_conversion_preserves_runtime_until_ac
             "source": "legacy_conversion_api",
             "change_kind": "MIGRATE",
             "reason": "explicit_legacy_conversion",
-            "core_version": "0.16.0",
+            "core_version": "0.17.0",
             "integration_version": "0.14.0",
         }
     )
@@ -1219,7 +1219,7 @@ async def test_legacy_conversion_surfaces_ephemeral_missing_bindings_without_a_v
             "projection_revision_id": "unresolved-legacy-v3-projection",
             "snapshot_id": "unresolved-legacy-v3-conversion",
             "created_at": NOW.isoformat(),
-            "core_version": "0.16.0",
+            "core_version": "0.17.0",
             "integration_version": "0.14.0",
         }
     )
@@ -1263,7 +1263,7 @@ async def test_legacy_conversion_surfaces_ephemeral_missing_bindings_without_a_v
         "projection_revision_id": "unresolved-legacy-v3-projection",
         "snapshot_id": "unresolved-legacy-v3-conversion",
         "created_at": NOW.isoformat(),
-        "core_version": "0.16.0",
+        "core_version": "0.17.0",
         "integration_version": "0.14.0",
         "binding_overrides": {
             "heating.primary_temperature": sensor_override,

@@ -26,7 +26,7 @@ def test_manifest_has_required_custom_component_contract():
         "integration_type": "hub",
         "iot_class": "local_push",
         "issue_tracker": "https://github.com/vmshops/controlel/issues",
-        "requirements": ["controlel==0.16.0"],
+        "requirements": ["controlel==0.17.0"],
         "single_config_entry": True,
         "version": "0.14.0",
     }
@@ -39,7 +39,7 @@ def test_core_and_integration_versions_are_intentionally_independent():
 
     assert core_version == "0.17.0"
     assert manifest["version"] == INTEGRATION_VERSION == "0.14.0"
-    assert manifest["requirements"] == ["controlel==0.16.0"]
+    assert manifest["requirements"] == ["controlel==0.17.0"]
     assert manifest["version"] != manifest["requirements"][0].partition("==")[2]
 
 
@@ -51,7 +51,7 @@ def test_release_ha_tests_install_public_core_from_pypi() -> None:
     assert "home-assistant-candidate:" not in workflow
     assert "CONTROLEL_FRAMEWORK_COMPOSITION: public" in workflow
     assert workflow.count("python -m pip install -e .") == 1
-    assert workflow.count("python -m pip install --no-cache-dir controlel==0.16.0") == 2
+    assert workflow.count("python -m pip install --no-cache-dir controlel==0.17.0") == 2
     assert workflow.count("python scripts/ci/verify_public_core.py") == 2
     assert workflow.count("python scripts/ci/verify_ha_candidate_core.py") == 0
     assert "tests/integrations/home_assistant \\" in workflow
@@ -63,7 +63,7 @@ def test_manifest_requirement_is_one_exact_public_distribution_pin():
     manifest = json.loads((COMPONENT / "manifest.json").read_text(encoding="utf-8"))
     requirements = manifest["requirements"]
 
-    assert requirements == ["controlel==0.16.0"]
+    assert requirements == ["controlel==0.17.0"]
     assert len(requirements) == 1
     assert not any(marker in requirements[0] for marker in ("~=", ">=", "<=", " @ ", "git+", "-e ", "file:"))
 

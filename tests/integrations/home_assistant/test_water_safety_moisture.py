@@ -2,14 +2,10 @@
 
 from __future__ import annotations
 
-import importlib.util
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
 import pytest
-
-if importlib.util.find_spec("controlel.application.water_safety") is None:
-    pytest.skip("requires candidate Water Safety core", allow_module_level=True)
 
 from controlel.application.setup import IdentityQuality, ProviderReference
 from controlel.domain.water_safety import MoistureCondition

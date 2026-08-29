@@ -47,7 +47,7 @@ def test_development_bundle_contains_matching_frontend_and_core_without_mutating
     assert release_manifest_path.read_bytes() == release_manifest_before
     assert composition["publishable"] is False
     assert composition["core"]["version"] == CORE_VERSION
-    assert composition["integration"]["release_source_requirement"] == "controlel==0.16.0"
+    assert composition["integration"]["release_source_requirement"] == "controlel==0.17.0"
     assert composition["integration"]["development_requirement"] == "controlel==0.17.0"
     validated = validate_development_composition(output, expected_core_version=CORE_VERSION)
     assert validated == composition

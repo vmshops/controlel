@@ -597,7 +597,7 @@ async def _activate_water_setup(
         connection.send_error(
             msg["id"],
             websocket_api.ERR_HOME_ASSISTANT_ERROR,
-            "Water Safety requires candidate Controlel core",
+            "Water Safety requires Controlel core with water_safety APIs",
         )
         return
     entry = hass.config_entries.async_get_entry(msg["config_entry_id"])

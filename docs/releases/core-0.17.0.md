@@ -1,6 +1,6 @@
 # Controlel Core 0.17.0
 
-Status: prepared release candidate
+Status: published
 
 Release: Controlel Core 0.17.0
 
@@ -28,18 +28,20 @@ existing Heating runtime and canonical configuration v3 behavior:
   does not confirm the physical output state.
 - Water Safety adaptation, device-specific automation, and Heating redesign are
   outside this release.
-- No Home Assistant manifest, release artifact, tag, publication, or dependency
-  change is prepared here. The repository HA candidate remains a separate
-  composition on published Core 0.16.0.
 
-## Candidate validation and publication separation
+## Public artifact identities
+
+- Immutable annotated Core tag: `core-v0.17.0`, resolving to
+  `6f9c34498ab09e6fc212d18b507c35c003bf1479`.
+- Wheel: `controlel-0.17.0-py3-none-any.whl`, 287,747 bytes, SHA-256
+  `d818dd403b2aada29061662464ce9c0e3d37a5eea5d9059a1e3780cf13ffd3b6`.
+- Sdist: `controlel-0.17.0.tar.gz`, 203,980 bytes, SHA-256
+  `9020487dd1325ff58ec3ac0e9e3541a78840eaaae803b05f9613f28525bd41bd`.
+- Both public files match the deterministic final artifacts bound to
+  `core-v0.17.0`.
+
+## Compatibility
 
 - Python: 3.13 or newer.
 - Runtime dependency remains only `pydantic>=2.0`.
-- Candidate validation builds exactly one wheel and one sdist, checks their
-  Water API contents and metadata, runs Twine validation, and imports the wheel
-  from an isolated clean environment without Home Assistant installed.
-- Candidate SHA-256 identities and the provenance manifest are generated only
-  after the release-preparation commit so that they bind to that exact commit.
-- The candidate is not published or tagged. Publication requires separate
-  approval and a later annotated `core-v0.17.0` tag on the reviewed commit.
+- Home Assistant integration 0.14.0 pins exactly `controlel==0.17.0`.
