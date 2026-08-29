@@ -23,6 +23,7 @@ from custom_components.controlel.const import (
     CONF_TEMPERATURE_ENTITY_ID,
     CONF_ZONE_ID,
     CONF_ZONE_NAME,
+    PUBLIC_CORE_VERSION,
 )
 
 ROOT = Path(__file__).parents[4]
@@ -30,9 +31,8 @@ FRAMEWORK_COMPOSITION_ENV = "CONTROLEL_FRAMEWORK_COMPOSITION"
 MANIFEST_REQUIREMENT = json.loads(
     (ROOT / "custom_components" / "controlel" / "manifest.json").read_text(encoding="utf-8")
 )["requirements"][0]
-MANIFEST_CORE_VERSION = MANIFEST_REQUIREMENT.removeprefix("controlel==")
 FRAMEWORK_CORE_VERSION_BY_COMPOSITION = {
-    "public": MANIFEST_CORE_VERSION,
+    "public": PUBLIC_CORE_VERSION,
 }
 
 

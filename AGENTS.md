@@ -201,9 +201,12 @@ Do not add Windows-specific compatibility hacks for Home Assistant tests, includ
 
 For local Frontend API development, use the local editable Controlel source installed in the canonical WSL environment.
 
-Published Core `0.13.0` contains Frontend API v1. Home Assistant 0.13.0
-public-composition tests must install exact `controlel==0.13.0` from PyPI and
-verify its published artifact identities and imported public surface.
+Published Core `0.16.0` is the public heating baseline. Water Safety APIs require
+candidate Core `0.17.0` or newer from source. Home Assistant public-composition
+tests must install exact `controlel==0.16.0` from PyPI and verify the integration
+manifest pins `controlel==0.17.0`, not the public baseline. Candidate Water Safety
+tests use editable source or Core `0.17.0` and must verify published artifact
+identities and imported public surface for the selected composition.
 Do not bypass, weaken, or rewrite public-composition tests.
 
 If a Home Assistant test fails:

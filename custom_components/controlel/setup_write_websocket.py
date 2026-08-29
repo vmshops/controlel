@@ -10,15 +10,14 @@ import voluptuous as vol
 from homeassistant.components import websocket_api
 from pydantic import ValidationError
 
-from controlel.application.configuration.water_safety_setup_adapter import WATER_SAFETY_MODULE_KEY
 from controlel.application.setup import SetupConflictError, SetupNotFoundError
 from controlel.infrastructure.home_assistant import (
     HeatingBindingSelectionRequest,
     SetupStorageIntegrityError,
-    WaterSafetyBindingSelectionRequest,
 )
 
 from .const import DOMAIN
+from .core_capabilities import water_safety_core_available
 from .setup_backend import async_get_setup_service
 
 SETUP_WRITE_API_VERSION = 1
@@ -29,6 +28,7 @@ SETUP_WRITE_V1_REOPEN = f"{DOMAIN}/setup/write/v1/reopen"
 SETUP_WRITE_V1_UPDATE = f"{DOMAIN}/setup/write/v1/update"
 SETUP_WRITE_V1_VALIDATE = f"{DOMAIN}/setup/write/v1/validate"
 SETUP_WRITE_V1_CANONICALIZE = f"{DOMAIN}/setup/write/v1/canonicalize"
+SETUP_WRITE_V1_ACTIVATE = f"{DOMAIN}/setup/write/v1/activate"
 
 ERR_SETUP_CONFLICT = "setup_conflict"
 ERR_SETUP_STORAGE_INTEGRITY = "setup_storage_integrity"
@@ -37,6 +37,11 @@ _TRANSPORT_KEY = f"{DOMAIN}_setup_write_v1_transport_registered"
 _NON_EMPTY_STRING = vol.All(str, vol.Length(min=1, max=256))
 _OPTIONAL_STRING = vol.Any(None, _NON_EMPTY_STRING)
 _HEATING_MODULE_KEY = "heating"
+_WATER_SAFETY_MODULE_KEY = "water_safety"
+
+
+def _water_safety_module_key() -> str:
+    return _WATER_SAFETY_MODULE_KEY
 
 
 class SetupHostService(Protocol):
@@ -70,6 +75,7 @@ def async_register_setup_write_api_v1(hass: Any) -> None:
         _update,
         _validate,
         _canonicalize,
+        _activate,
     ):
         websocket_api.async_register_command(hass, handler)
     hass.data[_TRANSPORT_KEY] = True
@@ -214,7 +220,7 @@ async def _get_recommendations(service: SetupHostService, msg: dict[str, Any]) -
         "preferred_area_id": msg["preferred_area_id"],
         "preferred_floor_id": msg["preferred_floor_id"],
     }
-    if _module_key(msg) == WATER_SAFETY_MODULE_KEY:
+    if _module_key(msg) == _water_safety_module_key():
         kwargs["notification_roles"] = tuple(msg.get("notification_roles") or ())
         kwargs["siren_roles"] = tuple(msg.get("siren_roles") or ())
     return await service.get_recommendations(**kwargs)
@@ -224,12 +230,14 @@ def _heating_selections(msg: dict[str, Any]) -> tuple[HeatingBindingSelectionReq
     return tuple(HeatingBindingSelectionRequest.model_validate(item) for item in msg["selections"])
 
 
-def _water_selections(msg: dict[str, Any]) -> tuple[WaterSafetyBindingSelectionRequest, ...]:
+def _water_selections(msg: dict[str, Any]) -> tuple[object, ...]:
+    from controlel.infrastructure.home_assistant import WaterSafetyBindingSelectionRequest
+
     return tuple(WaterSafetyBindingSelectionRequest.model_validate(item) for item in msg["selections"])
 
 
 async def _start_draft(service: SetupHostService, msg: dict[str, Any]) -> object:
-    if _module_key(msg) == WATER_SAFETY_MODULE_KEY:
+    if _module_key(msg) == _water_safety_module_key():
         return await service.start_new_water_safety_setup(
             draft_id=msg["draft_id"],
             module_instance_id=msg["module_instance_id"],
@@ -257,7 +265,7 @@ async def _start_draft(service: SetupHostService, msg: dict[str, Any]) -> object
 
 
 async def _reopen_draft(service: SetupHostService, msg: dict[str, Any]) -> object:
-    if _module_key(msg) == WATER_SAFETY_MODULE_KEY:
+    if _module_key(msg) == _water_safety_module_key():
         return await service.reopen_water_safety_setup(
             msg["draft_id"],
             snapshot_id=msg["snapshot_id"],
@@ -275,7 +283,7 @@ async def _reopen_draft(service: SetupHostService, msg: dict[str, Any]) -> objec
 
 
 async def _update_draft(service: SetupHostService, msg: dict[str, Any]) -> object:
-    if _module_key(msg) == WATER_SAFETY_MODULE_KEY:
+    if _module_key(msg) == _water_safety_module_key():
         return await service.update_water_draft(
             msg["draft_id"],
             expected_revision=msg["expected_revision"],
@@ -301,7 +309,7 @@ async def _update_draft(service: SetupHostService, msg: dict[str, Any]) -> objec
 
 
 async def _validate_draft(service: SetupHostService, msg: dict[str, Any]) -> object:
-    if _module_key(msg) == WATER_SAFETY_MODULE_KEY:
+    if _module_key(msg) == _water_safety_module_key():
         return await service.validate_water_draft(
             msg["draft_id"],
             snapshot_id=msg["snapshot_id"],
@@ -338,9 +346,134 @@ async def _canonicalize_draft(service: SetupHostService, msg: dict[str, Any]) ->
         "preferred_area_id": msg["preferred_area_id"],
         "preferred_floor_id": msg["preferred_floor_id"],
     }
-    if _module_key(msg) == WATER_SAFETY_MODULE_KEY:
+    if _module_key(msg) == _water_safety_module_key():
         return await service.canonicalize_water_draft(msg["draft_id"], **common)
     return await service.canonicalize_heating_draft(msg["draft_id"], **common)
+
+
+async def _activate_water_setup(
+    hass: Any,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    if _module_key(msg) != _water_safety_module_key():
+        connection.send_error(
+            msg["id"],
+            websocket_api.ERR_INVALID_FORMAT,
+            "Controlel setup activate is only supported for water_safety",
+        )
+        return
+    if not water_safety_core_available():
+        connection.send_error(
+            msg["id"],
+            websocket_api.ERR_HOME_ASSISTANT_ERROR,
+            "Water Safety requires candidate Controlel core",
+        )
+        return
+    entry = hass.config_entries.async_get_entry(msg["config_entry_id"])
+    if entry is None or entry.domain != DOMAIN:
+        connection.send_error(
+            msg["id"],
+            websocket_api.ERR_NOT_FOUND,
+            "Controlel setup config entry was not found",
+        )
+        return
+    try:
+        service = await async_get_setup_service(hass, entry, module_key=_water_safety_module_key())
+    except ValueError:
+        connection.send_error(
+            msg["id"],
+            websocket_api.ERR_INVALID_FORMAT,
+            "Controlel setup module_key is not supported",
+        )
+        return
+
+    runtime_data = getattr(entry, "runtime_data", None)
+    existing_host = getattr(runtime_data, "water_safety_host", None) if runtime_data is not None else None
+    if existing_host is not None:
+        await existing_host.async_stop()
+
+    from .frontend_api import create_frontend_api_provider_v1
+    from .frontend_api_websocket import register_frontend_api_provider_v1, register_water_safety_action_handler_v1
+    from .water_safety_activation import WaterSafetyActivationService
+
+    try:
+        water_host = await WaterSafetyActivationService().activate_canonical_revision(
+            hass,
+            entry,
+            msg["canonical_revision_id"],
+            attempt_id=msg.get("attempt_id"),
+        )
+    except SetupNotFoundError:
+        connection.send_error(msg["id"], websocket_api.ERR_NOT_FOUND, "Controlel setup draft was not found")
+        return
+    except SetupConflictError:
+        connection.send_error(msg["id"], ERR_SETUP_CONFLICT, "Controlel setup request conflicts with current state")
+        return
+    except (TypeError, ValueError, ValidationError):
+        connection.send_error(
+            msg["id"],
+            websocket_api.ERR_INVALID_FORMAT,
+            "Controlel setup request is invalid",
+        )
+        return
+
+    if runtime_data is not None:
+        runtime_data.water_safety_host = water_host
+        heating_host = runtime_data.host
+        if heating_host is not None:
+            if runtime_data.frontend_api_unregister is not None:
+                runtime_data.frontend_api_unregister()
+            runtime_data.frontend_api_unregister = register_frontend_api_provider_v1(
+                hass,
+                entry.entry_id,
+                create_frontend_api_provider_v1(heating_host, water_safety_host=water_host),
+            )
+
+            async def _water_safety_action(action: str) -> dict[str, object]:
+                return await water_host.async_frontend_api_water_safety_action(action)
+
+            if runtime_data.water_safety_action_unregister is not None:
+                runtime_data.water_safety_action_unregister()
+            runtime_data.water_safety_action_unregister = register_water_safety_action_handler_v1(
+                hass,
+                entry.entry_id,
+                _water_safety_action,
+            )
+
+    try:
+        result = await service.validate_water_draft(
+            msg["draft_id"],
+            snapshot_id=msg["snapshot_id"],
+            evaluated_at=msg["captured_at"],
+            report_id=msg["report_id"],
+            notification_roles=tuple(msg.get("notification_roles") or ()),
+            siren_roles=tuple(msg.get("siren_roles") or ()),
+            preferred_area_id=msg.get("preferred_area_id"),
+            preferred_floor_id=msg.get("preferred_floor_id"),
+        )
+    except SetupNotFoundError:
+        connection.send_error(msg["id"], websocket_api.ERR_NOT_FOUND, "Controlel setup draft was not found")
+        return
+    except SetupConflictError:
+        connection.send_error(msg["id"], ERR_SETUP_CONFLICT, "Controlel setup request conflicts with current state")
+        return
+    except (TypeError, ValueError, ValidationError):
+        connection.send_error(
+            msg["id"],
+            websocket_api.ERR_INVALID_FORMAT,
+            "Controlel setup request is invalid",
+        )
+        return
+
+    connection.send_result(
+        msg["id"],
+        {
+            "setup_write_api_version": SETUP_WRITE_API_VERSION,
+            "operation": "activate",
+            "result": _json_result(result),
+        },
+    )
 
 
 @websocket_api.websocket_command(
@@ -482,3 +615,25 @@ async def _validate(hass: Any, connection: websocket_api.ActiveConnection, msg: 
 @websocket_api.async_response
 async def _canonicalize(hass: Any, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
     await _send(hass, connection, msg, "canonicalize", _canonicalize_draft)
+
+
+@websocket_api.websocket_command(
+    _schema(
+        SETUP_WRITE_V1_ACTIVATE,
+        {
+            vol.Required("draft_id"): _NON_EMPTY_STRING,
+            vol.Required("canonical_revision_id"): _NON_EMPTY_STRING,
+            vol.Required("snapshot_id"): _NON_EMPTY_STRING,
+            **dict((_required_time("captured_at"),)),
+            vol.Required("report_id"): _NON_EMPTY_STRING,
+            vol.Optional("attempt_id", default=None): _OPTIONAL_STRING,
+            vol.Optional("notification_roles", default=list): [_NON_EMPTY_STRING],
+            vol.Optional("siren_roles", default=list): [_NON_EMPTY_STRING],
+            **_optional_preferences(),
+        },
+    )
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def _activate(hass: Any, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    await _activate_water_setup(hass, connection, msg)

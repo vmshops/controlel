@@ -32,6 +32,7 @@ from controlel.domain.source_control import SourceCapabilities, SourceOwnership
 from controlel.infrastructure.time.system_clock import SystemClock
 
 from .config import HomeAssistantIntegrationConfig, integration_config_from_entry
+from .core_capabilities import water_safety_core_available
 from .event_loop_bridge import HomeAssistantEventLoopBridge
 from .failure_sink import HomeAssistantScheduledFailureSink, clear_entry_issues
 from .frontend_api import create_frontend_api_provider_v1
@@ -253,13 +254,14 @@ async def async_setup_entry(
         )
         failure_sink.bind_fatal_handler(host.request_fatal_shutdown)
         await host.async_initialize()
-        from .water_safety_activation import WaterSafetyActivationService
+        if water_safety_core_available():
+            from .water_safety_activation import WaterSafetyActivationService
 
-        water_safety_host = await WaterSafetyActivationService().async_start_from_active_reference(
-            hass,
-            entry,
-            bridge=bridge,
-        )
+            water_safety_host = await WaterSafetyActivationService().async_start_from_active_reference(
+                hass,
+                entry,
+                bridge=bridge,
+            )
     except BaseException:
         try:
             if water_safety_host is not None:

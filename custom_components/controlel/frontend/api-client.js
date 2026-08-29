@@ -49,6 +49,8 @@
     reopen: "controlel/setup/write/v1/reopen",
     update: "controlel/setup/write/v1/update",
     validate: "controlel/setup/write/v1/validate",
+    canonicalize: "controlel/setup/write/v1/canonicalize",
+    activate: "controlel/setup/write/v1/activate",
   };
 
   const DOMAINS = Object.keys(COMMANDS);
@@ -487,12 +489,14 @@
     reopen: normalizeSetupSession,
     update: normalizeSetupSession,
     validate: normalizeSetupSession,
+    canonicalize: normalizeSetupSession,
+    activate: normalizeSetupSession,
   };
 
   /**
-   * Create the authenticated, setup-only write client. It exposes draft and
-   * validation operations only: there is deliberately no canonicalize,
-   * activate, runtime, or Home Assistant service-call method.
+   * Create the authenticated setup write client. Heating exposes draft and
+   * validation only. Water Safety additionally exposes explicit canonicalize
+   * and activate operations through the shared Setup Write API v1 transport.
    */
   function createSetupWriteClient({ connection, configEntryId, moduleKey = "heating", timeoutMs = 15000 }) {
     if (!connection || typeof connection.sendMessagePromise !== "function") {
@@ -558,7 +562,7 @@
       });
     }
 
-    return {
+    const client = {
       discover: (request) => call("discovery", request),
       recommendations: (request) => call("recommendations", request),
       startDraft: (request) => call("start", request),
@@ -566,6 +570,11 @@
       updateDraft: (request) => call("update", request),
       validateDraft: (request) => call("validate", request),
     };
+    if (moduleKey === "water_safety") {
+      client.canonicalizeDraft = (request) => call("canonicalize", request);
+      client.activateDraft = (request) => call("activate", request);
+    }
+    return client;
   }
 
   // ------------------------------------------------- environment detect

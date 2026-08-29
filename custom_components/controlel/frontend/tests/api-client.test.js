@@ -515,6 +515,27 @@ test("setup write client includes module_key for water safety", async () => {
   assert.equal(connection.sent[0].module_key, "water_safety");
 });
 
+test("setup write client exposes lifecycle operations for water safety", async () => {
+  const connection = setupWriteConnection((message) => Promise.resolve({
+    setup_write_api_version: 1,
+    operation: message.type.endsWith("/canonicalize") ? "canonicalize" : "activate",
+    result: setupSessionRaw(3),
+  }));
+  const client = CA_API.createSetupWriteClient({
+    connection,
+    configEntryId: "entry-setup",
+    moduleKey: "water_safety",
+  });
+
+  assert.equal(typeof client.canonicalizeDraft, "function");
+  assert.equal(typeof client.activateDraft, "function");
+  await client.canonicalizeDraft({ draft_id: "draft-water" });
+  await client.activateDraft({ draft_id: "draft-water", canonical_revision_id: "rev-1" });
+  assert.equal(connection.sent.length, 2);
+  assert.equal(connection.sent[0].module_key, "water_safety");
+  assert.equal(connection.sent[1].type.endsWith("/activate"), true);
+});
+
 test("setup write client exposes draft lifecycle only and preserves backend errors", async () => {
   const connection = setupWriteConnection(() => Promise.reject({
     code: "setup_conflict",
@@ -525,8 +546,8 @@ test("setup write client exposes draft lifecycle only and preserves backend erro
   assert.deepEqual(Object.keys(client).sort(), [
     "discover", "recommendations", "reopenDraft", "startDraft", "updateDraft", "validateDraft",
   ]);
-  assert.equal(client.activate, undefined);
-  assert.equal(client.canonicalize, undefined);
+  assert.equal(client.activateDraft, undefined);
+  assert.equal(client.canonicalizeDraft, undefined);
   await assert.rejects(
     client.updateDraft({ draft_id: "draft-1" }),
     (error) => error instanceof CA_API.ApiError && error.code === "setup_conflict" && error.message === "draft revision conflict"

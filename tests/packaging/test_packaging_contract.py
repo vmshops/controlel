@@ -38,7 +38,7 @@ def test_project_metadata_and_runtime_dependencies_match_release_contract() -> N
     project = load_pyproject()["project"]
 
     assert project["name"] == "controlel"
-    assert project["version"] == "0.13.0"
+    assert project["version"] == "0.17.0"
     assert project["readme"] == "README.md"
     assert project["requires-python"] == ">=3.13"
     assert project["license"] == "MIT"
@@ -86,7 +86,7 @@ def test_project_version_is_the_only_release_version_source() -> None:
         path for path in (ROOT / "src" / "controlel").rglob("*.py") if "__version__" in path.read_text(encoding="utf-8")
     ]
 
-    assert project_version == "0.13.0"
+    assert project_version == "0.17.0"
     assert controlel.__version__ == project_version
     assert importlib.metadata.version("controlel") == project_version
     assert version_files == [ROOT / "src" / "controlel" / "__init__.py"]
@@ -99,9 +99,9 @@ def test_manifest_pins_published_core_and_keeps_release_metadata_independent() -
     manifest = json.loads((ROOT / "custom_components" / "controlel" / "manifest.json").read_text(encoding="utf-8"))
     core_version = load_pyproject()["project"]["version"]
 
-    assert core_version == "0.13.0"
-    assert manifest["requirements"] == ["controlel==0.13.0"]
-    assert manifest["version"] == "0.13.0"
+    assert core_version == "0.17.0"
+    assert manifest["requirements"] == ["controlel==0.17.0"]
+    assert manifest["version"] == "0.17.0"
     assert manifest["issue_tracker"] == "https://github.com/vmshops/controlel/issues"
 
 
@@ -330,7 +330,7 @@ def test_ci_validates_ha_candidate_against_the_exact_public_core() -> None:
     assert "home-assistant-framework-public:" in workflow
     assert "home-assistant-candidate:" not in workflow
     assert "CONTROLEL_FRAMEWORK_COMPOSITION: public" in workflow
-    assert workflow.count("python -m pip install --no-cache-dir controlel==0.13.0") == 2
+    assert workflow.count("python -m pip install --no-cache-dir controlel==0.16.0") == 2
     assert workflow.count("python scripts/ci/verify_public_core.py") == 2
     assert workflow.count("--asyncio-mode=auto") == 1
     assert "controlel==0.10.0" not in workflow
@@ -356,12 +356,12 @@ def test_public_core_provenance_records_history_and_current_composition_hash() -
     assert "equivalent to `core-v0.3.0`" in release_guide
     assert wheel_hash in release_guide
     assert sdist_hash in release_guide
-    assert "controlel-0.13.0-py3-none-any.whl" in checker
-    assert "PUBLIC_WHEEL_SIZE = 237_489" in checker
-    assert "233f395993dd9b6b0f16fa3cf267b61ec332e2e7f36aa17d84ac37a1fa925ff2" in checker
-    assert "controlel-0.13.0.tar.gz" in checker
-    assert "PUBLIC_SDIST_SIZE = 165_233" in checker
-    assert "001e69c0f0fd3bdfeecc751472689d2d59d27b6f8ff0e4b3cde7d3b1cd08c164" in checker
+    assert "controlel-0.16.0-py3-none-any.whl" in checker
+    assert "PUBLIC_WHEEL_SIZE = 262_788" in checker
+    assert "1bd604429b8a655f6a4295f8b95378fafa194ff9c070eb884745a620cb3c0b8e" in checker
+    assert "controlel-0.16.0.tar.gz" in checker
+    assert "PUBLIC_SDIST_SIZE = 185_466" in checker
+    assert "6a132d3af66261b704d07e055305fe81d62c9648bbd075a3c66300c98cd3050a" in checker
     assert 'distribution.read_text("direct_url.json") is None' in checker
 
 

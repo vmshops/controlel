@@ -12,6 +12,7 @@ from homeassistant.components import websocket_api
 from controlel.frontend_api.v1 import FrontendApiProviderV1, frontend_response_to_dict
 
 from .const import DOMAIN
+from .core_capabilities import water_safety_core_available
 
 FRONTEND_API_V1_OVERVIEW = f"{DOMAIN}/frontend_api/v1/overview"
 FRONTEND_API_V1_HEATING = f"{DOMAIN}/frontend_api/v1/heating"
@@ -173,6 +174,13 @@ async def _send_water_safety_action(
             "Controlel Water Safety is not available for this config entry",
         )
         return
+    if not water_safety_core_available():
+        connection.send_error(
+            msg["id"],
+            websocket_api.ERR_HOME_ASSISTANT_ERROR,
+            "Water Safety requires candidate Controlel core",
+        )
+        return
     try:
         result = await handler(action)
     except RuntimeError as error:
@@ -215,6 +223,13 @@ async def _setup(hass: Any, connection: websocket_api.ActiveConnection, msg: dic
 @websocket_api.websocket_command(_schema(FRONTEND_API_V1_WATER_SAFETY))
 @websocket_api.async_response
 async def _water_safety(hass: Any, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    if not water_safety_core_available():
+        connection.send_error(
+            msg["id"],
+            websocket_api.ERR_HOME_ASSISTANT_ERROR,
+            "Water Safety requires candidate Controlel core",
+        )
+        return
     await _send(hass, connection, msg, "water_safety")
 
 

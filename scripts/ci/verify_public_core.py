@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.metadata
+import importlib.util
 import inspect
 import json
 import sys
@@ -39,15 +40,21 @@ from controlel.infrastructure.home_assistant import (
 )
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-CORE_VERSION = "0.13.0"
-CORE_REQUIREMENT = f"controlel=={CORE_VERSION}"
-PUBLIC_WHEEL_FILENAME = "controlel-0.13.0-py3-none-any.whl"
-PUBLIC_WHEEL_SIZE = 237_489
-PUBLIC_WHEEL_SHA256 = "233f395993dd9b6b0f16fa3cf267b61ec332e2e7f36aa17d84ac37a1fa925ff2"
-PUBLIC_SDIST_FILENAME = "controlel-0.13.0.tar.gz"
-PUBLIC_SDIST_SIZE = 165_233
-PUBLIC_SDIST_SHA256 = "001e69c0f0fd3bdfeecc751472689d2d59d27b6f8ff0e4b3cde7d3b1cd08c164"
-PYPI_METADATA_URL = f"https://pypi.org/pypi/controlel/{CORE_VERSION}/json"
+PUBLIC_CORE_VERSION = "0.16.0"
+PUBLIC_CORE_REQUIREMENT = f"controlel=={PUBLIC_CORE_VERSION}"
+CANDIDATE_CORE_VERSION = "0.17.0"
+CANDIDATE_CORE_REQUIREMENT = f"controlel=={CANDIDATE_CORE_VERSION}"
+PUBLIC_WHEEL_FILENAME = "controlel-0.16.0-py3-none-any.whl"
+PUBLIC_WHEEL_SIZE = 262_788
+PUBLIC_WHEEL_SHA256 = "1bd604429b8a655f6a4295f8b95378fafa194ff9c070eb884745a620cb3c0b8e"
+PUBLIC_SDIST_FILENAME = "controlel-0.16.0.tar.gz"
+PUBLIC_SDIST_SIZE = 185_466
+PUBLIC_SDIST_SHA256 = "6a132d3af66261b704d07e055305fe81d62c9648bbd075a3c66300c98cd3050a"
+PYPI_METADATA_URL = f"https://pypi.org/pypi/controlel/{PUBLIC_CORE_VERSION}/json"
+WATER_SAFETY_CORE_SYMBOLS = (
+    "controlel.application.water_safety",
+    "controlel.infrastructure.home_assistant.water_safety_setup_host",
+)
 
 
 def _contract_module_path(contract: object) -> Path:
@@ -85,6 +92,15 @@ def verify_public_artifact_metadata() -> None:
     assert sdist["digests"]["sha256"] == PUBLIC_SDIST_SHA256
 
 
+def verify_public_core_excludes_water_safety() -> None:
+    """Ensure the published public core does not expose Water Safety APIs."""
+
+    for module_name in WATER_SAFETY_CORE_SYMBOLS:
+        assert importlib.util.find_spec(module_name) is None, module_name
+    frontend_api = importlib.import_module("controlel.frontend_api.v1")
+    assert not hasattr(frontend_api, "WaterSafetyEvidenceV1")
+
+
 def main() -> int:
     package_path = Path(controlel.__file__).resolve()
     distribution = importlib.metadata.distribution("controlel")
@@ -96,8 +112,8 @@ def main() -> int:
     with (REPOSITORY_ROOT / "pyproject.toml").open("rb") as pyproject_file:
         project = tomllib.load(pyproject_file)["project"]
 
-    assert importlib.metadata.version("controlel") == CORE_VERSION
-    assert controlel.__version__ == CORE_VERSION
+    assert importlib.metadata.version("controlel") == PUBLIC_CORE_VERSION
+    assert controlel.__version__ == PUBLIC_CORE_VERSION
     assert "site-packages" in package_path.as_posix()
     assert not package_path.is_relative_to(source_root)
     assert source_root not in {Path(entry or ".").resolve() for entry in sys.path}
@@ -113,7 +129,10 @@ def main() -> int:
     ]
     assert project["dependencies"] == ["pydantic>=2.0"]
     assert not any("homeassistant" in dependency.casefold() for dependency in project["dependencies"])
-    assert manifest["requirements"] == [CORE_REQUIREMENT]
+    assert manifest["requirements"] == [CANDIDATE_CORE_REQUIREMENT]
+    assert manifest["requirements"] != [PUBLIC_CORE_REQUIREMENT]
+    assert project["version"] == CANDIDATE_CORE_VERSION
+    verify_public_core_excludes_water_safety()
 
     setup_contracts = (
         ActiveReference,
@@ -182,7 +201,8 @@ def main() -> int:
     verify_public_artifact_metadata()
 
     print(
-        f"Verified public controlel {CORE_VERSION} at {package_path}; "
+        f"Verified public controlel {PUBLIC_CORE_VERSION} at {package_path}; "
+        f"integration candidate core requirement {CANDIDATE_CORE_REQUIREMENT}; "
         f"{PUBLIC_WHEEL_FILENAME} SHA-256 {PUBLIC_WHEEL_SHA256}; "
         f"{PUBLIC_SDIST_FILENAME} SHA-256 {PUBLIC_SDIST_SHA256}"
     )

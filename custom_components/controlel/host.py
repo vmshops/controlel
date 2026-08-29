@@ -61,7 +61,10 @@ from controlel.domain.operating_mode import SafeHeatingTemperatureEvidence
 from controlel.domain.operational_events import MeasurementEventCondition
 from controlel.domain.runtime_supervision import CommandAuthority
 from controlel.domain.source_control import ReportedSourceEvidence, ReportedSourceState
-from controlel.frontend_api.v1 import WaterSafetyEvidenceV1
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from controlel.frontend_api.v1 import WaterSafetyEvidenceV1
 
 from .config import HomeAssistantIntegrationConfig
 from .const import INTEGRATION_VERSION

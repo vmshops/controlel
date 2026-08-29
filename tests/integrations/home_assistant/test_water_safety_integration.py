@@ -2,6 +2,15 @@
 
 from __future__ import annotations
 
+import importlib.util
+
+import pytest
+
+pytestmark = pytest.mark.skipif(
+    importlib.util.find_spec("controlel.application.water_safety") is None,
+    reason="requires candidate Water Safety core",
+)
+
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
@@ -162,7 +171,7 @@ def _effective(draft: DraftRevision | None = None):
         source="test",
         change_kind="CREATE",
         reason="test",
-        core_version="0.13.0",
+        core_version="0.17.0",
     )
     resolved = {binding.role: binding.reference for binding in draft.bindings}
     return derive_real_runtime_configuration(canonical, resolved), canonical
@@ -215,7 +224,7 @@ def test_configure_validate_canonicalize_and_activate_authority() -> None:
         source="setup",
         change_kind="CREATE",
         reason="initial",
-        core_version="0.13.0",
+        core_version="0.17.0",
     )
     repository = InMemorySetupRepository()
     repository.add_canonical_revision(canonical)
@@ -365,7 +374,7 @@ def test_cross_surface_config_semantics_match_canonical_payload() -> None:
         source="setup",
         change_kind="CREATE",
         reason="initial",
-        core_version="0.13.0",
+        core_version="0.17.0",
     )
     effective, _ = _effective(draft)
     payload = effective.module_payload

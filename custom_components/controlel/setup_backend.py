@@ -12,7 +12,6 @@ from datetime import datetime
 from importlib import import_module
 from typing import Any, cast
 
-from controlel.application.configuration.water_safety_setup_adapter import WATER_SAFETY_MODULE_KEY
 from controlel.application.setup import DiscoverySnapshot
 from controlel.infrastructure.home_assistant import (
     ACTIVE_REFERENCE_KEY,
@@ -22,15 +21,15 @@ from controlel.infrastructure.home_assistant import (
     HomeAssistantDiscoveryAdapter,
     HomeAssistantSetupRepository,
     LegacyConfigurationStatusDTO,
-    WaterSafetySetupHostService,
 )
-from controlel.infrastructure.home_assistant.water_safety_discovery import async_snapshot_with_notify_services
 
 from .const import DOMAIN
+from .core_capabilities import water_safety_core_available
 
 _SETUP_CACHE_KEY = f"{DOMAIN}_setup_backend"
 _LIFECYCLE_DATA_KEYS = frozenset({ACTIVE_REFERENCE_KEY})
 _HEATING_MODULE_KEY = "heating"
+_WATER_SAFETY_MODULE_KEY = "water_safety"
 
 
 def _legacy_status(entry: Any) -> LegacyConfigurationStatusDTO:
@@ -69,7 +68,11 @@ async def async_get_setup_service(hass: Any, entry: Any, *, module_key: str = _H
     repository = await _repository_for_entry(hass, entry)
     legacy_status = _legacy_status(entry)
 
-    if module_key == WATER_SAFETY_MODULE_KEY:
+    if module_key == _WATER_SAFETY_MODULE_KEY:
+        if not water_safety_core_available():
+            raise ValueError("Water Safety setup requires candidate core with water_safety APIs")
+        from controlel.infrastructure.home_assistant import WaterSafetySetupHostService
+        from controlel.infrastructure.home_assistant.water_safety_discovery import async_snapshot_with_notify_services
 
         async def water_snapshot_loader(snapshot_id: str, captured_at: datetime) -> DiscoverySnapshot:
             return await async_snapshot_with_notify_services(

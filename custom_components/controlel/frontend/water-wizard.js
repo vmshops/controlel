@@ -1,8 +1,7 @@
 /*
  * Controlel Water Safety setup wizard — Setup Write API v1 consumer.
  *
- * Mirrors the heating setup wizard but targets module_key=water_safety.
- * Never activates/canonicalizes configuration.
+ * Explicit lifecycle: Save Draft -> Validate -> Canonicalize -> Activate.
  */
 (function (global) {
   "use strict";
@@ -75,6 +74,10 @@
 
     const now = typeof opts.now === "function" ? opts.now : () => new Date().toISOString();
     const makeId = typeof opts.idFactory === "function" ? opts.idFactory : defaultId;
+    const coreVersion = typeof opts.coreVersion === "string" && opts.coreVersion ? opts.coreVersion : "0.17.0";
+    const integrationVersion = typeof opts.integrationVersion === "string" && opts.integrationVersion
+      ? opts.integrationVersion
+      : "0.17.0";
     const storage = opts.storage || null;
     const storageKey = `controlel.setup.water.draft.v1.${opts.configEntryId || "unknown"}`;
     const state = {
@@ -409,6 +412,75 @@
       render();
     }
 
+    async function canonicalizeDraft() {
+      let session = state.session;
+      const savedBefore = state.dirty;
+      if (savedBefore) session = await saveDraft();
+      if (!session || (savedBefore && state.status === "error")) return;
+      if (!session.activation_ready) return;
+      if (!client.canonicalizeDraft) return;
+      state.status = "saving";
+      state.error = null;
+      state.errorOperation = null;
+      render();
+      const createdAt = now();
+      const validationReportId = session.validation_report_id || makeId("report");
+      try {
+        const canonicalized = await client.canonicalizeDraft({
+          draft_id: session.draft_id,
+          snapshot_id: state.snapshot.snapshot_id,
+          created_at: createdAt,
+          validation_report_id: validationReportId,
+          configuration_id: makeId("configuration"),
+          revision_id: makeId("revision"),
+          revision: session.active_revision_id ? 2 : 1,
+          actor: "user:setup_wizard",
+          source: "setup_write_v1",
+          change_kind: session.active_revision_id ? "UPDATE" : "CREATE",
+          reason: "water_safety_wizard_activation",
+          core_version: coreVersion,
+          integration_version: integrationVersion,
+          parent_revision_id: session.active_revision_id,
+        });
+        applySession(canonicalized);
+        state.lastSavedAt = createdAt;
+        state.status = "loaded";
+      } catch (error) {
+        state.status = "error";
+        state.error = error;
+        state.errorOperation = "canonicalize";
+      }
+      render();
+    }
+
+    async function activateDraft() {
+      let session = state.session;
+      if (!session || !session.canonical_revision_id || !client.activateDraft) return;
+      state.status = "saving";
+      state.error = null;
+      state.errorOperation = null;
+      render();
+      const activatedAt = now();
+      try {
+        const activated = await client.activateDraft({
+          draft_id: session.draft_id,
+          canonical_revision_id: session.canonical_revision_id,
+          snapshot_id: state.snapshot.snapshot_id,
+          captured_at: activatedAt,
+          report_id: makeId("report"),
+          attempt_id: makeId("attempt"),
+        });
+        applySession(activated);
+        state.lastSavedAt = activatedAt;
+        state.status = "loaded";
+      } catch (error) {
+        state.status = "error";
+        state.error = error;
+        state.errorOperation = "activate";
+      }
+      render();
+    }
+
     function formatTime(value) {
       if (!value) return "Unknown";
       const parsed = new Date(value);
@@ -638,6 +710,7 @@
 
     function renderReview() {
       const session = state.session;
+      const reviewLoaded = state.status === "loaded";
       const issues = session.validation_issues || [];
       const blockingIssues = issues.filter((issue) => issue.severity === "ERROR");
       const warnings = issues.filter((issue) => issue.severity !== "ERROR");
@@ -665,7 +738,7 @@
 
       return el("div", { class: "step" },
         el("h2", { class: "step__title" }, t("wizard.review_title")),
-        el("p", { class: "step__lead" }, t("wizard.review_persisted_lead")),
+        el("p", { class: "step__lead" }, t("wizard.water.review_persisted_lead")),
         el("div", { class: "panel" },
           el("h3", { class: "panel__title" }, t("wizard.draft_review")),
           el("div", { class: "review-row" },
@@ -701,6 +774,38 @@
               )
             : null,
           noteBox(t("wizard.validation_preparation"), "neutral")
+        ),
+        el("div", { class: "panel" },
+          el("h3", { class: "panel__title" }, t("wizard.water.lifecycle_title")),
+          el("p", { class: "step__lead" }, t("wizard.water.lifecycle_lead")),
+          el("div", { class: "panel__actions panel__actions--stacked" },
+            el("button", {
+              class: "btn btn--secondary",
+              disabled: !reviewLoaded || !state.session,
+              onclick: saveDraft,
+            }, state.status === "saving" && state.errorOperation !== "validate" ? t("wizard.saving") : t("wizard.save_later")),
+            el("button", {
+              class: "btn btn--secondary",
+              disabled: !reviewLoaded || !state.session,
+              onclick: validateDraft,
+            }, t("wizard.validate_draft")),
+            el("button", {
+              class: "btn btn--secondary",
+              disabled: !reviewLoaded || !state.session || !draftIsReady() || Boolean(state.session.canonical_revision_id),
+              onclick: canonicalizeDraft,
+            }, t("wizard.canonicalize_draft")),
+            el("button", {
+              class: "btn btn--primary",
+              disabled: !reviewLoaded || !state.session || !state.session.canonical_revision_id || Boolean(state.session.active_revision_id),
+              onclick: activateDraft,
+            }, t("wizard.activate"))
+          ),
+          state.session && state.session.canonical_revision_id && !state.session.active_revision_id
+            ? noteBox(t("wizard.water.canonicalized_not_active"), "info")
+            : null,
+          state.session && state.session.active_revision_id
+            ? noteBox(t("wizard.water.activated_revision", { revision: state.session.active_revision_id }), "positive")
+            : null
         )
       );
     }
@@ -744,7 +849,11 @@
         disabled: !loaded || !state.session,
         onclick: state.step < STEP_COUNT ? () => goToStep(state.step + 1) : validateDraft,
       }, state.step < STEP_COUNT ? t("wizard.continue") : t("wizard.validate_draft"));
-      footer.replaceChildren(back, save, next);
+      if (state.step === STEP_COUNT) {
+        footer.replaceChildren(back, save);
+      } else {
+        footer.replaceChildren(back, save, next);
+      }
     }
 
     function render() {
@@ -770,7 +879,13 @@
             el("p", { class: "state-panel__message" }, state.error && state.error.message ? state.error.message : "The setup request failed."),
             el("button", {
               class: "btn btn--secondary",
-              onclick: state.errorOperation === "validate" ? validateDraft : saveDraft,
+              onclick: state.errorOperation === "validate"
+                ? validateDraft
+                : state.errorOperation === "canonicalize"
+                  ? canonicalizeDraft
+                  : state.errorOperation === "activate"
+                    ? activateDraft
+                    : saveDraft,
             }, t("common.retry"))
           ),
           content
@@ -792,6 +907,8 @@
       startNewDraft,
       saveDraft,
       validateDraft,
+      canonicalizeDraft,
+      activateDraft,
       goToStep,
       render,
     };

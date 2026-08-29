@@ -1,5 +1,14 @@
 """HA adapter tests for Water Safety moisture mapping."""
 
+import importlib.util
+
+import pytest
+
+pytestmark = pytest.mark.skipif(
+    importlib.util.find_spec("controlel.application.water_safety") is None,
+    reason="requires candidate Water Safety core",
+)
+
 from dataclasses import dataclass
 from datetime import UTC, datetime
 

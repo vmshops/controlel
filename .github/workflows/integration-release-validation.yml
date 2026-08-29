@@ -33,7 +33,7 @@ jobs:
           python-version: "3.14"
 
       - name: Build deterministic HACS release archive
-        run: python scripts/packaging/build_hacs_release.py --version 0.13.0
+        run: python scripts/packaging/build_hacs_release.py --version 0.17.0
 
       - name: Validate HACS release archive
         run: |
