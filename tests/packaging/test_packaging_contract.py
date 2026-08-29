@@ -38,7 +38,7 @@ def test_project_metadata_and_runtime_dependencies_match_release_contract() -> N
     project = load_pyproject()["project"]
 
     assert project["name"] == "controlel"
-    assert project["version"] == "0.16.0"
+    assert project["version"] == "0.17.0"
     assert project["readme"] == "README.md"
     assert project["requires-python"] == ">=3.13"
     assert project["license"] == "MIT"
@@ -86,7 +86,7 @@ def test_project_version_is_the_only_release_version_source() -> None:
         path for path in (ROOT / "src" / "controlel").rglob("*.py") if "__version__" in path.read_text(encoding="utf-8")
     ]
 
-    assert project_version == "0.16.0"
+    assert project_version == "0.17.0"
     assert controlel.__version__ == project_version
     assert importlib.metadata.version("controlel") == project_version
     assert version_files == [ROOT / "src" / "controlel" / "__init__.py"]
@@ -95,11 +95,11 @@ def test_project_version_is_the_only_release_version_source() -> None:
     assert project_version not in package_source
 
 
-def test_release_manifest_pins_exact_public_core() -> None:
+def test_core_candidate_remains_separate_from_ha_public_core_pin() -> None:
     manifest = json.loads((ROOT / "custom_components" / "controlel" / "manifest.json").read_text(encoding="utf-8"))
     core_version = load_pyproject()["project"]["version"]
 
-    assert core_version == "0.16.0"
+    assert core_version == "0.17.0"
     assert manifest["requirements"] == ["controlel==0.16.0"]
     assert manifest["version"] == "0.14.0"
     assert manifest["version"] != core_version
@@ -191,12 +191,40 @@ def test_core_artifact_verification_binds_representative_public_contracts() -> N
         "HeatingSetupAdapter",
         "HeatingSetupPayload",
         "ActivationCoordinator",
+        "WATER_SAFETY_MODULE_KEY",
+        "WATER_SAFETY_SETUP_SCHEMA_VERSION",
+        "WaterSafetySetupAdapter",
+        "WaterSafetySetupPayload",
+        "WaterSafetyDiagnosticsProjector",
+        "WATER_SAFETY_DIAGNOSTICS_SCHEMA_VERSION",
+        "WaterSafetyActionsAvailableV1",
+        "WaterSafetyDiagnosticsSnapshotV1",
+        "water_safety_diagnostics_to_dict",
+        "WaterOutputOutcome",
+        "WaterSafetyDiagnostics",
+        "WaterSafetyEvidencePort",
+        "WaterSafetyOutputPort",
+        "WaterSafetyRuntime",
+        "WaterSafetyStatePort",
+        "MoistureCondition",
+        "MoistureObservation",
+        "WaterIncident",
+        "WaterIncidentStatus",
+        "WaterSafetyAssessmentStatus",
+        "WaterSafetySnapshot",
+        "WaterSafetyState",
+        "WaterSafetyBindingSelectionRequest",
+        "WaterSafetySetupHostService",
+        "WaterSafetySetupSessionDTO",
+        "async_snapshot_with_notify_services",
         "FRONTEND_API_VERSION",
         "FrontendApiEvidenceV1",
         "FrontendApiProviderV1",
         "HeatSourceEvidenceV1",
         "BuildingEvidenceV1",
         "SystemEvidenceV1",
+        "WaterSafetyEvidenceV1",
+        "WaterSafetyResponseV1",
         "frontend_response_to_dict",
     }
     assert all(contract in clean_install for contract in required_contracts)
@@ -246,9 +274,20 @@ def test_core_artifact_verification_binds_representative_public_contracts() -> N
         "application/configuration/canonical_v3_migration.py",
         "application/configuration/canonical_defaults.py",
         "application/configuration/__init__.py",
+        "application/configuration/water_safety_setup_adapter.py",
+        "application/services/water_safety_projector.py",
+        "application/state/water_safety_diagnostics.py",
+        "application/water_safety/__init__.py",
+        "application/water_safety/model.py",
+        "application/water_safety/ports.py",
+        "application/water_safety/runtime.py",
+        "domain/water_safety/__init__.py",
+        "domain/water_safety/model.py",
         "infrastructure/home_assistant/setup_discovery.py",
         "infrastructure/home_assistant/setup_host.py",
         "infrastructure/home_assistant/setup_persistence.py",
+        "infrastructure/home_assistant/water_safety_discovery.py",
+        "infrastructure/home_assistant/water_safety_setup_host.py",
         "frontend_api/__init__.py",
         "frontend_api/v1/__init__.py",
         "frontend_api/v1/models.py",
@@ -280,10 +319,13 @@ def test_setup_backend_uses_the_versioned_public_core_surface_without_activation
 
 def test_release_metadata_records_published_core_and_unpublished_ha_boundary() -> None:
     metadata = (ROOT / "release-metadata" / "releases.yaml").read_text(encoding="utf-8")
+    candidate_note = (ROOT / "docs" / "releases" / "core-0.17.0.md").read_text(encoding="utf-8")
+    normalized_candidate_note = " ".join(candidate_note.split())
     core_note = (ROOT / "docs" / "releases" / "core-0.14.0.md").read_text(encoding="utf-8")
     integration_note = (ROOT / "docs" / "releases" / "home-assistant-0.14.0.md").read_text(encoding="utf-8")
     previous_integration_note = (ROOT / "docs" / "releases" / "home-assistant-0.13.0.md").read_text(encoding="utf-8")
 
+    assert "release_id: controlel-core-0.17.0" in metadata
     assert "release_id: controlel-core-0.14.0" in metadata
     assert "release_id: controlel-core-0.16.0" in metadata
     assert "release_id: controlel-core-0.15.0" in metadata
@@ -292,13 +334,16 @@ def test_release_metadata_records_published_core_and_unpublished_ha_boundary() -
     assert "release_id: controlel-home_assistant-0.14.0" in metadata
     assert "release_id: controlel-home_assistant-0.13.0" in metadata
     assert "release_id: controlel-home_assistant-0.12.0" in metadata
+    assert metadata.count('version: "0.17.0"') == 1
     assert metadata.count('version: "0.16.0"') == 1
     assert metadata.count('version: "0.15.0"') == 1
     assert metadata.count('version: "0.14.0"') == 2
     assert metadata.count('version: "0.13.0"') == 2
     assert metadata.count('version: "0.12.0"') == 2
     assert metadata.count("status: published") >= 6
-    assert metadata.count("status: candidate") >= 2
+    assert metadata.count("status: candidate") >= 3
+    assert 'title: "Controlel Core 0.17.0"' in metadata
+    assert 'previous_public_core: "0.16.0"' in metadata
     assert 'tag: "core-v0.16.0"' in metadata
     assert 'title: "Controlel Core 0.16.0"' in metadata
     assert 'title: "Controlel Core 0.15.0"' in metadata
@@ -320,6 +365,11 @@ def test_release_metadata_records_published_core_and_unpublished_ha_boundary() -
     assert "6e59c5fae5098a35069458f5c09b2eed8e837cd9a95b7bd7156865a1acdde6a6" in metadata
     assert 'required_core: "0.16.0"' in metadata
     assert 'required_core: "0.14.0"' in metadata
+    assert "Status: prepared release candidate" in normalized_candidate_note
+    assert "Water Safety V1" in normalized_candidate_note
+    assert "canonical configuration v3 behavior remain unchanged" in normalized_candidate_note
+    assert "does not confirm the physical output state" in normalized_candidate_note
+    assert "separate composition on published Core 0.16.0" in normalized_candidate_note
     assert "HeatingDiagnosticPolicy" in core_note
     assert "HeatingNotificationPolicy" in core_note
     assert "schema-v1 revisions" in core_note
@@ -342,7 +392,7 @@ def test_development_composition_matches_the_public_release_boundary() -> None:
     manifest = json.loads((ROOT / "custom_components" / "controlel" / "manifest.json").read_text(encoding="utf-8"))
 
     assert manifest["requirements"] == ["controlel==0.16.0"]
-    assert 'DEVELOPMENT_CORE_VERSION = "0.16.0"' in builder
+    assert 'DEVELOPMENT_CORE_VERSION = "0.17.0"' in builder
     assert '"publishable": False' in builder
     assert '"integration/controlel.zip"' in builder
     assert "development integration manifest has the wrong Core pin" in builder

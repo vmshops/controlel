@@ -33,7 +33,7 @@ else:
 
 ROOT = Path(__file__).parents[2]
 COMPOSITION_SCHEMA_VERSION = 1
-DEVELOPMENT_CORE_VERSION = "0.16.0"
+DEVELOPMENT_CORE_VERSION = "0.17.0"
 ARCHIVE_PREFIX = "controlel-dev"
 
 
@@ -121,8 +121,8 @@ Install in this order while Home Assistant is stopped:
    `HA_PYTHON -c "import importlib.metadata; print(importlib.metadata.version('controlel'))"`
    The result must be `{core_version}`.
 
-The integration ZIP carries an exact `controlel=={core_version}` pin matching the
-published release manifest.
+The integration ZIP carries an exact development-only `controlel=={core_version}`
+pin. The repository release manifest is not changed.
 """.encode()
 
 

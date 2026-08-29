@@ -35,6 +35,12 @@ from controlel.application.configuration.heating_setup_adapter import (
     HeatingSetupAdapter,
     HeatingSetupPayload,
 )
+from controlel.application.configuration.water_safety_setup_adapter import (
+    WATER_SAFETY_MODULE_KEY,
+    WATER_SAFETY_SETUP_SCHEMA_VERSION,
+    WaterSafetySetupAdapter,
+    WaterSafetySetupPayload,
+)
 from controlel.application.ports.notification_delivery_port import NotificationDeliveryPort
 from controlel.application.services.source_reconciliation_policy import SourceReconciliationPolicy
 from controlel.application.services.source_recovery_policy import SourceRecoveryPolicy
@@ -60,6 +66,7 @@ from controlel.application.services.notification_policy import (
     notification_level_for_event,
     notification_rule_for_activity,
 )
+from controlel.application.services.water_safety_projector import WaterSafetyDiagnosticsProjector
 from controlel.application.state.notification_state import NotificationState, notification_state_to_dict
 from controlel.application.state.source_resilience_diagnostics import (
     SOURCE_RESILIENCE_DIAGNOSTICS_SCHEMA_VERSION,
@@ -68,6 +75,20 @@ from controlel.application.state.source_resilience_diagnostics import (
 from controlel.application.state.runtime_supervision_state import (
     RuntimeSupervisionDiagnosticsV1,
     RuntimeSupervisionState,
+)
+from controlel.application.state.water_safety_diagnostics import (
+    WATER_SAFETY_DIAGNOSTICS_SCHEMA_VERSION,
+    WaterSafetyActionsAvailableV1,
+    WaterSafetyDiagnosticsSnapshotV1,
+    water_safety_diagnostics_to_dict,
+)
+from controlel.application.water_safety import (
+    WaterOutputOutcome,
+    WaterSafetyDiagnostics,
+    WaterSafetyEvidencePort,
+    WaterSafetyOutputPort,
+    WaterSafetyRuntime,
+    WaterSafetyStatePort,
 )
 from controlel.application.configuration import (
     CANONICAL_CONFIGURATION_SCHEMA_VERSION_V3,
@@ -133,6 +154,15 @@ from controlel.domain.source_control import (
     SourceOwnership,
     TransitionHistoryKnowledge,
 )
+from controlel.domain.water_safety import (
+    MoistureCondition,
+    MoistureObservation,
+    WaterIncident,
+    WaterIncidentStatus,
+    WaterSafetyAssessmentStatus,
+    WaterSafetySnapshot,
+    WaterSafetyState,
+)
 from controlel.domain.value_objects.sensor_id import SensorId
 from controlel.domain.value_objects.temperature import Temperature
 from controlel.domain.value_objects.zone_id import ZoneId
@@ -144,6 +174,10 @@ from controlel.infrastructure.home_assistant import (
     HeatingSetupSessionDTO,
     HomeAssistantDiscoveryAdapter,
     HomeAssistantSetupRepository,
+    WaterSafetyBindingSelectionRequest,
+    WaterSafetySetupHostService,
+    WaterSafetySetupSessionDTO,
+    async_snapshot_with_notify_services,
 )
 from controlel.frontend_api.v1 import (
     FRONTEND_API_VERSION,
@@ -152,6 +186,8 @@ from controlel.frontend_api.v1 import (
     FrontendApiProviderV1,
     HeatSourceEvidenceV1,
     SystemEvidenceV1,
+    WaterSafetyEvidenceV1,
+    WaterSafetyResponseV1,
     frontend_response_to_dict,
 )
 
@@ -351,12 +387,90 @@ configuration_id = new_configuration_id_v3()
 assert configuration_id.startswith("heating_")
 assert CanonicalConfigurationLifecycleV3 is not None
 
+water_contracts = (
+    WaterSafetySetupAdapter,
+    WaterSafetySetupPayload,
+    WaterSafetyDiagnosticsProjector,
+    WaterSafetyActionsAvailableV1,
+    WaterSafetyDiagnosticsSnapshotV1,
+    WaterSafetyDiagnostics,
+    WaterSafetyEvidencePort,
+    WaterSafetyOutputPort,
+    WaterSafetyRuntime,
+    WaterSafetyStatePort,
+    MoistureCondition,
+    MoistureObservation,
+    WaterIncident,
+    WaterIncidentStatus,
+    WaterSafetyAssessmentStatus,
+    WaterSafetySnapshot,
+    WaterSafetyState,
+    WaterSafetyBindingSelectionRequest,
+    WaterSafetySetupHostService,
+    WaterSafetySetupSessionDTO,
+    async_snapshot_with_notify_services,
+)
+for contract in water_contracts:
+    module_path = Path(importlib.import_module(contract.__module__).__file__).resolve()
+    assert module_path.is_relative_to(package_path.parent)
+assert WATER_SAFETY_MODULE_KEY == "water_safety"
+assert WATER_SAFETY_SETUP_SCHEMA_VERSION == 1
+assert WATER_SAFETY_DIAGNOSTICS_SCHEMA_VERSION == 1
+water_payload = WaterSafetySetupPayload(
+    zone_id="utility",
+    zone_name="Utility",
+    area_id="utility-room",
+    area_name="Utility room",
+    sensor_id="utility-moisture",
+    unavailable_grace_seconds=60.0,
+    fault_repeat_interval_seconds=None,
+    notification_target_roles=("water_safety.notification.primary",),
+)
+assert water_payload.behavior_contract_version == 1
+assert WaterSafetySetupAdapter.module_schema_version == 1
+water_observation = MoistureObservation(
+    sensor_id="utility-moisture",
+    condition=MoistureCondition.UNKNOWN,
+    observed_at=datetime(2026, 1, 1, tzinfo=UTC),
+)
+assert water_observation.condition is MoistureCondition.UNKNOWN
+water_diagnostics = WaterSafetyDiagnostics(
+    state=WaterSafetyState.OK,
+    processing_enabled=True,
+    sensor_id="utility-moisture",
+    zone_id="utility",
+    area_id="utility-room",
+    critical_sensor=False,
+    assessment_status=WaterSafetyAssessmentStatus.INDETERMINATE_GRACE,
+    latest_observation=water_observation,
+    last_confirmed_observation=None,
+    active_incident=None,
+    last_incident=None,
+    fault_deadline=datetime(2026, 1, 1, 0, 1, tzinfo=UTC),
+    next_fault_notification_at=None,
+    owned_outputs=(),
+    canonical_revision_id="water-revision",
+    semantic_configuration_fingerprint="water-fingerprint",
+)
+water_projection = WaterSafetyDiagnosticsProjector().project(
+    water_diagnostics,
+    area_name="Utility room",
+    zone_name="Utility",
+)
+water_projection_payload = water_safety_diagnostics_to_dict(water_projection)
+assert water_projection_payload["assessment_status"] == "INDETERMINATE_GRACE"
+assert water_projection_payload["sensor_condition"] == "UNKNOWN"
+assert water_projection_payload["last_siren_command_outcome"] is None
+assert WaterOutputOutcome.ACCEPTED.value == "ACCEPTED"
+
 frontend_api_contracts = (
     BuildingEvidenceV1,
     FrontendApiEvidenceV1,
     FrontendApiProviderV1,
     HeatSourceEvidenceV1,
     SystemEvidenceV1,
+    WaterSafetyEvidenceV1,
+    WaterSafetyResponseV1,
     frontend_response_to_dict,
 )
 for contract in frontend_api_contracts:
@@ -375,6 +489,19 @@ class FrontendEvidenceSource:
                     reported_state="UNKNOWN",
                 )
             ),
+            water_safety=WaterSafetyEvidenceV1(
+                state="SENSOR_FAULT",
+                assessment_status="CONFIRMED",
+                sensor_condition="UNKNOWN",
+                area_name="Utility room",
+                zone_name="Utility",
+                active_incident=False,
+                incident_silenced=False,
+                processing_enabled=True,
+                owned_siren_count=0,
+                last_siren_command_outcome=None,
+                actions_available=("disable", "test_notification"),
+            ),
         )
 
 class FrontendClock:
@@ -389,13 +516,18 @@ frontend_payloads = tuple(
         frontend_provider.heating(),
         frontend_provider.diagnostics(),
         frontend_provider.setup(),
+        frontend_provider.water_safety(),
     )
 )
 frontend_heating = frontend_payloads[1]
+frontend_water = frontend_payloads[4]
 assert all(payload["frontend_api_version"] == 1 for payload in frontend_payloads)
 assert frontend_heating["building"]["heat_source"]["command_outcome"] == "held"
 assert frontend_heating["building"]["heat_source"]["reported_state"] == "UNKNOWN"
 assert frontend_heating["building"]["heat_source"]["physical_state"] == "unknown"
+assert frontend_water["state"] == "SENSOR_FAULT"
+assert frontend_water["sensor_condition"] == "UNKNOWN"
+assert frontend_water["actions_available"] == ["disable", "test_notification"]
 
 activity_notification_planner = NotificationPlanner(
     NotificationPolicy(

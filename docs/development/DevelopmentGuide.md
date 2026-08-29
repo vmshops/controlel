@@ -6,7 +6,7 @@ The ordinary development environment deliberately has no Home Assistant
 dependency. Use these separate suites:
 
 ```text
-# A. Repository Core 0.16.0 candidate tests
+# A. Repository Core 0.17.0 candidate tests
 python -m pytest tests/domain tests/application tests/infrastructure \
   tests/architecture tests/packaging
 
@@ -18,8 +18,8 @@ python -m pytest tests/integrations/home_assistant \
 CONTROLEL_FRAMEWORK_COMPOSITION=public \
   python -m pytest tests/integrations/home_assistant/framework
 
-# D. Real loader smoke for an explicit Core 0.16.0 development composition
-CONTROLEL_DEVELOPMENT_COMPOSITION=/absolute/path/to/controlel-dev-0.16.0.zip \
+# D. Real loader smoke for an explicit Core 0.17.0 development composition
+CONTROLEL_DEVELOPMENT_COMPOSITION=/absolute/path/to/controlel-dev-0.17.0.zip \
   python -m pytest \
   tests/integrations/home_assistant/development_composition
 ```
