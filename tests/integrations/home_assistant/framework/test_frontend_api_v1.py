@@ -19,6 +19,7 @@ from custom_components.controlel.const import (
     CONF_TEMPERATURE_ENTITY_ID,
     DOMAIN,
 )
+from custom_components.controlel.core_capabilities import water_safety_core_available
 from custom_components.controlel.frontend_api import (
     _command_outcome,
     _event_command_outcome,
@@ -113,10 +114,18 @@ async def test_authenticated_reads_use_real_evidence_without_control_mutation(
 
     assert overview["frontend_api_version"] == 1
     assert overview["system"]["status"] == "active"
-    assert overview["modules"] == [
+    expected_modules = [
         {"module_id": "heating", "status": "active", "reason": None},
-        {"module_id": "water_safety", "status": "inactive", "reason": "water_safety_not_configured"},
     ]
+    if water_safety_core_available():
+        expected_modules.append(
+            {
+                "module_id": "water_safety",
+                "status": "inactive",
+                "reason": "water_safety_not_configured",
+            },
+        )
+    assert overview["modules"] == expected_modules
     assert heating["zones"][0]["zone_id"] == entry_data["zone_id"]
     assert heating["zones"][0]["current_temperature_c"] == 22.0
     assert heating["zones"][0]["measurement_state"] == "fresh"
