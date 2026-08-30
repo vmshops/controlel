@@ -32,6 +32,7 @@ require("../mock-app-data.js");
 require("../api-client.js");
 require("../components.js");
 require("../wizard.js");
+require("../water-wizard.js");
 require("../app.js");
 
 const CW = globalThis.CW;
@@ -124,6 +125,83 @@ function waterSafetyRaw() {
   };
 }
 
+function unconfiguredOverviewRaw() {
+  return {
+    frontend_api_version: 1,
+    generated_at: "2026-08-22T10:00:00+02:00",
+    system: { status: "stopped", operating_mode: "UNCONFIGURED", operating_mode_reason: null, operating_mode_since: null },
+    modules: [
+      { module_id: "heating", status: "inactive", reason: "heating_not_configured" },
+      { module_id: "water_safety", status: "inactive", reason: "water_safety_not_configured" },
+    ],
+    attention: [],
+  };
+}
+
+function unconfiguredHeatingRaw() {
+  return {
+    frontend_api_version: 1,
+    generated_at: "2026-08-22T10:00:00+02:00",
+    building: {
+      demand_status: "indeterminate",
+      demand_reason_code: null,
+      heat_source: {
+        permission: "unknown",
+        requested_command: null,
+        command_outcome: null,
+        reported_state: "UNKNOWN",
+        physical_state: "unknown",
+        last_decision_summary: null,
+      },
+    },
+    zones: [],
+  };
+}
+
+function unconfiguredSetupRaw() {
+  return {
+    frontend_api_version: 1,
+    generated_at: "2026-08-22T10:00:00+02:00",
+    readiness: { state: "ready", reason_code: null },
+    missing_configuration: [],
+    validation_messages: [],
+  };
+}
+
+function unconfiguredWaterSafetyRaw() {
+  return {
+    frontend_api_version: 1,
+    generated_at: "2026-08-22T10:00:00+02:00",
+    state: "DISABLED",
+    assessment_status: "DISABLED",
+    sensor_condition: null,
+    area_name: null,
+    zone_name: null,
+    active_incident: false,
+    incident_silenced: false,
+    processing_enabled: false,
+    owned_siren_count: 0,
+    last_siren_command_outcome: null,
+    actions_available: [],
+  };
+}
+
+function unconfiguredResponses() {
+  return {
+    overview: unconfiguredOverviewRaw(),
+    heating: unconfiguredHeatingRaw(),
+    diagnostics: {
+      frontend_api_version: 1,
+      generated_at: null,
+      health: { runtime_status: "stopped", operating_mode: "UNCONFIGURED", event_stream: { total_emitted: 0, retained: 0, dropped: 0 } },
+      recent_events: [],
+      decision_trace: null,
+    },
+    setup: unconfiguredSetupRaw(),
+    waterSafety: unconfiguredWaterSafetyRaw(),
+  };
+}
+
 function fullResponses() {
   return {
     overview: overviewRaw(),
@@ -164,9 +242,10 @@ function buildApp({ mode = "real", responses = fullResponses(), failTransport = 
   const navRoot = new Element("div"); navRoot.id = "app-nav";
   const viewRoot = new Element("main"); viewRoot.id = "view-root";
   const wizardRoot = new Element("div"); wizardRoot.id = "wizard-view";
+  const waterWizardRoot = new Element("div"); waterWizardRoot.id = "water-wizard-view";
   const topbar = new Element("span"); topbar.id = "topbar-status";
   const modeEl = new Element("p"); modeEl.id = "app-mode";
-  root.append(navRoot, topbar, modeEl, viewRoot, wizardRoot);
+  root.append(navRoot, topbar, modeEl, viewRoot, wizardRoot, waterWizardRoot);
   documentStub._root = root;
 
   const app = CA.createApp({
@@ -176,6 +255,7 @@ function buildApp({ mode = "real", responses = fullResponses(), failTransport = 
     navRoot,
     viewRoot,
     wizardRoot,
+    waterWizardRoot,
     topbarStatusRoot: topbar,
     modeRoot: modeEl,
     renderRoot: root,
@@ -184,7 +264,7 @@ function buildApp({ mode = "real", responses = fullResponses(), failTransport = 
     now: () => "2026-08-28T10:00:00Z",
     idFactory: (prefix) => `${prefix}-test`,
   });
-  return { app, root, navRoot, viewRoot, wizardRoot, topbar, modeEl, connection };
+  return { app, root, navRoot, viewRoot, wizardRoot, waterWizardRoot, topbar, modeEl, connection };
 }
 
 /** Await all in-flight domain loads so the view has re-rendered. */
@@ -339,17 +419,20 @@ test("navigation renders the requested view and marks the current nav item", asy
   assert.ok(viewRoot.textContent.includes("Current temperature"));
 });
 
-test("navigating to setup shows the wizard container and the readiness view", async () => {
-  const { app, viewRoot, wizardRoot } = buildApp();
+test("navigating to setup shows the module hub before a wizard opens", async () => {
+  const { app, viewRoot, wizardRoot, waterWizardRoot } = buildApp({ responses: unconfiguredResponses() });
   app.navigate("setup");
   await settle(app);
-  assert.equal(viewRoot.hidden, false, "readiness view is shown");
-  assert.equal(wizardRoot.hidden, false, "wizard is shown below the readiness view");
-  assert.ok(viewRoot.textContent.includes("Readiness"));
-  app.navigate("overview");
+  assert.equal(viewRoot.hidden, false, "setup hub is shown");
+  assert.equal(wizardRoot.hidden, true, "heating wizard stays hidden until Heating is selected");
+  assert.equal(waterWizardRoot.hidden, true, "water wizard stays hidden until Water Safety is selected");
+  assert.ok(viewRoot.textContent.includes("Choose a module"), "module hub copy is shown");
+  assert.ok(!viewRoot.textContent.includes("Readiness"), "global readiness view is not shown on the hub");
+
+  app.openSetupModule("heating");
   await settle(app);
-  assert.equal(viewRoot.hidden, false);
-  assert.equal(wizardRoot.hidden, true);
+  assert.equal(wizardRoot.hidden, false, "heating wizard opens after module selection");
+  assert.ok(viewRoot.textContent.includes("Back to Setup"), "module header offers return to hub");
 });
 
 test("unknown routes fall back to the default route", async () => {
@@ -370,11 +453,11 @@ test("clicking a navigation item navigates", async () => {
   assert.ok(viewRoot.textContent.includes("Diagnostics / Activity"));
 });
 
-test("topbar shows the real setup readiness state", async () => {
+test("topbar shows the overall system state instead of setup readiness", async () => {
   const { app, topbar } = buildApp();
   app.navigate("overview");
   await settle(app);
-  assert.ok(topbar.textContent.includes("Incomplete"), "readiness state shown in topbar");
+  assert.ok(topbar.textContent.includes("Active"), "system status shown in topbar");
 });
 
 // ------------------------------------------------------------- truthful states
@@ -559,7 +642,7 @@ test("Heating reopens a compatible persisted canonical draft", async () => {
 
 test("setup view shows real readiness, missing config and validation", async () => {
   const { app, viewRoot } = buildApp();
-  app.navigate("setup");
+  app.openSetupModule("heating");
   await settle(app);
   assert.ok(viewRoot.textContent.includes("Incomplete"), "readiness state");
   assert.ok(viewRoot.textContent.includes("SETUP_INCOMPLETE"), "reason code");
@@ -633,9 +716,57 @@ test("toModuleCard maps a real module to the card shape", () => {
   assert.equal(card.state, "active");
   assert.deepEqual(card.primaryAction, { label: "Open Heating", route: "heating" });
 
+  const unconfigured = CA.toModuleCard({ module_id: "heating", status: "inactive", reason: "heating_not_configured" });
+  assert.equal(unconfigured.state, "not_configured");
+  assert.equal(unconfigured.primaryAction.setupModule, "heating");
+
   const errCard = CA.toModuleCard({ module_id: "heating", status: "error", reason: "boom" });
   assert.equal(errCard.state, "error");
   assert.deepEqual(errCard.primaryAction, { label: "Review issues", route: "diagnostics" });
+});
+
+test("module helpers distinguish unconfigured modules from setup readiness", () => {
+  const overview = unconfiguredOverviewRaw();
+  assert.equal(CA.moduleDisplayState(CA.findModule(overview.modules, "heating")), "not_configured");
+  assert.equal(CA.isHeatingConfigured(overview), false);
+  assert.equal(CA.heatingSettingsState(overview, unconfiguredSetupRaw()), "not_configured");
+});
+
+test("fresh install settings show not configured and do not query canonical authority", async () => {
+  const canonicalClient = {
+    calls: [],
+    discover(request) { this.calls.push(["discovery", request]); return Promise.resolve({ snapshot_id: "s" }); },
+    defaults() { this.calls.push(["defaults"]); return Promise.resolve({ core_version: "0.17.0", integration_version: "0.14.0" }); },
+    readActive(request) {
+      this.calls.push(["active", request]);
+      return Promise.reject(new Error("Canonical v3 request conflicts with current authority"));
+    },
+    listDrafts() { this.calls.push(["drafts"]); return Promise.resolve([]); },
+  };
+  const { app, viewRoot } = buildApp({ responses: unconfiguredResponses(), canonicalClient });
+  app.navigate("settings");
+  await settle(app);
+  assert.ok(viewRoot.textContent.includes("Not configured"));
+  assert.ok(!viewRoot.textContent.includes("Ready"));
+  assert.ok(!viewRoot.textContent.includes("conflicts with current authority"));
+  assert.equal(canonicalClient.calls.length, 0);
+});
+
+test("fresh install water safety view shows not configured instead of disabled", async () => {
+  const { app, viewRoot } = buildApp({ responses: unconfiguredResponses() });
+  app.navigate("water-safety");
+  await settle(app);
+  assert.ok(viewRoot.textContent.includes("not configured"), "unconfigured water state");
+  assert.ok(!viewRoot.textContent.includes("Disabled"), "never-configured water is not labeled Disabled");
+});
+
+test("selecting Water Safety from the setup hub opens the water wizard container", async () => {
+  const { app, waterWizardRoot } = buildApp({ responses: unconfiguredResponses() });
+  app.navigate("setup");
+  await settle(app);
+  app.openSetupModule("water_safety");
+  await settle(app);
+  assert.equal(waterWizardRoot.hidden, false);
 });
 
 test("toActivityEvent maps a real event and keeps the command distinct", () => {

@@ -88,6 +88,8 @@
       },
       action: {
         continue_setup: "Continue setup",
+        configure_heating: "Configure Heating",
+        configure_water: "Configure Water Safety",
         open_heating: "Open Heating",
         open_water_safety: "Open Water Safety",
         open_diagnostics: "Open Diagnostics",
@@ -167,6 +169,7 @@
         lead: "Canonical configuration v3 is the shared authority used by Heating, the Setup Wizard and Home Assistant Configure.",
         loading: "Loading the active canonical configuration…",
         load_failed: "Canonical configuration unavailable",
+        not_configured_lead: "Heating has not been configured yet. Use Setup to create and activate a canonical v3 configuration.",
         unavailable: "Canonical editing is unavailable outside an authenticated Home Assistant connection.",
         single_zone_only: "This surface supports exactly one canonical Heating zone and one heat source.",
         active_revision: "Active revision",
@@ -213,6 +216,8 @@
         last_siren_outcome: "Last siren command outcome",
         truth_note:
           "Grace periods render as indeterminate. A successful command is not physical confirmation that a siren sounded.",
+        not_configured_title: "Water Safety is not configured",
+        not_configured_message: "No Water Safety module has been activated for this Controlel entry yet.",
         state: {
           ok: "OK",
           wet: "Wet",
@@ -265,6 +270,8 @@
         overview: "Settings overview",
         heating_config: "Heating configuration",
         heating_config_desc: "Zone, sensor and heat source bindings for the heating module.",
+        water_safety_config: "Water Safety configuration",
+        water_safety_config_desc: "Moisture sensor, notifications and siren bindings for Water Safety.",
         diagnostics_level: "Diagnostics level",
         diagnostics_level_desc: "Basic, Detailed or Debug display level for the activity view.",
         notifications: "Notifications",
@@ -275,8 +282,7 @@
         advanced_desc: "Advanced options and prototype diagnostics (placeholder).",
         placeholder: "Placeholder",
         note:
-          "The Heating configuration row reflects the real setup readiness state. The setup wizard uses the " +
-          "protected canonical-v3 lifecycle; other rows are placeholders.",
+          "Module rows reflect configured state, not setup-backend readiness alone. Placeholder rows remain available for future settings.",
       },
       language: {
         auto: "Auto",
@@ -284,6 +290,13 @@
         cs: "Czech",
       },
       setup: {
+        hub_title: "Setup",
+        hub_subtitle: "Choose a module or area to configure. Each module keeps its own setup lifecycle.",
+        hub_note: "Setup writes remain draft-only until you explicitly activate a canonical revision.",
+        back_to_hub: "Back to Setup",
+        open_module: "Open setup",
+        module_subtitle: "Use the guided setup flow below for this module.",
+        module_wizard_below: "The guided setup wizard for this module is shown below.",
         title: "Setup / Readiness",
         subtitle: "Real setup readiness, missing configuration and validation from Frontend API v1.",
         readiness: "Readiness",
@@ -507,6 +520,8 @@
         entry_incomplete: "The backend reports setup as incomplete. Continue in the wizard to create or resume a draft.",
         entry_invalid: "The backend reports setup as invalid. Continue in the wizard and review backend validation.",
         entry_unknown: "The backend setup state is unknown. The wizard will not assume that setup is ready.",
+        entry_services_ready_unconfigured:
+          "Setup services are available for a new Heating configuration. Ready here means the setup backend can accept drafts, not that Heating is configured or active.",
         entry_unavailable: "Backend setup readiness is unavailable: {message}",
         resume_available:
           "A saved draft reference ({draft}) is available in this browser. Resume will verify and load it from the backend.",
@@ -625,6 +640,8 @@
       },
       action: {
         continue_setup: "Pokračovat v nastavení",
+        configure_heating: "Nakonfigurovat topení",
+        configure_water: "Nakonfigurovat ochranu proti vodě",
         open_heating: "Otevřít topení",
         open_water_safety: "Otevřít ochranu proti vodě",
         open_diagnostics: "Otevřít diagnostiku",
@@ -704,6 +721,7 @@
         lead: "Kanonická konfigurace v3 je společnou autoritou pro Topení, Průvodce nastavením a konfiguraci v Home Assistant.",
         loading: "Načítání aktivní kanonické konfigurace…",
         load_failed: "Kanonická konfigurace není dostupná",
+        not_configured_lead: "Topení zatím nebylo nakonfigurováno. Použijte Nastavení a vytvořte a aktivujte kanonickou konfiguraci v3.",
         unavailable: "Kanonické úpravy jsou dostupné pouze přes ověřené připojení Home Assistant.",
         single_zone_only: "Tato obrazovka podporuje právě jednu kanonickou zónu topení a jeden zdroj tepla.",
         active_revision: "Aktivní revize",
@@ -750,6 +768,8 @@
         last_siren_outcome: "Výsledek posledního příkazu siréně",
         truth_note:
           "Období tolerance se zobrazuje jako nedostatečně určené. Úspěšný příkaz není fyzikálním potvrzením, že siréna zazněla.",
+        not_configured_title: "Ochrana proti vodě není nakonfigurována",
+        not_configured_message: "Pro tento záznam Controlel zatím nebyl aktivován modul ochrany proti vodě.",
         state: {
           ok: "OK",
           wet: "Vlhkost",
@@ -802,6 +822,8 @@
         overview: "Přehled nastavení",
         heating_config: "Konfigurace topení",
         heating_config_desc: "Propojení zóny, senzoru a zdroje tepla pro modul topení.",
+        water_safety_config: "Konfigurace ochrany proti vodě",
+        water_safety_config_desc: "Senor vlhkosti, oznámení a sirény pro ochranu proti vodě.",
         diagnostics_level: "Úroveň diagnostiky",
         diagnostics_level_desc: "Úroveň zobrazení aktivity: Základní, Podrobné nebo Ladění.",
         notifications: "Oznámení",
@@ -812,8 +834,7 @@
         advanced_desc: "Pokročilé možnosti a diagnostika prototypu (rezervováno).",
         placeholder: "Rezervováno",
         note:
-          "Řádek Konfigurace topení odráží skutečný stav připravenosti. Průvodce používá chráněný životní " +
-          "cyklus canonical-v3; ostatní řádky jsou rezervované.",
+          "Řádky modulů odrážejí nakonfigurovaný stav, ne jen připravenost setup backendu. Rezervované řádky zůstávají k dispozici pro budoucí nastavení.",
       },
       language: {
         auto: "Automaticky",
@@ -821,6 +842,13 @@
         cs: "Čeština",
       },
       setup: {
+        hub_title: "Nastavení",
+        hub_subtitle: "Vyberte modul nebo oblast, kterou chcete konfigurovat. Každý modul má vlastní životní cyklus nastavení.",
+        hub_note: "Zápisy do nastavení zůstávají jen koncepty, dokud výslovně neaktivujete kanonickou revizi.",
+        back_to_hub: "Zpět do Nastavení",
+        open_module: "Otevřít nastavení",
+        module_subtitle: "Pro tento modul použijte níže uvedený průvodce nastavením.",
+        module_wizard_below: "Průvodce nastavením pro tento modul je zobrazen níže.",
         title: "Průvodce a připravenost",
         subtitle: "Skutečná připravenost, chybějící konfigurace a validace z Frontend API v1.",
         readiness: "Připravenost",
@@ -1044,6 +1072,8 @@
         entry_incomplete: "Backend hlásí nastavení jako nekompletní. V průvodci založte nový koncept nebo pokračujte v existujícím.",
         entry_invalid: "Backend hlásí nastavení jako neplatné. Pokračujte v průvodci a zkontrolujte validaci backendu.",
         entry_unknown: "Stav nastavení podle backendu je neznámý. Průvodce nebude předpokládat, že je nastavení připravené.",
+        entry_services_ready_unconfigured:
+          "Služby nastavení jsou dostupné pro novou konfiguraci topení. Připraveno zde znamená, že setup backend přijímá koncepty, nikoli že je topení nakonfigurované nebo aktivní.",
         entry_unavailable: "Připravenost nastavení z backendu není dostupná: {message}",
         resume_available:
           "V tomto prohlížeči je uložen odkaz na koncept ({draft}). Pokračování jej ověří a načte z backendu.",

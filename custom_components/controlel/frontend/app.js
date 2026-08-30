@@ -110,6 +110,52 @@
     error: { label: "Error", tone: "negative", key: "state.error" },
   };
 
+  const MODULE_NOT_CONFIGURED_REASONS = {
+    heating: "heating_not_configured",
+    water_safety: "water_safety_not_configured",
+  };
+
+  const MODULE_DISABLED_REASONS = {
+    water_safety: "water_safety_disabled",
+  };
+
+  function findModule(modules, moduleId) {
+    return (modules || []).find((item) => item.module_id === moduleId) || null;
+  }
+
+  function moduleDisplayState(module) {
+    if (!module) return "unknown";
+    if (module.status === "active") return "active";
+    if (module.reason === MODULE_NOT_CONFIGURED_REASONS[module.module_id]) return "not_configured";
+    if (module.reason === MODULE_DISABLED_REASONS[module.module_id]) return "disabled";
+    if (module.status === "error") return "error";
+    if (module.status === "inactive") return "inactive";
+    return module.status;
+  }
+
+  function isHeatingConfigured(overview) {
+    const module = findModule(overview && overview.modules, "heating");
+    return moduleDisplayState(module) !== "not_configured" && moduleDisplayState(module) !== "unknown";
+  }
+
+  function isWaterSafetyConfigured(overview) {
+    const module = findModule(overview && overview.modules, "water_safety");
+    if (!module) return false;
+    return moduleDisplayState(module) !== "not_configured";
+  }
+
+  function isCanonicalAuthorityConflict(error) {
+    const message = (error && error.message) || "";
+    return message.includes("conflicts with current authority")
+      || (error && error.code === "setup_conflict");
+  }
+
+  function heatingSettingsState(overview, setup) {
+    if (!isHeatingConfigured(overview)) return "not_configured";
+    const readiness = setup && setup.readiness;
+    return readiness ? readiness.state : "unknown";
+  }
+
   const READINESS_META = {
     ready: { label: "Ready", tone: "positive", key: "state.ready" },
     incomplete: { label: "Incomplete", tone: "warning", key: "state.incomplete" },
@@ -153,7 +199,13 @@
     return t("common.unknown");
   }
 
-  function waterPrimaryStateLabel(state, assessmentStatus) {
+  function waterPrimaryStateLabel(state, assessmentStatus, overview) {
+    if (overview) {
+      const waterModule = findModule(overview.modules, "water_safety");
+      const displayState = moduleDisplayState(waterModule);
+      if (displayState === "not_configured") return t("state.not_configured");
+      if (displayState === "disabled") return t("state.disabled");
+    }
     if (assessmentStatus === "INDETERMINATE_GRACE") return t("water.assessment.indeterminate_grace");
     return stateLabel(state, WATER_STATE_META);
   }
@@ -247,16 +299,23 @@
 
   /** Map a real module ({module_id,status,reason}) to the moduleCard shape. */
   function toModuleCard(m) {
-    const meta = metaOf(MODULE_STATUS_META, m.status);
+    const displayState = moduleDisplayState(m);
     let primaryAction = null;
     if (m.status === "error") primaryAction = { label: t("action.review_issues"), route: "diagnostics" };
-    else if (m.module_id === "heating") primaryAction = { label: t("action.open_heating"), route: "heating" };
+    else if (displayState === "not_configured" && m.module_id === "heating") {
+      primaryAction = { label: t("action.configure_heating"), setupModule: "heating" };
+    } else if (displayState === "not_configured" && m.module_id === "water_safety") {
+      primaryAction = { label: t("action.configure_water"), setupModule: "water_safety" };
+    } else if (m.module_id === "heating") primaryAction = { label: t("action.open_heating"), route: "heating" };
     else if (m.module_id === "water_safety") primaryAction = { label: t("action.open_water_safety"), route: "water-safety" };
+    const stateLabel = displayState === "not_configured" ? t("state.not_configured")
+      : displayState === "disabled" ? t("state.disabled")
+        : metaOf(MODULE_STATUS_META, m.status).label;
     return {
       id: m.module_id,
       label: m.module_id,
-      state: m.status,
-      stateLabel: meta.label,
+      state: displayState,
+      stateLabel,
       summary: m.reason || t("module.no_reason"),
       warningCount: 0,
       updatedAt: null,
@@ -315,6 +374,7 @@
     navRoot,
     viewRoot,
     wizardRoot,
+    waterWizardRoot,
     topbarStatusRoot,
     modeRoot,
     renderRoot,
@@ -333,6 +393,7 @@
     };
     const state = {
       route: DEFAULT_ROUTE,
+      setupModule: null,
       mode,
       dataSource: dataSource || null,
       diagnosticsLevel: "basic",
@@ -358,14 +419,25 @@
 
     const api = {
       get state() { return state; },
-      navigate(route) {
+      navigate(route, options) {
         const next = ROUTES.includes(route) ? route : DEFAULT_ROUTE;
         state.route = next;
+        if (next !== "setup") state.setupModule = null;
+        else if (options && options.setupModule) state.setupModule = options.setupModule;
         // Fresh data per view visit (read-only, event-driven). The setup
         // domain is kept cached because it drives the global topbar.
         for (const d of neededDomains(next)) {
           if (d !== "setup" && d !== "canonical") state.domains[d] = freshDomain();
         }
+        render();
+      },
+      openSetupModule(moduleKey) {
+        state.route = "setup";
+        state.setupModule = moduleKey;
+        render();
+      },
+      backToSetupHub() {
+        state.setupModule = null;
         render();
       },
       setDiagnosticsLevel(level) {
@@ -431,8 +503,8 @@
         case "heating": return ["heating", "setup", "diagnostics", "canonical"];
         case "water-safety": return ["waterSafety"];
         case "diagnostics": return ["diagnostics"];
-        case "settings": return ["setup", "canonical"];
-        case "setup": return ["setup"];
+        case "settings": return ["setup", "overview", "canonical"];
+        case "setup": return ["setup", "overview"];
         default: return [];
       }
     }
@@ -481,7 +553,28 @@
 
     function loadCanonical() {
       const c = state.canonical;
-      if (!canonicalClient || c.inflight || c.status !== "idle") return c.inflight || Promise.resolve();
+      if (!canonicalClient || c.inflight) return c.inflight || Promise.resolve();
+      const overview = state.domains.overview;
+      if (overview.status === "idle") {
+        const pending = loadDomain("overview");
+        pending.then(() => loadCanonical());
+        return pending;
+      }
+      if (overview.status === "loading") {
+        const pending = overview.inflight || Promise.resolve();
+        pending.then(() => loadCanonical());
+        return pending;
+      }
+      if (overview.status === "loaded" && !isHeatingConfigured(overview.data)) {
+        c.status = "unconfigured";
+        c.error = null;
+        c.active = null;
+        c.availableDraft = null;
+        c.inflight = null;
+        render();
+        return Promise.resolve(null);
+      }
+      if (c.status !== "idle") return c.inflight || Promise.resolve();
       c.status = "loading";
       c.error = null;
       const context = canonicalContext();
@@ -499,8 +592,15 @@
         render();
         return active;
       }, (error) => {
-        c.status = "error";
-        c.error = error;
+        if (isCanonicalAuthorityConflict(error)) {
+          c.status = "unconfigured";
+          c.error = null;
+          c.active = null;
+          c.availableDraft = null;
+        } else {
+          c.status = "error";
+          c.error = error;
+        }
         c.inflight = null;
         render();
         return null;
@@ -652,10 +752,12 @@
     function render() {
       if (typeof onSetupState === "function") {
         const setup = state.domains.setup;
+        const overview = state.domains.overview;
         onSetupState({
           status: setup.status,
           readiness: setup.status === "loaded" && setup.data ? setup.data.readiness : null,
           error: setup.error,
+          heatingConfigured: overview.status === "loaded" ? isHeatingConfigured(overview.data) : null,
         });
       }
       if (navRoot) {
@@ -681,9 +783,12 @@
         return;
       }
 
-      const isSetup = state.route === "setup";
+      const isSetupRoute = state.route === "setup";
+      const showHeatingWizard = isSetupRoute && state.setupModule === "heating";
+      const showWaterWizard = isSetupRoute && state.setupModule === "water_safety";
       if (viewRoot) viewRoot.hidden = false;
-      if (wizardRoot) wizardRoot.hidden = !isSetup;
+      if (wizardRoot) wizardRoot.hidden = !showHeatingWizard;
+      if (waterWizardRoot) waterWizardRoot.hidden = !showWaterWizard;
       if (viewRoot) viewRoot.replaceChildren(renderView(state.route));
 
       for (const domain of neededDomains(state.route)) {
@@ -702,13 +807,31 @@
     }
 
     function renderTopbar(root) {
+      const overview = state.domains.overview;
+      if (overview.status === "loaded" && overview.data) {
+        const system = overview.data.system;
+        if (system.operating_mode === "UNCONFIGURED") {
+          root.replaceChildren(badge(t("state.not_configured"), "neutral"));
+          return;
+        }
+        root.replaceChildren(stateBadge(SYSTEM_STATUS_META, system.status));
+        return;
+      }
       const setup = state.domains.setup;
-      if (setup.status === "loaded" && setup.data && setup.data.readiness) {
-        root.replaceChildren(stateBadge(READINESS_META, setup.data.readiness.state));
-      } else if (setup.status === "error") {
+      if (setup.status === "error") {
         root.replaceChildren(badge(t("common.unavailable"), "warning"));
       } else {
         root.replaceChildren(badge(t("common.unknown"), "neutral"));
+      }
+    }
+
+    function moduleCardNavigate(module) {
+      if (module.primaryAction && module.primaryAction.setupModule) {
+        api.openSetupModule(module.primaryAction.setupModule);
+        return;
+      }
+      if (module.primaryAction && module.primaryAction.route) {
+        api.navigate(module.primaryAction.route);
       }
     }
 
@@ -751,7 +874,8 @@
       return section({ title, lead, badges, actions, children: body });
     }
 
-    function readinessNeedsAction(setup) {
+    function readinessNeedsAction(overview, setup) {
+      if (overview && !isHeatingConfigured(overview)) return true;
       return setup && setup.readiness &&
         (setup.readiness.state === "incomplete" || setup.readiness.state === "invalid");
     }
@@ -787,7 +911,7 @@
       if (ov.status === "loaded" && ov.data) badges.push(stateBadge(SYSTEM_STATUS_META, ov.data.system.status));
 
       const headerActions = [];
-      if (setup.status === "loaded" && readinessNeedsAction(setup.data)) headerActions.push(continueSetupButton());
+      if (setup.status === "loaded" && readinessNeedsAction(ov.data, setup.data)) headerActions.push(continueSetupButton());
 
       const subtitle = (ov.status === "loaded" && ov.data && ov.data.generated_at)
         ? t("overview.subtitle_generated", { time: formatTime(ov.data.generated_at) })
@@ -802,7 +926,10 @@
           lead: t("overview.modules_lead"),
           loaded: (data) => el("div", { class: "module-grid" },
             data.modules.length
-              ? data.modules.map((m) => moduleCard({ module: toModuleCard(m), onNavigate: (route) => api.navigate(route) }))
+              ? data.modules.map((m) => {
+                const card = toModuleCard(m);
+                return moduleCard({ module: card, onNavigate: () => moduleCardNavigate(card) });
+              })
               : emptyState({ title: t("empty.no_modules_title"), message: t("empty.no_modules_message") })
           ),
           onRetry: () => api.retryDomain("overview"),
@@ -838,7 +965,10 @@
           title: t("section.all_modules"),
           loaded: (data) => el("div", { class: "module-grid" },
             data.modules.length
-              ? data.modules.map((m) => moduleCard({ module: toModuleCard(m), onNavigate: (route) => api.navigate(route) }))
+              ? data.modules.map((m) => {
+                const card = toModuleCard(m);
+                return moduleCard({ module: card, onNavigate: () => moduleCardNavigate(card) });
+              })
               : emptyState({ title: t("empty.no_modules_title"), message: t("empty.no_modules_message") })
           ),
           onRetry: () => api.retryDomain("overview"),
@@ -924,11 +1054,36 @@
 
     function renderCanonicalConfiguration() {
       const c = state.canonical;
+      const overview = state.domains.overview;
       if (!canonicalClient) return noteBox(t("canonical.unavailable"), "neutral");
+      if (overview.status === "loaded" && !isHeatingConfigured(overview.data)) {
+        return el("div", { class: "canonical-configuration" },
+          noteBox(t("canonical.not_configured_lead"), "neutral"),
+          el("div", { class: "section__actions" },
+            el("button", { class: "btn btn--primary", onclick: () => api.openSetupModule("heating") }, t("action.configure_heating"))
+          )
+        );
+      }
+      if (c.status === "unconfigured") {
+        return el("div", { class: "canonical-configuration" },
+          noteBox(t("canonical.not_configured_lead"), "neutral"),
+          el("div", { class: "section__actions" },
+            el("button", { class: "btn btn--primary", onclick: () => api.openSetupModule("heating") }, t("action.configure_heating"))
+          )
+        );
+      }
       if ((c.status === "idle" || c.status === "loading") && !c.active) {
         return statePanel({ status: c.status, loadingLabel: t("canonical.loading") });
       }
       if (c.status === "error" && !c.active) {
+        if (isCanonicalAuthorityConflict(c.error)) {
+          return el("div", { class: "canonical-configuration" },
+            noteBox(t("canonical.not_configured_lead"), "neutral"),
+            el("div", { class: "section__actions" },
+              el("button", { class: "btn btn--primary", onclick: () => api.openSetupModule("heating") }, t("action.configure_heating"))
+            )
+          );
+        }
         return statePanel({
           status: "error", error: c.error, errorTitle: t("canonical.load_failed"),
           onRetry: () => { c.status = "idle"; c.error = null; render(); },
@@ -1009,6 +1164,27 @@
 
     function renderWaterSafety() {
       const pending = state.waterActionPending;
+      const overview = state.domains.overview;
+      if (overview.status === "loaded") {
+        const waterModule = findModule(overview.data.modules, "water_safety");
+        if (moduleDisplayState(waterModule) === "not_configured") {
+          return el("div", { class: "view" },
+            pageHeader({
+              title: t("navigation.water_safety"),
+              subtitle: t("water.subtitle"),
+            }),
+            emptyState({
+              title: t("water.not_configured_title"),
+              message: t("water.not_configured_message"),
+              action: el("button", {
+                class: "btn btn--primary",
+                onclick: () => api.openSetupModule("water_safety"),
+              }, t("action.configure_water")),
+            })
+          );
+        }
+      }
+      const overviewData = overview.status === "loaded" ? overview.data : null;
       return el("div", { class: "view" },
         pageHeader({
           title: t("navigation.water_safety"),
@@ -1023,7 +1199,7 @@
               ? "warning"
               : data.assessment_status === "CONFIRMED" && data.state === "OK"
                 ? "positive"
-                : data.state === "DISABLED"
+                : data.state === "DISABLED" && data.processing_enabled === false
                   ? "neutral"
                   : "negative";
             const actions = [];
@@ -1050,7 +1226,7 @@
             }
             return el("div", { class: "water-current" },
               el("div", { class: "section__badges" },
-                badge(waterPrimaryStateLabel(data.state, data.assessment_status), assessmentTone),
+                badge(waterPrimaryStateLabel(data.state, data.assessment_status, overviewData), assessmentTone),
                 badge(stateLabel(data.assessment_status, WATER_ASSESSMENT_META), assessmentTone)
               ),
               el("div", { class: "metric-grid" },
@@ -1091,12 +1267,17 @@
 
     function renderHeating() {
       const setup = state.domains.setup;
+      const ov = state.domains.overview;
 
       const badges = [];
-      if (setup.status === "loaded" && setup.data) badges.push(stateBadge(READINESS_META, setup.data.readiness.state));
+      if (ov.status === "loaded" && isHeatingConfigured(ov.data) && setup.status === "loaded" && setup.data) {
+        badges.push(stateBadge(READINESS_META, setup.data.readiness.state));
+      }
 
       const headerActions = [];
-      if (setup.status === "loaded" && readinessNeedsAction(setup.data)) headerActions.push(continueSetupButton());
+      if (ov.status === "loaded" && setup.status === "loaded" && readinessNeedsAction(ov.data, setup.data)) {
+        headerActions.push(continueSetupButton());
+      }
 
       return el("div", { class: "view" },
         pageHeader({
@@ -1259,26 +1440,33 @@
 
     function renderSettings() {
       const setup = state.domains.setup;
-      const readiness = (setup.status === "loaded" && setup.data) ? setup.data.readiness : null;
+      const overview = state.domains.overview;
+      const modules = overview.status === "loaded" ? overview.data.modules : [];
+      const heatingModule = findModule(modules, "heating");
+      const waterModule = findModule(modules, "water_safety");
+      const setupData = setup.status === "loaded" ? setup.data : null;
+      const overviewData = overview.status === "loaded" ? overview.data : null;
 
       const rows = [
         {
           id: "heating-config",
           label: t("settings.heating_config"),
           description: t("settings.heating_config_desc"),
-          state: readiness ? readiness.state : "unknown",
-          action: { label: t("canonical.edit"), callback: () => api.editCanonical() },
+          state: overviewData ? heatingSettingsState(overviewData, setupData) : "unknown",
+          action: overviewData && isHeatingConfigured(overviewData)
+            ? { label: t("canonical.edit"), callback: () => api.editCanonical() }
+            : { label: t("action.configure_heating"), callback: () => api.openSetupModule("heating") },
           order: 1,
           hidden: false,
         },
         {
-          id: "diagnostics",
-          label: t("settings.diagnostics_level"),
-          description: t("settings.diagnostics_level_desc"),
-          state: "ok",
-          action: { label: t("action.open_diagnostics"), route: "diagnostics" },
+          id: "water-config",
+          label: t("settings.water_safety_config"),
+          description: t("settings.water_safety_config_desc"),
+          state: moduleDisplayState(waterModule),
+          action: { label: t("action.configure_water"), callback: () => api.openSetupModule("water_safety") },
           order: 2,
-          hidden: false,
+          hidden: !waterModule,
         },
         {
           id: "notifications",
@@ -1338,10 +1526,11 @@
         ),
         s.id === "language"
           ? languageControl()
-          : s.action
+            : s.action
             ? el("button", {
                 class: "btn btn--secondary btn--sm",
-                disabled: s.id === "heating-config" && (!state.canonical.active || state.canonical.editing),
+                disabled: s.id === "heating-config" && overviewData && isHeatingConfigured(overviewData)
+                  && (!state.canonical.active || state.canonical.editing),
                 onclick: () => s.action.callback ? s.action.callback() : api.navigate(s.action.route),
               }, s.action.label)
             : el("span", { class: "hint" }, t("settings.placeholder"))
@@ -1352,17 +1541,81 @@
           title: t("navigation.settings"),
           subtitle: t("settings.subtitle"),
         }),
-        section({
-          title: t("canonical.title"),
-          lead: t("canonical.lead"),
-          children: renderCanonicalConfiguration(),
-        }),
+        overviewData && isHeatingConfigured(overviewData)
+          ? section({
+              title: t("canonical.title"),
+              lead: t("canonical.lead"),
+              children: renderCanonicalConfiguration(),
+            })
+          : null,
         section({ title: t("settings.overview"), children: el("div", { class: "settings-list" }, rendered) }),
         noteBox(t("settings.note"), "info")
       );
     }
 
-    function renderSetup() {
+    function setupHubCard({ moduleId, label, description, displayState, onSelect }) {
+      return el("article", { class: "module-card setup-hub-card", "data-module": moduleId },
+        el("div", { class: "module-card__head" },
+          el("h3", { class: "module-card__title" }, label),
+          statusBadge(displayState)
+        ),
+        el("p", { class: "module-card__summary" }, description),
+        el("div", { class: "module-card__actions" },
+          el("button", { class: "btn btn--primary btn--sm", onclick: onSelect }, t("setup.open_module"))
+        )
+      );
+    }
+
+    function renderSetupModuleHeader(moduleId) {
+      const title = moduleId === "heating" ? t("navigation.heating") : t("navigation.water_safety");
+      return el("div", { class: "view" },
+        pageHeader({
+          title,
+          subtitle: t("setup.module_subtitle"),
+          actions: [el("button", { class: "btn btn--secondary", onclick: () => api.backToSetupHub() }, t("setup.back_to_hub"))],
+        }),
+        noteBox(t("setup.module_wizard_below"), "info")
+      );
+    }
+
+    function renderSetupHub() {
+      const overview = state.domains.overview;
+      const modules = overview.status === "loaded" ? overview.data.modules : [];
+      const heatingModule = findModule(modules, "heating");
+      const waterModule = findModule(modules, "water_safety");
+      return el("div", { class: "view" },
+        pageHeader({
+          title: t("setup.hub_title"),
+          subtitle: t("setup.hub_subtitle"),
+        }),
+        el("div", { class: "module-grid" },
+          setupHubCard({
+            moduleId: "heating",
+            label: t("navigation.heating"),
+            description: t("settings.heating_config_desc"),
+            displayState: moduleDisplayState(heatingModule),
+            onSelect: () => api.openSetupModule("heating"),
+          }),
+          waterModule ? setupHubCard({
+            moduleId: "water_safety",
+            label: t("navigation.water_safety"),
+            description: t("settings.water_safety_config_desc"),
+            displayState: moduleDisplayState(waterModule),
+            onSelect: () => api.openSetupModule("water_safety"),
+          }) : null,
+          setupHubCard({
+            moduleId: "notifications",
+            label: t("settings.notifications"),
+            description: t("settings.notifications_desc"),
+            displayState: "not_configured",
+            onSelect: () => api.navigate("settings"),
+          })
+        ),
+        noteBox(t("setup.hub_note"), "info")
+      );
+    }
+
+    function renderConfiguredHeatingSetup() {
       const setup = state.domains.setup;
 
       const badges = [];
@@ -1435,6 +1688,16 @@
 
         noteBox(t("setup.readonly_note"), "info")
       );
+    }
+
+    function renderSetup() {
+      if (!state.setupModule) return renderSetupHub();
+      if (state.setupModule === "water_safety") return renderSetupModuleHeader("water_safety");
+      const overview = state.domains.overview;
+      if (overview.status === "loaded" && isHeatingConfigured(overview.data)) {
+        return renderConfiguredHeatingSetup();
+      }
+      return renderSetupModuleHeader("heating");
     }
 
     render();
@@ -1517,6 +1780,25 @@
         })
       : null;
 
+    const waterSetupClient = setupWizardClient && CA_API.createSetupWriteClient
+      ? CA_API.createSetupWriteClient({
+          connection: env.connection,
+          configEntryId: env.configEntryId,
+          moduleKey: "water_safety",
+        })
+      : null;
+
+    const waterWizard = waterSetupClient && global.CA_WATER_WIZARD
+      && typeof global.CA_WATER_WIZARD.createSetupWaterWizard === "function"
+      ? global.CA_WATER_WIZARD.createSetupWaterWizard({
+          client: waterSetupClient,
+          configEntryId: env.configEntryId,
+          actor: `home_assistant:${env.userId || "admin"}`,
+          root,
+          storage: global.localStorage || null,
+        })
+      : null;
+
     const app = createApp({
       mode,
       dataSource,
@@ -1524,6 +1806,7 @@
       navRoot: _findById(root, "app-nav"),
       viewRoot: _findById(root, "view-root"),
       wizardRoot: _findById(root, "wizard-view"),
+      waterWizardRoot: _findById(root, "water-wizard-view"),
       topbarStatusRoot: _findById(root, "topbar-status"),
       modeRoot: _findById(root, "app-mode"),
       renderRoot: root,
@@ -1538,6 +1821,7 @@
     });
 
     if (setupWizard) app.setupWizard = setupWizard;
+    if (waterWizard) app.waterSetupWizard = waterWizard;
 
     // Hash routing: deep links + back/forward (re-entrant, see above).
     _setupHashRouting(app);
@@ -1579,6 +1863,12 @@
     CANONICAL_HEATING_FIELDS,
     canonicalHeatingValues,
     canonicalScopesWithHeatingValues,
+    findModule,
+    moduleDisplayState,
+    isHeatingConfigured,
+    isWaterSafetyConfigured,
+    isCanonicalAuthorityConflict,
+    heatingSettingsState,
     createApp,
     bootstrap,
   };

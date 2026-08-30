@@ -845,7 +845,9 @@
         const entry = state.entryState;
         const readiness = entry && entry.status === "loaded" ? entry.readiness : null;
         let entryNote = null;
-        if (readiness) {
+        if (readiness && entry.heatingConfigured === false) {
+          entryNote = noteBox(t("wizard.entry_services_ready_unconfigured"), "neutral");
+        } else if (readiness && entry.heatingConfigured) {
           const messageKey = {
             ready: "wizard.entry_ready",
             incomplete: "wizard.entry_incomplete",

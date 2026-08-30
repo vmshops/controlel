@@ -103,6 +103,13 @@ function _buildShellDOM() {
         <section id="step-panel" class="step-panel" aria-live="polite"></section>
       </div>
 
+      <div id="water-wizard-view" class="app__content app__content--wizard" hidden>
+        <div id="water-draft-status" class="draft-status" hidden></div>
+        <footer id="water-wizard-footer" class="wizard-footer"></footer>
+        <nav id="water-stepper" class="stepper" aria-label="Water Safety setup steps"></nav>
+        <section id="water-step-panel" class="step-panel" aria-live="polite"></section>
+      </div>
+
     </div>
   `;
   return app;
