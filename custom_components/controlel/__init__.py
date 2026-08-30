@@ -93,11 +93,24 @@ async def async_setup_entry(
 ) -> bool:
     """Set up one Controlel runtime from a config entry."""
     if not entry.data and not entry.options and staged_candidate_runtime(hass, entry.entry_id) is None:
+        from .frontend_api import create_unconfigured_frontend_api_provider_v1
+        from .frontend_api_websocket import register_frontend_api_provider_v1
         from .panel import async_register_controlel_panel
         from .setup_backend import async_get_setup_backend
 
         await async_get_setup_backend(hass, entry)
-        entry.runtime_data = ControlelEntryRuntime(host=None, config=None, water_safety_host=None)
+        frontend_api_unregister = register_frontend_api_provider_v1(
+            hass,
+            entry.entry_id,
+            create_unconfigured_frontend_api_provider_v1(),
+        )
+        entry.runtime_data = ControlelEntryRuntime(
+            host=None,
+            config=None,
+            water_safety_host=None,
+            frontend_api_unregister=frontend_api_unregister,
+        )
+        entry.async_on_unload(frontend_api_unregister)
         entry.async_on_unload(entry.add_update_listener(_async_update_listener))
         try:
             await async_register_controlel_panel(hass, entry.entry_id)

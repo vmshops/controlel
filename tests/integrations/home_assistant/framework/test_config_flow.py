@@ -152,6 +152,7 @@ async def test_greenfield_config_entry_is_empty_v3_shell_and_links_to_configure(
 
     result = await hass.config_entries.flow.async_configure(initial["flow_id"], {})
     assert result["type"] is data_entry_flow.FlowResultType.CREATE_ENTRY
+    assert result["title"] == "Controlel"
     assert result["data"] == {}
     assert result["options"] == {}
     assert result["next_flow"][0] is config_entries.FlowType.OPTIONS_FLOW

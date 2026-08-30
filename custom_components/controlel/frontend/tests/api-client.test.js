@@ -289,11 +289,11 @@ test("successful one-shot results resolve without any subscription callback", as
 });
 
 test("client rejects with a typed error on a failed request", async () => {
-  const connection = fakeConnection({ responses: { setup: { __error: "config entry is not loaded" } } });
+  const connection = fakeConnection({ responses: { setup: { __error: "unavailable for this config entry" } } });
   const client = clientFor(connection);
   await assert.rejects(client.setup(), (err) => {
     assert.equal(err.kind, "error");
-    assert.match(err.message, /config entry is not loaded/);
+    assert.match(err.message, /unavailable for this config entry/);
     return true;
   });
 });

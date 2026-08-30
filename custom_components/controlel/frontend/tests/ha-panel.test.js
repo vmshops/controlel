@@ -57,6 +57,13 @@ async function flushLifecycle() {
   await new Promise((resolve) => setImmediate(resolve));
 }
 
+test("custom panel mounts the shell before assets finish loading", () => {
+  const panel = new Panel();
+  panel.connectedCallback();
+  const app = panel.shadowRoot.getElementById("app");
+  assert.ok(app, "shell root is mounted before async assets resolve");
+});
+
 test("custom panel forwards HA lifecycle properties and scopes CSS to its shadow root", async () => {
   const panel = new Panel();
   loadShadowStyles(panel);

@@ -397,11 +397,11 @@ test("a view shows loaded data after the request resolves", async () => {
 });
 
 test("a failed request shows an error state with a retry action (no mock fallback)", async () => {
-  const { app, viewRoot } = buildApp({ responses: { overview: { __error: "config entry is not loaded" } } });
+  const { app, viewRoot } = buildApp({ responses: { overview: { __error: "unavailable for this config entry" } } });
   app.navigate("overview");
   await settle(app);
   assert.ok(viewRoot.textContent.includes("Unavailable"), "error state shown");
-  assert.ok(viewRoot.textContent.includes("config entry is not loaded"), "backend error surfaced");
+  assert.ok(viewRoot.textContent.includes("unavailable for this config entry"), "backend error surfaced");
   assert.ok(viewRoot.findButton("Retry"), "retry action offered");
   // The mock zone name must NOT appear as a silent fallback.
   assert.ok(!viewRoot.textContent.includes("Living Room"), "no mock data substituted");

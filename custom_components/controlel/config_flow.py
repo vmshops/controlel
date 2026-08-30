@@ -159,7 +159,7 @@ class ControlelConfigFlow(ConfigFlow, domain=DOMAIN):
         self._abort_if_unique_id_configured()
         if user_input is not None:
             return self.async_create_entry(
-                title="Controlel heating",
+                title="Controlel",
                 data={},
                 options={},
             )

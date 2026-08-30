@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime
-from importlib import metadata
 from typing import Any, Protocol
 
 import voluptuous as vol
 from homeassistant.components import websocket_api
 from pydantic import ValidationError
 
+from controlel import __version__ as CORE_VERSION
 from controlel.application.configuration import CanonicalDraftRevisionConflict
 from controlel.application.configuration.heating_setup_adapter import (
     SOURCE_DISABLE_TARGET_ROLE,
@@ -428,7 +428,7 @@ async def _get_discovery(service: SetupHostService, msg: dict[str, Any]) -> obje
 
 async def _get_defaults(_service: SetupHostService, _msg: dict[str, Any]) -> object:
     return {
-        "core_version": metadata.version("controlel"),
+        "core_version": CORE_VERSION,
         "integration_version": INTEGRATION_VERSION,
         "settings": canonical_heating_setup_defaults(),
         "simple_switch": {

@@ -388,12 +388,12 @@ test("unknown/null values render as 'Neznámé' in Czech", async () => {
 test("a failed request in Czech surfaces the backend error (no mock fallback)", async () => {
   await withLanguage("cs", async () => {
     const { app, viewRoot } = buildApp({
-      responses: { overview: { __error: "config entry is not loaded" } },
+      responses: { overview: { __error: "unavailable for this config entry" } },
     });
     app.navigate("overview");
     await settle(app);
     assert.ok(viewRoot.textContent.includes("Nedostupné"), "Czech error state");
-    assert.ok(viewRoot.textContent.includes("config entry is not loaded"), "backend error surfaced");
+    assert.ok(viewRoot.textContent.includes("unavailable for this config entry"), "backend error surfaced");
     assert.ok(viewRoot.findButton("Zkusit znovu"), "Czech retry action");
     assert.ok(!viewRoot.textContent.includes("Living Room"), "no mock data substituted");
   });

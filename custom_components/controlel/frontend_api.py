@@ -70,6 +70,39 @@ class FrontendApiHostV1(Protocol):
 
 SetupEvidenceSource = Callable[[], SetupEvidenceV1]
 
+_UNCONFIGURED_OPERATING_MODE = "UNCONFIGURED"
+_HEATING_NOT_CONFIGURED = "heating_not_configured"
+
+
+@dataclass(frozen=True, slots=True)
+class UnconfiguredFrontendApiEvidenceSourceV1:
+    """Passive evidence for a loaded but unconfigured Controlel config entry."""
+
+    def snapshot(self) -> FrontendApiEvidenceV1:
+        modules = [
+            ModuleEvidenceV1(
+                module_id="heating",
+                status="inactive",
+                reason=_HEATING_NOT_CONFIGURED,
+            ),
+        ]
+        if water_safety_core_available():
+            modules.append(
+                ModuleEvidenceV1(
+                    module_id="water_safety",
+                    status="inactive",
+                    reason="water_safety_not_configured",
+                ),
+            )
+        return FrontendApiEvidenceV1(
+            system=SystemEvidenceV1(
+                status="stopped",
+                operating_mode=_UNCONFIGURED_OPERATING_MODE,
+            ),
+            modules=tuple(modules),
+            setup=SetupEvidenceV1(state="ready", reason_code=None),
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class HomeAssistantFrontendApiHostBridge:
@@ -182,6 +215,15 @@ class HomeAssistantFrontendApiEvidenceSourceV1:
         if water_safety_core_available() and water_safety is not None and hasattr(evidence, "water_safety"):
             return replace(evidence, water_safety=water_safety)
         return evidence
+
+
+def create_unconfigured_frontend_api_provider_v1() -> FrontendApiProviderV1:
+    """Compose a passive provider for a fresh, unconfigured Controlel entry."""
+
+    return FrontendApiProviderV1(
+        source=UnconfiguredFrontendApiEvidenceSourceV1(),
+        clock=SystemClock(),
+    )
 
 
 def create_frontend_api_provider_v1(

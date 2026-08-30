@@ -152,7 +152,7 @@ async def _send(
         connection.send_error(
             msg["id"],
             websocket_api.ERR_NOT_FOUND,
-            "Controlel Frontend API v1 config entry is not loaded",
+            "Controlel Frontend API v1 is unavailable for this config entry",
         )
         return
     response = getattr(provider, operation)()

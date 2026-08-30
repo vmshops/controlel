@@ -65,6 +65,20 @@ def _static_path_registered(hass) -> bool:
 
 
 @pytest.mark.asyncio
+async def test_empty_entry_registers_panel_without_heating_runtime(hass, http_component) -> None:
+    """A fresh empty shell entry registers the sidebar panel immediately."""
+    entry = MockConfigEntry(domain=DOMAIN, title="Controlel", data={}, options={})
+    entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(entry.entry_id) is True
+    assert entry.runtime_data.host is None
+    assert frontend.async_panel_exists(hass, FRONTEND_URL_PATH) is True
+    panel = _panel(hass)
+    assert panel is not None
+    assert panel.config["config_entry_id"] == entry.entry_id
+
+
+@pytest.mark.asyncio
 async def test_panel_registered_with_correct_module_url_and_config(hass, entry_data, http_component) -> None:
     """Setting up a config entry registers the Controlel sidebar panel."""
     entry = MockConfigEntry(domain=DOMAIN, title="Living room", data=entry_data)

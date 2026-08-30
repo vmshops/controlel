@@ -176,6 +176,16 @@ class ControlelPanel extends HTMLElement {
 
   connectedCallback() {
     const token = ++this._connectionToken;
+    this._ensureStyle();
+    if (!this.shadowRoot.getElementById("app")) {
+      const shell = _buildShellDOM();
+      const viewRoot = shell.querySelector("#view-root");
+      if (viewRoot) {
+        viewRoot.textContent = "Loading…";
+      }
+      const children = [this._styleLink, shell].filter(Boolean);
+      this.shadowRoot.replaceChildren(...children);
+    }
     Promise.all([_ensureAssets(), this._ensureStyle()])
       .then(() => {
         if (token !== this._connectionToken) return;
