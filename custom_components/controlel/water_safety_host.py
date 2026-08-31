@@ -362,7 +362,7 @@ def build_water_safety_host(
         sensor_id=WaterSafetySetupPayload.model_validate_json(canonical_json(effective.module_payload)).sensor_id,
         binding=sensor_binding.reference,
     )
-    output_port = HomeAssistantWaterSafetyOutputPort(hass, bridge)
+    output_port = HomeAssistantWaterSafetyOutputPort(hass, bridge, logger=logger)
     runtime = WaterSafetyRuntime(
         effective,
         output_port,

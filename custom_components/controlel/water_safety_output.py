@@ -1,8 +1,11 @@
 """Home Assistant adapter for truthful Water Safety output requests."""
 
+import logging
 from collections.abc import Coroutine
 from datetime import UTC, datetime
 from typing import Any, Protocol
+
+from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
 
 from controlel.application.water_safety.model import (
     WaterOutputAction,
@@ -51,17 +54,37 @@ class ConfigLike(Protocol):
     language: str
 
 
+class StateLike(Protocol):
+    state: str
+
+
+class StateMachineLike(Protocol):
+    def get(self, entity_id: str) -> StateLike | None: ...
+
+
 class HomeAssistantLike(Protocol):
     services: ServiceRegistryLike
     config: ConfigLike
+    states: StateMachineLike
+
+
+class SirenUnavailableError(RuntimeError):
+    """The configured siren has no currently usable HA state."""
 
 
 class HomeAssistantWaterSafetyOutputPort:
     """Dispatch notification and siren requests; physical state remains unknown."""
 
-    def __init__(self, hass: HomeAssistantLike, bridge: HomeAssistantEventLoopBridge) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistantLike,
+        bridge: HomeAssistantEventLoopBridge,
+        *,
+        logger: logging.Logger | None = None,
+    ) -> None:
         self._hass = hass
         self._bridge = bridge
+        self._logger = logger or logging.getLogger(__name__)
 
     def request(self, command: WaterOutputCommand) -> WaterOutputCommandResult:
         try:
@@ -69,10 +92,29 @@ class HomeAssistantWaterSafetyOutputPort:
                 self._bridge.run_coroutine(lambda: self._async_notify(command))
             else:
                 self._bridge.run_coroutine(lambda: self._async_siren(command))
-        except Exception:
+        except SirenUnavailableError:
+            failure_code = "home_assistant_siren_unavailable"
+            self._logger.warning(
+                "Water Safety siren request was not sent because the target is unavailable (role=%s, action=%s)",
+                command.target_role,
+                command.action.value,
+            )
             return WaterOutputCommandResult(
                 command_id=command.command_id,
-                occurred_at=command.requested_at,
+                occurred_at=datetime.now(UTC),
+                outcome=WaterOutputOutcome.FAILED,
+                failure_code=failure_code,
+            )
+        except Exception:
+            self._logger.exception(
+                "Water Safety output service request failed (kind=%s, role=%s, action=%s)",
+                command.output_kind.value,
+                command.target_role,
+                command.action.value,
+            )
+            return WaterOutputCommandResult(
+                command_id=command.command_id,
+                occurred_at=datetime.now(UTC),
                 outcome=WaterOutputOutcome.FAILED,
                 failure_code="home_assistant_service_call_failed",
             )
@@ -102,6 +144,9 @@ class HomeAssistantWaterSafetyOutputPort:
         entity_id = command.target.current_locator
         if entity_id is None or "." not in entity_id:
             raise ValueError("siren target requires an entity locator")
+        state = self._hass.states.get(entity_id)
+        if state is None or state.state in {STATE_UNAVAILABLE, STATE_UNKNOWN}:
+            raise SirenUnavailableError(f"siren target is unavailable: {entity_id}")
         domain = entity_id.split(".", 1)[0]
         if domain == "switch":
             service = "turn_on" if command.action is WaterOutputAction.REQUEST_SIREN_ON else "turn_off"

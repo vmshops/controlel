@@ -21,6 +21,7 @@ from controlel.application.water_safety import (
     WaterOutputAction,
     WaterOutputCommand,
     WaterOutputCommandResult,
+    WaterOutputKind,
     WaterOutputOutcome,
     WaterSafetyEvent,
     WaterSafetyEventCode,
@@ -401,6 +402,36 @@ def test_disable_while_wet_attempts_every_cleanup_and_records_partial_failure() 
     assert dict(disabled_event.details) == {"cleanup_failed": 1, "cleanup_requested": 2}
     assert len(output.commands) == command_count + 2
     assert all(owned.last_requested_action is WaterOutputAction.REQUEST_SIREN_OFF for owned in runtime.owned_outputs())
+
+
+def test_wet_partial_siren_failure_does_not_block_other_sirens_or_notifications() -> None:
+    output = RecordingOutput(failing={(SIREN_CELLAR, WaterOutputAction.REQUEST_SIREN_ON)})
+    runtime = _runtime(output, effective=_effective(siren_roles=(SIREN_HALL, SIREN_CELLAR)))
+    runtime.start(_observation(MoistureCondition.DRY, T0), started_at=T0)
+
+    wet = runtime.observe(_observation(MoistureCondition.WET, T0 + timedelta(seconds=1)))
+    siren_commands = [command for command in output.commands if command.output_kind is WaterOutputKind.SIREN]
+    notification_commands = [
+        command for command in output.commands if command.output_kind is WaterOutputKind.NOTIFICATION
+    ]
+
+    assert wet.state is WaterSafetyState.WET
+    assert len(siren_commands) == 2
+    assert len(notification_commands) == 2
+    assert {result.outcome for result in wet.output_results} == {
+        WaterOutputOutcome.ACCEPTED,
+        WaterOutputOutcome.FAILED,
+    }
+    assert all(
+        dict(event.details) == {"physical_state_confirmed": False}
+        for event in wet.events
+        if event.code is WaterSafetyEventCode.OUTPUT_REQUESTED
+    )
+
+    command_count = len(output.commands)
+    repeated = runtime.observe(_observation(MoistureCondition.WET, T0 + timedelta(minutes=5)))
+    assert repeated.output_results == ()
+    assert len(output.commands) == command_count
 
 
 def test_reenable_while_still_wet_reuses_incident_and_reasserts_unsilenced_siren() -> None:
