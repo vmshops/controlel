@@ -5,6 +5,10 @@ The maintained architecture description is
 changes must also follow the boundary and truthfulness rules in the repository
 root AGENTS.md (see the file at the repository root).
 
+UI and configuration layer separation (Observability UI vs HA Configure vs
+future Configuration UI and Wizard) is documented in
+[architecture/UILayers.md](architecture/UILayers.md).
+
 The allowed internal dependency direction is:
 
 ```text

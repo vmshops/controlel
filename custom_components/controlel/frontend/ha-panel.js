@@ -8,9 +8,9 @@
  * existing scripts in their original order.
  *
  * Truthfulness / safety (see AGENTS.md):
- *   - Setup writes are limited to drafts and validation and use the existing
- *     authenticated Home Assistant WebSocket connection (`this.hass.connection`).
- *   - No custom authentication, transport, or control actions are created.
+ *   - Layer 2 observability UI: read-only Frontend API v1 projections.
+ *   - Configuration writes belong in native Home Assistant Configure.
+ *   - Setup wizard scripts remain for experimental/developer access only.
  *   - If no config entry id is available, the shell renders its truthful
  *     "unavailable" state; it never falls back to mock data silently.
  *
@@ -84,7 +84,7 @@ function _buildShellDOM() {
       <div id="app-nav" class="app__nav"></div>
       <div class="app__sidebar-footer">
         <p id="app-mode" class="app__mode">Frontend API v1</p>
-        <p data-i18n="panel.readonly_footer">Setup drafts only · no activation or runtime control</p>
+        <p data-i18n="panel.readonly_footer">Observability UI · read-only · configure in Home Assistant</p>
       </div>
     </aside>
 

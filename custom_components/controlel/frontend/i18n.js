@@ -64,6 +64,8 @@
         attention: "Needs attention",
         disabled: "Disabled",
         not_configured: "Not configured",
+        draft_incomplete: "Draft incomplete",
+        draft_ready: "Draft ready",
         ok: "OK",
         idle: "Idle",
         unknown: "Unknown",
@@ -90,6 +92,9 @@
         continue_setup: "Continue setup",
         configure_heating: "Configure Heating",
         configure_water: "Configure Water Safety",
+        configure_in_ha: "Configure in Home Assistant",
+        configure_in_ha_lead:
+          "Configuration changes are made in Home Assistant: Settings → Devices & services → Controlel → Configure.",
         open_heating: "Open Heating",
         open_water_safety: "Open Water Safety",
         open_diagnostics: "Open Diagnostics",
@@ -112,7 +117,7 @@
         subtitle_api: "Frontend API v1",
         subtitle_generated: "Frontend API v1 · generated {time}",
         modules_lead: "Configured Controlel modules and their current state.",
-        readonly_hint: "Read-only: actions only navigate; no backend writes are made.",
+        readonly_hint: "Read-only observability: no configuration writes or runtime control from this panel.",
       },
       section: {
         modules: "Modules",
@@ -132,7 +137,7 @@
       },
       modules: {
         subtitle: "Each module is an independent capability.",
-        note: "Only modules reported by the backend are shown. Modules that are not configured are not listed.",
+        note: "Heating and Water Safety are listed with their current configured state. Future modules follow the same structure.",
       },
       heating: {
         subtitle: "Zone demand, heat source permission and reported state.",
@@ -166,10 +171,10 @@
       },
       canonical: {
         title: "Active Heating configuration",
-        lead: "Canonical configuration v3 is the shared authority used by Heating, the Setup Wizard and Home Assistant Configure.",
+        lead: "Active canonical configuration v3 summary (read-only). Edits belong in Home Assistant Configure.",
         loading: "Loading the active canonical configuration…",
         load_failed: "Canonical configuration unavailable",
-        not_configured_lead: "Heating has not been configured yet. Use Setup to create and activate a canonical v3 configuration.",
+        not_configured_lead: "Heating has not been configured yet. Configure it in Home Assistant.",
         unavailable: "Canonical editing is unavailable outside an authenticated Home Assistant connection.",
         single_zone_only: "This surface supports exactly one canonical Heating zone and one heat source.",
         active_revision: "Active revision",
@@ -196,6 +201,8 @@
         working: "Canonical lifecycle operation in progress: {operation}",
         noneditable_note:
           "Stable Controlel identities, runtime/operational evidence, and deferred physical-operation fields are shown only through their projections and are not editable here.",
+        readonly_lead:
+          "This is a read-only summary. To change bindings or values, use Home Assistant Configure.",
       },
       water: {
         subtitle: "Moisture sensor assessment, incidents and configured outputs.",
@@ -266,7 +273,7 @@
         retained_total: "Retained / total",
       },
       settings: {
-        subtitle: "Canonical-v3 setup lifecycle — runtime device control is not available here.",
+        subtitle: "Read-only module and UI preferences. Configuration edits belong in Home Assistant.",
         overview: "Settings overview",
         heating_config: "Heating configuration",
         heating_config_desc: "Zone, sensor and heat source bindings for the heating module.",
@@ -282,7 +289,8 @@
         advanced_desc: "Advanced options and prototype diagnostics (placeholder).",
         placeholder: "Placeholder",
         note:
-          "Module rows reflect configured state, not setup-backend readiness alone. Placeholder rows remain available for future settings.",
+          "Module rows reflect configured state, not setup-backend readiness alone. Configuration changes are made in Home Assistant Configure.",
+        experimental_setup: "Experimental Setup Wizard",
       },
       language: {
         auto: "Auto",
@@ -293,6 +301,10 @@
         hub_title: "Setup",
         hub_subtitle: "Choose a module or area to configure. Each module keeps its own setup lifecycle.",
         hub_note: "Setup writes remain draft-only until you explicitly activate a canonical revision.",
+        experimental_warning:
+          "Experimental developer surface. The guided Setup Wizard is not part of the normal Controlel panel. Prefer Home Assistant Configure for production configuration.",
+        experimental_note:
+          "The wizard below can create drafts and activation candidates. Use only for development; production configuration belongs in Home Assistant Configure.",
         back_to_hub: "Back to Setup",
         open_module: "Open setup",
         module_subtitle: "Use the guided setup flow below for this module.",
@@ -351,7 +363,7 @@
       },
       panel: {
         tagline: "Heating control platform",
-        readonly_footer: "Canonical v3 setup · explicit activation · no device control",
+        readonly_footer: "Observability UI · read-only · configure in Home Assistant",
         overall_status: "Overall status",
         load_error: "Controlel panel failed to load",
         wizard_demo_label:
@@ -616,6 +628,8 @@
         attention: "Vyžaduje pozornost",
         disabled: "Vypnuto",
         not_configured: "Není nakonfigurováno",
+        draft_incomplete: "Koncept nekompletní",
+        draft_ready: "Koncept připraven",
         ok: "OK",
         idle: "Nečinné",
         unknown: "Neznámé",
@@ -642,6 +656,9 @@
         continue_setup: "Pokračovat v nastavení",
         configure_heating: "Nakonfigurovat topení",
         configure_water: "Nakonfigurovat ochranu proti vodě",
+        configure_in_ha: "Nakonfigurovat v Home Assistant",
+        configure_in_ha_lead:
+          "Změny konfigurace provádějte v Home Assistant: Nastavení → Zařízení a služby → Controlel → Konfigurovat.",
         open_heating: "Otevřít topení",
         open_water_safety: "Otevřít ochranu proti vodě",
         open_diagnostics: "Otevřít diagnostiku",
@@ -664,7 +681,7 @@
         subtitle_api: "Frontend API v1",
         subtitle_generated: "Frontend API v1 · generováno {time}",
         modules_lead: "Nakonfigurované moduly Controlel a jejich aktuální stav.",
-        readonly_hint: "Pouze pro čtení: akce pouze přepínají pohledy; do backendu se nic nezapisuje.",
+        readonly_hint: "Pouze pro sledování: z tohoto panelu se neprovádí zápis konfigurace ani řízení za běhu.",
       },
       section: {
         modules: "Moduly",
@@ -684,7 +701,7 @@
       },
       modules: {
         subtitle: "Každý modul je nezávislá funkčnost.",
-        note: "Zobrazují se pouze moduly hlášené backendem. Nekonefigurované moduly se nezobrazují.",
+        note: "Topení a ochrana proti vodě jsou uvedeny s aktuálním stavem konfigurace. Budoucí moduly budou mít stejnou strukturu.",
       },
       heating: {
         subtitle: "Potřeba topení v zónách, oprávnění zdroje tepla a hlášený stav.",
@@ -718,10 +735,10 @@
       },
       canonical: {
         title: "Aktivní konfigurace topení",
-        lead: "Kanonická konfigurace v3 je společnou autoritou pro Topení, Průvodce nastavením a konfiguraci v Home Assistant.",
+        lead: "Souhrn aktivní kanonické konfigurace v3 (pouze pro čtení). Úpravy patří do konfigurace Home Assistant.",
         loading: "Načítání aktivní kanonické konfigurace…",
         load_failed: "Kanonická konfigurace není dostupná",
-        not_configured_lead: "Topení zatím nebylo nakonfigurováno. Použijte Nastavení a vytvořte a aktivujte kanonickou konfiguraci v3.",
+        not_configured_lead: "Topení zatím nebylo nakonfigurováno. Nakonfigurujte ho v Home Assistant.",
         unavailable: "Kanonické úpravy jsou dostupné pouze přes ověřené připojení Home Assistant.",
         single_zone_only: "Tato obrazovka podporuje právě jednu kanonickou zónu topení a jeden zdroj tepla.",
         active_revision: "Aktivní revize",
@@ -748,6 +765,8 @@
         working: "Probíhá operace kanonického životního cyklu: {operation}",
         noneditable_note:
           "Stabilní identity Controlel, provozní údaje a odložená pole fyzického provozu se zde zobrazují pouze jako projekce a nelze je upravovat.",
+        readonly_lead:
+          "Toto je souhrn pouze pro čtení. Pro změnu vazeb nebo hodnot použijte konfiguraci Home Assistant.",
       },
       water: {
         subtitle: "Posouzení vlhkostního senzoru, incidenty a nakonfigurované výstupy.",
@@ -818,7 +837,7 @@
         retained_total: "Uloženo / celkem",
       },
       settings: {
-        subtitle: "Životní cyklus nastavení canonical-v3 — přímé řízení zařízení zde není dostupné.",
+        subtitle: "Předvolby modulů a rozhraní pouze pro čtení. Úpravy konfigurace patří do Home Assistant.",
         overview: "Přehled nastavení",
         heating_config: "Konfigurace topení",
         heating_config_desc: "Propojení zóny, senzoru a zdroje tepla pro modul topení.",
@@ -834,7 +853,8 @@
         advanced_desc: "Pokročilé možnosti a diagnostika prototypu (rezervováno).",
         placeholder: "Rezervováno",
         note:
-          "Řádky modulů odrážejí nakonfigurovaný stav, ne jen připravenost setup backendu. Rezervované řádky zůstávají k dispozici pro budoucí nastavení.",
+          "Řádky modulů odrážejí nakonfigurovaný stav, ne jen připravenost setup backendu. Změny konfigurace provádějte v Home Assistant.",
+        experimental_setup: "Experimentální průvodce nastavením",
       },
       language: {
         auto: "Automaticky",
@@ -845,6 +865,10 @@
         hub_title: "Nastavení",
         hub_subtitle: "Vyberte modul nebo oblast, kterou chcete konfigurovat. Každý modul má vlastní životní cyklus nastavení.",
         hub_note: "Zápisy do nastavení zůstávají jen koncepty, dokud výslovně neaktivujete kanonickou revizi.",
+        experimental_warning:
+          "Experimentální vývojářská obrazovka. Průvodce nastavením není součástí běžného panelu Controlel. Pro produkční konfiguraci používejte Home Assistant.",
+        experimental_note:
+          "Průvodce níže může vytvářet koncepty a kandidáty na aktivaci. Používejte jen pro vývoj; produkční konfigurace patří do Home Assistant.",
         back_to_hub: "Zpět do Nastavení",
         open_module: "Otevřít nastavení",
         module_subtitle: "Pro tento modul použijte níže uvedený průvodce nastavením.",
@@ -903,7 +927,7 @@
       },
       panel: {
         tagline: "Platforma pro řízení topení",
-        readonly_footer: "Kanonické nastavení v3 · výslovná aktivace · bez ovládání zařízení",
+        readonly_footer: "Observability UI · pouze pro čtení · konfigurace v Home Assistant",
         overall_status: "Celkový stav",
         load_error: "Panel Controlel se nepodařilo načíst",
         wizard_demo_label:

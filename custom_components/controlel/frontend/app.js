@@ -7,8 +7,10 @@
  *   - rendering the Overview / Modules / Heating / Diagnostics / Settings /
  *     Setup views from the Frontend API v1 adapter (api-client.js) using the
  *     reusable CW components;
- *   - hosting the real setup-only wizard (wizard.js) as part of the "Setup"
- *     view without exposing activation or runtime control.
+ *   - Observability UI (layer 2): read-only presentation of Frontend API v1
+ *     projections. Configuration writes belong in native Home Assistant
+ *     Configure (layer 1). The Setup wizard (layer 4) remains in the
+ *     codebase but is hidden from primary navigation.
  *
  * Truthfulness (see AGENTS.md):
  *   - every view section shows an explicit state: loading / loaded / error;
@@ -40,6 +42,20 @@
   const ROUTES = ["overview", "modules", "heating", "water-safety", "diagnostics", "settings", "setup"];
   const DEFAULT_ROUTE = "overview";
 
+  /** Layer 2 default: read-only observability; writes stay in HA Configure. */
+  const OBSERVABILITY_MODE = true;
+
+  /** Known modules shown on the Modules view (future modules extend this list). */
+  const KNOWN_MODULES = [
+    { module_id: "heating", order: 1 },
+    { module_id: "water_safety", order: 2 },
+  ];
+
+  const MODULE_LABELS = {
+    heating: "navigation.heating",
+    water_safety: "navigation.water_safety",
+  };
+
   /**
    * Navigation items (data-driven; hidden/order are future-customization
    * hooks). `key` is the stable translation key; `label` is the canonical
@@ -52,7 +68,6 @@
     { id: "water-safety", label: "Water Safety", key: "navigation.water_safety", order: 4, hidden: false },
     { id: "diagnostics", label: "Diagnostics", key: "navigation.diagnostics", order: 5, hidden: false },
     { id: "settings", label: "Settings", key: "navigation.settings", order: 6, hidden: false },
-    { id: "setup", label: "Setup", key: "navigation.setup", order: 7, hidden: false },
   ];
 
   /** Parse a location hash ("#/heating", "#/heating?x=1") into a known route. */
@@ -119,18 +134,66 @@
     water_safety: "water_safety_disabled",
   };
 
+  const DEGRADED_MODULE_REASONS = new Set([
+    "recoverable_runtime_failure",
+    "fatal_runtime_failure",
+    "runtime_stopped",
+    "runtime_starting",
+  ]);
+
   function findModule(modules, moduleId) {
     return (modules || []).find((item) => item.module_id === moduleId) || null;
   }
 
-  function moduleDisplayState(module) {
+  function moduleLabel(moduleId) {
+    const key = MODULE_LABELS[moduleId];
+    return key && has(key) ? t(key) : moduleId;
+  }
+
+  /**
+   * Truthful module presentation state. Setup readiness refines heating only
+   * when the module is already known to be configured (never the reverse).
+   */
+  function moduleDisplayState(module, options) {
     if (!module) return "unknown";
-    if (module.status === "active") return "active";
-    if (module.reason === MODULE_NOT_CONFIGURED_REASONS[module.module_id]) return "not_configured";
+    const setup = options && options.setup;
+    const notConfiguredReason = MODULE_NOT_CONFIGURED_REASONS[module.module_id];
+    if (module.reason === notConfiguredReason) return "not_configured";
     if (module.reason === MODULE_DISABLED_REASONS[module.module_id]) return "disabled";
-    if (module.status === "error") return "error";
-    if (module.status === "inactive") return "inactive";
+    if (module.status === "error") {
+      if (DEGRADED_MODULE_REASONS.has(module.reason)) return "degraded";
+      return "error";
+    }
+    if (module.status === "active") return "active";
+    if (module.status === "inactive") {
+      if (DEGRADED_MODULE_REASONS.has(module.reason)) return "degraded";
+      if (module.module_id === "heating" && setup && setup.readiness) {
+        const readinessState = setup.readiness.state;
+        if (readinessState === "incomplete" || readinessState === "invalid") return "draft_incomplete";
+        if (readinessState === "ready") return "draft_ready";
+      }
+      return "degraded";
+    }
     return module.status;
+  }
+
+  function moduleStateLabel(displayState) {
+    const key = `state.${displayState}`;
+    return has(key) ? t(key) : displayState;
+  }
+
+  /** Merge backend modules with the known-module catalog for the Modules view. */
+  function modulesForDisplay(backendModules, setupData) {
+    const byId = new Map((backendModules || []).map((item) => [item.module_id, item]));
+    return KNOWN_MODULES.map((known) => {
+      const backend = byId.get(known.module_id);
+      if (backend) return backend;
+      return {
+        module_id: known.module_id,
+        status: "inactive",
+        reason: MODULE_NOT_CONFIGURED_REASONS[known.module_id] || null,
+      };
+    });
   }
 
   function isHeatingConfigured(overview) {
@@ -298,24 +361,29 @@
   }
 
   /** Map a real module ({module_id,status,reason}) to the moduleCard shape. */
-  function toModuleCard(m) {
-    const displayState = moduleDisplayState(m);
+  function toModuleCard(m, options) {
+    const observabilityMode = !options || options.observabilityMode !== false;
+    const setup = options && options.setup;
+    const displayState = moduleDisplayState(m, { setup });
     let primaryAction = null;
-    if (m.status === "error") primaryAction = { label: t("action.review_issues"), route: "diagnostics" };
-    else if (displayState === "not_configured" && m.module_id === "heating") {
-      primaryAction = { label: t("action.configure_heating"), setupModule: "heating" };
-    } else if (displayState === "not_configured" && m.module_id === "water_safety") {
-      primaryAction = { label: t("action.configure_water"), setupModule: "water_safety" };
-    } else if (m.module_id === "heating") primaryAction = { label: t("action.open_heating"), route: "heating" };
-    else if (m.module_id === "water_safety") primaryAction = { label: t("action.open_water_safety"), route: "water-safety" };
-    const stateLabel = displayState === "not_configured" ? t("state.not_configured")
-      : displayState === "disabled" ? t("state.disabled")
-        : metaOf(MODULE_STATUS_META, m.status).label;
+    if (m.status === "error" && displayState === "error") {
+      primaryAction = { label: t("action.review_issues"), route: "diagnostics" };
+    } else if (displayState === "not_configured") {
+      primaryAction = observabilityMode
+        ? { label: t("action.configure_in_ha"), action: "configure_in_ha" }
+        : (m.module_id === "heating"
+          ? { label: t("action.configure_heating"), setupModule: "heating" }
+          : { label: t("action.configure_water"), setupModule: "water_safety" });
+    } else if (m.module_id === "heating") {
+      primaryAction = { label: t("action.open_heating"), route: "heating" };
+    } else if (m.module_id === "water_safety") {
+      primaryAction = { label: t("action.open_water_safety"), route: "water-safety" };
+    }
     return {
       id: m.module_id,
-      label: m.module_id,
+      label: moduleLabel(m.module_id),
       state: displayState,
-      stateLabel,
+      stateLabel: moduleStateLabel(displayState),
       summary: m.reason || t("module.no_reason"),
       warningCount: 0,
       updatedAt: null,
@@ -366,6 +434,8 @@
    * @param {object} [opts.renderRoot]       document/shadow root containing the shell
    * @param {Function} [opts.onSetupState]   reports read-only setup entry state to the wizard
    * @param {Function} [opts.onWaterSafetyAction] admin Water Safety actions from the panel
+   * @param {object} [opts.hass]               Home Assistant runtime (for Configure navigation)
+   * @param {boolean} [opts.observabilityMode] read-only layer 2 (default true)
    */
   function createApp({
     mode,
@@ -384,6 +454,8 @@
     actor,
     now,
     idFactory,
+    hass,
+    observabilityMode = OBSERVABILITY_MODE,
   }) {
     let idSequence = 0;
     const canonicalNow = typeof now === "function" ? now : () => new Date().toISOString();
@@ -415,6 +487,32 @@
 
     function freshDomain() {
       return { status: "idle", data: null, error: null, inflight: null };
+    }
+
+    function configureInHaButton(className) {
+      const canNavigate = hass && typeof hass.navigate === "function";
+      return el("button", {
+        class: className || "btn btn--primary",
+        disabled: !canNavigate,
+        onclick: () => {
+          if (canNavigate) hass.navigate("/config/integrations/integration/controlel");
+        },
+      }, t("action.configure_in_ha"));
+    }
+
+    function configureInHaCallout() {
+      return el("div", { class: "configure-in-ha" },
+        noteBox(t("action.configure_in_ha_lead"), "info"),
+        configureInHaButton("btn btn--secondary")
+      );
+    }
+
+    function moduleCardOptions() {
+      const setup = state.domains.setup;
+      return {
+        observabilityMode,
+        setup: setup.status === "loaded" ? setup.data : null,
+      };
     }
 
     const api = {
@@ -826,7 +924,13 @@
     }
 
     function moduleCardNavigate(module) {
-      if (module.primaryAction && module.primaryAction.setupModule) {
+      if (module.primaryAction && module.primaryAction.action === "configure_in_ha") {
+        if (hass && typeof hass.navigate === "function") {
+          hass.navigate("/config/integrations/integration/controlel");
+        }
+        return;
+      }
+      if (!observabilityMode && module.primaryAction && module.primaryAction.setupModule) {
         api.openSetupModule(module.primaryAction.setupModule);
         return;
       }
@@ -881,6 +985,7 @@
     }
 
     function continueSetupButton() {
+      if (observabilityMode) return configureInHaButton("btn btn--primary");
       return el("button", { class: "btn btn--primary", onclick: () => api.navigate("setup") }, t("action.continue_setup"));
     }
 
@@ -911,7 +1016,9 @@
       if (ov.status === "loaded" && ov.data) badges.push(stateBadge(SYSTEM_STATUS_META, ov.data.system.status));
 
       const headerActions = [];
-      if (setup.status === "loaded" && readinessNeedsAction(ov.data, setup.data)) headerActions.push(continueSetupButton());
+      if (!observabilityMode && setup.status === "loaded" && readinessNeedsAction(ov.data, setup.data)) {
+        headerActions.push(continueSetupButton());
+      }
 
       const subtitle = (ov.status === "loaded" && ov.data && ov.data.generated_at)
         ? t("overview.subtitle_generated", { time: formatTime(ov.data.generated_at) })
@@ -927,7 +1034,7 @@
           loaded: (data) => el("div", { class: "module-grid" },
             data.modules.length
               ? data.modules.map((m) => {
-                const card = toModuleCard(m);
+                const card = toModuleCard(m, moduleCardOptions());
                 return moduleCard({ module: card, onNavigate: () => moduleCardNavigate(card) });
               })
               : emptyState({ title: t("empty.no_modules_title"), message: t("empty.no_modules_message") })
@@ -958,18 +1065,18 @@
     }
 
     function renderModules() {
+      const setup = state.domains.setup;
+      const setupData = setup.status === "loaded" ? setup.data : null;
       return el("div", { class: "view" },
         pageHeader({ title: t("navigation.modules"), subtitle: t("modules.subtitle") }),
         domainSection({
           domain: "overview",
           title: t("section.all_modules"),
           loaded: (data) => el("div", { class: "module-grid" },
-            data.modules.length
-              ? data.modules.map((m) => {
-                const card = toModuleCard(m);
-                return moduleCard({ module: card, onNavigate: () => moduleCardNavigate(card) });
-              })
-              : emptyState({ title: t("empty.no_modules_title"), message: t("empty.no_modules_message") })
+            modulesForDisplay(data.modules, setupData).map((m) => {
+              const card = toModuleCard(m, moduleCardOptions());
+              return moduleCard({ module: card, onNavigate: () => moduleCardNavigate(card) });
+            })
           ),
           onRetry: () => api.retryDomain("overview"),
         }),
@@ -1059,7 +1166,7 @@
       if (overview.status === "loaded" && !isHeatingConfigured(overview.data)) {
         return el("div", { class: "canonical-configuration" },
           noteBox(t("canonical.not_configured_lead"), "neutral"),
-          el("div", { class: "section__actions" },
+          observabilityMode ? configureInHaCallout() : el("div", { class: "section__actions" },
             el("button", { class: "btn btn--primary", onclick: () => api.openSetupModule("heating") }, t("action.configure_heating"))
           )
         );
@@ -1067,7 +1174,7 @@
       if (c.status === "unconfigured") {
         return el("div", { class: "canonical-configuration" },
           noteBox(t("canonical.not_configured_lead"), "neutral"),
-          el("div", { class: "section__actions" },
+          observabilityMode ? configureInHaCallout() : el("div", { class: "section__actions" },
             el("button", { class: "btn btn--primary", onclick: () => api.openSetupModule("heating") }, t("action.configure_heating"))
           )
         );
@@ -1079,7 +1186,7 @@
         if (isCanonicalAuthorityConflict(c.error)) {
           return el("div", { class: "canonical-configuration" },
             noteBox(t("canonical.not_configured_lead"), "neutral"),
-            el("div", { class: "section__actions" },
+            observabilityMode ? configureInHaCallout() : el("div", { class: "section__actions" },
               el("button", { class: "btn btn--primary", onclick: () => api.openSetupModule("heating") }, t("action.configure_heating"))
             )
           );
@@ -1090,41 +1197,45 @@
         });
       }
 
-      const document = c.editing ? c.session : c.active.configuration_scopes;
-      const values = c.editing ? c.form : canonicalHeatingValues(document);
+      const document = observabilityMode ? c.active.configuration_scopes : (c.editing ? c.session : c.active.configuration_scopes);
+      const values = observabilityMode
+        ? canonicalHeatingValues(document)
+        : (c.editing ? c.form : canonicalHeatingValues(document));
       if (!values) return noteBox(t("canonical.single_zone_only"), "warning");
       const heating = document.heating;
       const zone = heating.zones[0];
       const source = heating.heat_sources[0];
       const revision = c.active.canonical_revision;
       const actions = [];
-      if (!c.editing) {
-        actions.push(el("button", {
-          class: "btn btn--primary", disabled: c.status === "saving", onclick: () => api.editCanonical(),
-        }, c.availableDraft ? t("canonical.reopen_draft") : t("canonical.edit")));
-      } else {
-        actions.push(
-          el("button", {
-            class: "btn btn--secondary", disabled: !c.dirty || c.status === "saving",
-            onclick: () => api.saveCanonicalDraft(),
-          }, t("canonical.save_draft")),
-          el("button", {
-            class: "btn btn--secondary", disabled: c.dirty || c.status === "saving",
-            onclick: () => api.validateCanonicalDraft(),
-          }, t("canonical.validate")),
-          el("button", {
-            class: "btn btn--secondary",
-            disabled: c.dirty || !c.validation || !c.validation.activation_ready || c.status === "saving",
-            onclick: () => api.canonicalizeCanonicalDraft(),
-          }, t("canonical.canonicalize")),
-          el("button", {
-            class: "btn btn--primary", disabled: !c.candidateRevision || c.status === "saving",
-            onclick: () => api.activateCanonicalRevision(),
-          }, t("canonical.activate"))
-        );
+      if (!observabilityMode) {
+        if (!c.editing) {
+          actions.push(el("button", {
+            class: "btn btn--primary", disabled: c.status === "saving", onclick: () => api.editCanonical(),
+          }, c.availableDraft ? t("canonical.reopen_draft") : t("canonical.edit")));
+        } else {
+          actions.push(
+            el("button", {
+              class: "btn btn--secondary", disabled: !c.dirty || c.status === "saving",
+              onclick: () => api.saveCanonicalDraft(),
+            }, t("canonical.save_draft")),
+            el("button", {
+              class: "btn btn--secondary", disabled: c.dirty || c.status === "saving",
+              onclick: () => api.validateCanonicalDraft(),
+            }, t("canonical.validate")),
+            el("button", {
+              class: "btn btn--secondary",
+              disabled: c.dirty || !c.validation || !c.validation.activation_ready || c.status === "saving",
+              onclick: () => api.canonicalizeCanonicalDraft(),
+            }, t("canonical.canonicalize")),
+            el("button", {
+              class: "btn btn--primary", disabled: !c.candidateRevision || c.status === "saving",
+              onclick: () => api.activateCanonicalRevision(),
+            }, t("canonical.activate"))
+          );
+        }
       }
 
-      const lifecycle = c.editing
+      const lifecycle = (!observabilityMode && c.editing)
         ? el("div", { class: "canonical-lifecycle" },
             el("div", { class: "section__badges" },
               badge(t("canonical.draft_revision", { revision: c.session.revision }), "info"),
@@ -1150,15 +1261,15 @@
           kvRow(t("canonical.temperature_sensor"), canonicalReferenceLabel(zone.primary_temperature_sensor.provider_reference)),
           kvRow(t("canonical.heat_source_permission"), canonicalReferenceLabel(source.command_strategy.enable_permission.command_target_reference))
         ),
-        c.availableDraft && !c.editing ? noteBox(t("canonical.draft_available"), "info") : null,
+        c.availableDraft && !c.editing && !observabilityMode ? noteBox(t("canonical.draft_available"), "info") : null,
         lifecycle,
-        el("div", { class: c.editing ? "settings-grid" : "metric-grid" },
-          CANONICAL_HEATING_FIELDS.map((field) => canonicalField(field, values, c.editing))
+        el("div", { class: "metric-grid" },
+          CANONICAL_HEATING_FIELDS.map((field) => canonicalField(field, values, false))
         ),
-        noteBox(t("canonical.noneditable_note"), "neutral"),
+        noteBox(observabilityMode ? t("canonical.readonly_lead") : t("canonical.noneditable_note"), "neutral"),
         c.status === "saving" ? noteBox(t("canonical.working", { operation: c.operation }), "info") : null,
         c.status === "error" ? noteBox((c.error && c.error.message) || t("common.request_failed"), "warning") : null,
-        el("div", { class: "section__actions" }, actions)
+        observabilityMode ? configureInHaCallout() : el("div", { class: "section__actions" }, actions)
       );
     }
 
@@ -1176,10 +1287,12 @@
             emptyState({
               title: t("water.not_configured_title"),
               message: t("water.not_configured_message"),
-              action: el("button", {
-                class: "btn btn--primary",
-                onclick: () => api.openSetupModule("water_safety"),
-              }, t("action.configure_water")),
+              action: observabilityMode
+                ? configureInHaCallout()
+                : el("button", {
+                    class: "btn btn--primary",
+                    onclick: () => api.openSetupModule("water_safety"),
+                  }, t("action.configure_water")),
             })
           );
         }
@@ -1203,26 +1316,28 @@
                   ? "neutral"
                   : "negative";
             const actions = [];
-            if (data.actions_available.includes("silence")) {
-              actions.push(el("button", {
-                class: "btn btn--secondary",
-                disabled: Boolean(pending),
-                onclick: () => api.runWaterSafetyAction("silence"),
-              }, pending === "silence" ? t("water.actions.pending") : t("water.actions.silence")));
-            }
-            if (data.actions_available.includes("disable")) {
-              actions.push(el("button", {
-                class: "btn btn--secondary",
-                disabled: Boolean(pending),
-                onclick: () => api.runWaterSafetyAction("disable"),
-              }, pending === "disable" ? t("water.actions.pending") : t("water.actions.disable")));
-            }
-            if (data.actions_available.includes("enable")) {
-              actions.push(el("button", {
-                class: "btn btn--primary",
-                disabled: Boolean(pending),
-                onclick: () => api.runWaterSafetyAction("enable"),
-              }, pending === "enable" ? t("water.actions.pending") : t("water.actions.enable")));
+            if (!observabilityMode && onWaterSafetyAction) {
+              if (data.actions_available.includes("silence")) {
+                actions.push(el("button", {
+                  class: "btn btn--secondary",
+                  disabled: Boolean(pending),
+                  onclick: () => api.runWaterSafetyAction("silence"),
+                }, pending === "silence" ? t("water.actions.pending") : t("water.actions.silence")));
+              }
+              if (data.actions_available.includes("disable")) {
+                actions.push(el("button", {
+                  class: "btn btn--secondary",
+                  disabled: Boolean(pending),
+                  onclick: () => api.runWaterSafetyAction("disable"),
+                }, pending === "disable" ? t("water.actions.pending") : t("water.actions.disable")));
+              }
+              if (data.actions_available.includes("enable")) {
+                actions.push(el("button", {
+                  class: "btn btn--primary",
+                  disabled: Boolean(pending),
+                  onclick: () => api.runWaterSafetyAction("enable"),
+                }, pending === "enable" ? t("water.actions.pending") : t("water.actions.enable")));
+              }
             }
             return el("div", { class: "water-current" },
               el("div", { class: "section__badges" },
@@ -1275,7 +1390,7 @@
       }
 
       const headerActions = [];
-      if (ov.status === "loaded" && setup.status === "loaded" && readinessNeedsAction(ov.data, setup.data)) {
+      if (!observabilityMode && ov.status === "loaded" && setup.status === "loaded" && readinessNeedsAction(ov.data, setup.data)) {
         headerActions.push(continueSetupButton());
       }
 
@@ -1453,9 +1568,11 @@
           label: t("settings.heating_config"),
           description: t("settings.heating_config_desc"),
           state: overviewData ? heatingSettingsState(overviewData, setupData) : "unknown",
-          action: overviewData && isHeatingConfigured(overviewData)
-            ? { label: t("canonical.edit"), callback: () => api.editCanonical() }
-            : { label: t("action.configure_heating"), callback: () => api.openSetupModule("heating") },
+          action: observabilityMode
+            ? { label: t("action.configure_in_ha"), action: "configure_in_ha" }
+            : (overviewData && isHeatingConfigured(overviewData)
+              ? { label: t("canonical.edit"), callback: () => api.editCanonical() }
+              : { label: t("action.configure_heating"), callback: () => api.openSetupModule("heating") }),
           order: 1,
           hidden: false,
         },
@@ -1463,10 +1580,12 @@
           id: "water-config",
           label: t("settings.water_safety_config"),
           description: t("settings.water_safety_config_desc"),
-          state: moduleDisplayState(waterModule),
-          action: { label: t("action.configure_water"), callback: () => api.openSetupModule("water_safety") },
+          state: moduleDisplayState(waterModule, { setup: setupData }),
+          action: observabilityMode
+            ? { label: t("action.configure_in_ha"), action: "configure_in_ha" }
+            : { label: t("action.configure_water"), callback: () => api.openSetupModule("water_safety") },
           order: 2,
-          hidden: !waterModule,
+          hidden: false,
         },
         {
           id: "notifications",
@@ -1489,6 +1608,7 @@
           label: t("settings.advanced"),
           description: t("settings.advanced_desc"),
           state: "not_configured",
+          action: observabilityMode ? { label: t("settings.experimental_setup"), route: "setup" } : null,
           order: 5,
           hidden: false,
         },
@@ -1529,9 +1649,16 @@
             : s.action
             ? el("button", {
                 class: "btn btn--secondary btn--sm",
-                disabled: s.id === "heating-config" && overviewData && isHeatingConfigured(overviewData)
+                disabled: !observabilityMode && s.id === "heating-config" && overviewData && isHeatingConfigured(overviewData)
                   && (!state.canonical.active || state.canonical.editing),
-                onclick: () => s.action.callback ? s.action.callback() : api.navigate(s.action.route),
+                onclick: () => {
+                  if (s.action.action === "configure_in_ha") {
+                    if (hass && typeof hass.navigate === "function") hass.navigate("/config/integrations/integration/controlel");
+                    return;
+                  }
+                  if (s.action.callback) s.action.callback();
+                  else if (s.action.route) api.navigate(s.action.route);
+                },
               }, s.action.label)
             : el("span", { class: "hint" }, t("settings.placeholder"))
       ));
@@ -1588,21 +1715,22 @@
           title: t("setup.hub_title"),
           subtitle: t("setup.hub_subtitle"),
         }),
+        observabilityMode ? noteBox(t("setup.experimental_warning"), "warning") : null,
         el("div", { class: "module-grid" },
           setupHubCard({
             moduleId: "heating",
             label: t("navigation.heating"),
             description: t("settings.heating_config_desc"),
-            displayState: moduleDisplayState(heatingModule),
+            displayState: moduleDisplayState(heatingModule, moduleCardOptions()),
             onSelect: () => api.openSetupModule("heating"),
           }),
-          waterModule ? setupHubCard({
+          setupHubCard({
             moduleId: "water_safety",
             label: t("navigation.water_safety"),
             description: t("settings.water_safety_config_desc"),
-            displayState: moduleDisplayState(waterModule),
+            displayState: moduleDisplayState(waterModule || { module_id: "water_safety", status: "inactive", reason: "water_safety_not_configured" }, moduleCardOptions()),
             onSelect: () => api.openSetupModule("water_safety"),
-          }) : null,
+          }),
           setupHubCard({
             moduleId: "notifications",
             label: t("settings.notifications"),
@@ -1611,7 +1739,7 @@
             onSelect: () => api.navigate("settings"),
           })
         ),
-        noteBox(t("setup.hub_note"), "info")
+        noteBox(observabilityMode ? t("setup.experimental_note") : t("setup.hub_note"), "info")
       );
     }
 
@@ -1799,6 +1927,7 @@
         })
       : null;
 
+    const observabilityMode = opts.observabilityMode !== false;
     const app = createApp({
       mode,
       dataSource,
@@ -1813,11 +1942,13 @@
       onSetupState: setupWizard && typeof setupWizard.setEntryState === "function"
         ? (entryState) => setupWizard.setEntryState(entryState)
         : null,
-      onWaterSafetyAction: frontendClient && typeof frontendClient.waterSafetyAction === "function"
+      onWaterSafetyAction: !observabilityMode && frontendClient && typeof frontendClient.waterSafetyAction === "function"
         ? (action) => frontendClient.waterSafetyAction(action)
         : null,
       canonicalClient: setupWizardClient,
       actor: `home_assistant:${env.userId || "admin"}`,
+      hass: opts.hass || null,
+      observabilityMode,
     });
 
     if (setupWizard) app.setupWizard = setupWizard;
@@ -1843,6 +1974,8 @@
   global.CA = {
     ROUTES,
     DEFAULT_ROUTE,
+    OBSERVABILITY_MODE,
+    KNOWN_MODULES,
     NAV_ITEMS,
     DIAGNOSTICS_LEVELS,
     SYSTEM_STATUS_META,
@@ -1864,7 +1997,10 @@
     canonicalHeatingValues,
     canonicalScopesWithHeatingValues,
     findModule,
+    moduleLabel,
     moduleDisplayState,
+    moduleStateLabel,
+    modulesForDisplay,
     isHeatingConfigured,
     isWaterSafetyConfigured,
     isCanonicalAuthorityConflict,

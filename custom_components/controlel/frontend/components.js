@@ -167,6 +167,8 @@
     attention: { label: "Needs attention", tone: "negative", key: "state.attention" },
     disabled: { label: "Disabled", tone: "neutral", key: "state.disabled" },
     not_configured: { label: "Not configured", tone: "neutral", key: "state.not_configured" },
+    draft_incomplete: { label: "Draft incomplete", tone: "warning", key: "state.draft_incomplete" },
+    draft_ready: { label: "Draft ready", tone: "info", key: "state.draft_ready" },
     ok: { label: "OK", tone: "positive", key: "state.ok" },
     idle: { label: "Idle", tone: "neutral", key: "state.idle" },
     unknown: { label: "Unknown", tone: "neutral", key: "state.unknown" },

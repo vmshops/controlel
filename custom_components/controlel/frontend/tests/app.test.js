@@ -233,7 +233,7 @@ function fakeConnection({ responses = {}, failTransport = false } = {}) {
 
 // ------------------------------------------------------------- app builder
 
-function buildApp({ mode = "real", responses = fullResponses(), failTransport = false, withDemo = true, canonicalClient = null } = {}) {
+function buildApp({ mode = "real", responses = fullResponses(), failTransport = false, withDemo = true, canonicalClient = null, observabilityMode = CA.OBSERVABILITY_MODE } = {}) {
   const connection = fakeConnection({ responses, failTransport });
   const client = CA_API.createFrontendApiClient({ connection, configEntryId: "entry-1", timeoutMs: 1000 });
   const dataSource = CA_API.createRealDataSource(client);
@@ -263,6 +263,7 @@ function buildApp({ mode = "real", responses = fullResponses(), failTransport = 
     actor: "home_assistant:test-admin",
     now: () => "2026-08-28T10:00:00Z",
     idFactory: (prefix) => `${prefix}-test`,
+    observabilityMode,
   });
   return { app, root, navRoot, viewRoot, wizardRoot, waterWizardRoot, topbar, modeEl, connection };
 }
@@ -419,8 +420,15 @@ test("navigation renders the requested view and marks the current nav item", asy
   assert.ok(viewRoot.textContent.includes("Current temperature"));
 });
 
+test("primary navigation hides Setup and lists observability views", async () => {
+  const { navRoot } = buildApp();
+  const routes = navRoot.findAll("app-nav__item").map((b) => b.getAttribute("data-route"));
+  assert.ok(!routes.includes("setup"), "setup is hidden from primary nav");
+  assert.deepEqual(routes, ["overview", "modules", "heating", "water-safety", "diagnostics", "settings"]);
+});
+
 test("navigating to setup shows the module hub before a wizard opens", async () => {
-  const { app, viewRoot, wizardRoot, waterWizardRoot } = buildApp({ responses: unconfiguredResponses() });
+  const { app, viewRoot, wizardRoot, waterWizardRoot } = buildApp({ responses: unconfiguredResponses(), observabilityMode: false });
   app.navigate("setup");
   await settle(app);
   assert.equal(viewRoot.hidden, false, "setup hub is shown");
@@ -475,7 +483,7 @@ test("a view shows loaded data after the request resolves", async () => {
   app.navigate("overview");
   await settle(app);
   assert.ok(viewRoot.textContent.includes("Living Room") === false, "overview has no zone name");
-  assert.ok(viewRoot.textContent.includes("heating"), "module id rendered");
+  assert.ok(viewRoot.textContent.includes("Heating"), "module label rendered");
   assert.ok(viewRoot.textContent.includes("Confirm the primary sensor."), "attention rendered");
 });
 
@@ -501,7 +509,7 @@ test("retry re-issues the request and recovers when it then succeeds", async () 
   responses.overview = overviewRaw();
   viewRoot.findButton("Retry").dispatch("click");
   await settle(app);
-  assert.ok(viewRoot.textContent.includes("heating"), "recovered to loaded data");
+  assert.ok(viewRoot.textContent.includes("Heating"), "recovered to loaded data");
 });
 
 test("unknown/null backend values render as Unknown, not a guessed value", async () => {
@@ -579,7 +587,7 @@ test("diagnostics shows health, level filtering and the activity list", async ()
 
 test("settings reflects readiness, canonical authority and keeps placeholders", async () => {
   const canonicalClient = fakeCanonicalClient();
-  const { app, viewRoot } = buildApp({ canonicalClient });
+  const { app, viewRoot } = buildApp({ canonicalClient, observabilityMode: false });
   app.navigate("settings");
   await settle(app);
   assert.ok(viewRoot.textContent.includes("Heating configuration"));
@@ -592,7 +600,7 @@ test("settings reflects readiness, canonical authority and keeps placeholders", 
 
 test("Heating edits through the explicit canonical-v3 lifecycle without mutating active authority", async () => {
   const canonicalClient = fakeCanonicalClient();
-  const { app, viewRoot } = buildApp({ canonicalClient });
+  const { app, viewRoot } = buildApp({ canonicalClient, observabilityMode: false });
   app.navigate("heating");
   await settle(app);
 
@@ -629,7 +637,7 @@ test("Heating edits through the explicit canonical-v3 lifecycle without mutating
 
 test("Heating reopens a compatible persisted canonical draft", async () => {
   const canonicalClient = fakeCanonicalClient({ existingDraft: true });
-  const { app, viewRoot } = buildApp({ canonicalClient });
+  const { app, viewRoot } = buildApp({ canonicalClient, observabilityMode: false });
   app.navigate("heating");
   await settle(app);
   assert.ok(viewRoot.findButton("Reopen draft"));
@@ -641,7 +649,7 @@ test("Heating reopens a compatible persisted canonical draft", async () => {
 });
 
 test("setup view shows real readiness, missing config and validation", async () => {
-  const { app, viewRoot } = buildApp();
+  const { app, viewRoot } = buildApp({ observabilityMode: false });
   app.openSetupModule("heating");
   await settle(app);
   assert.ok(viewRoot.textContent.includes("Incomplete"), "readiness state");
@@ -714,15 +722,49 @@ test("toModuleCard maps a real module to the card shape", () => {
   const card = CA.toModuleCard({ module_id: "heating", status: "active", reason: null });
   assert.equal(card.id, "heating");
   assert.equal(card.state, "active");
+  assert.equal(card.label, "Heating");
   assert.deepEqual(card.primaryAction, { label: "Open Heating", route: "heating" });
 
   const unconfigured = CA.toModuleCard({ module_id: "heating", status: "inactive", reason: "heating_not_configured" });
   assert.equal(unconfigured.state, "not_configured");
-  assert.equal(unconfigured.primaryAction.setupModule, "heating");
+  assert.equal(unconfigured.primaryAction.label, "Configure in Home Assistant");
+  assert.equal(unconfigured.primaryAction.action, "configure_in_ha");
+
+  const legacy = CA.toModuleCard(
+    { module_id: "heating", status: "inactive", reason: "heating_not_configured" },
+    { observabilityMode: false }
+  );
+  assert.equal(legacy.primaryAction.setupModule, "heating");
 
   const errCard = CA.toModuleCard({ module_id: "heating", status: "error", reason: "boom" });
   assert.equal(errCard.state, "error");
   assert.deepEqual(errCard.primaryAction, { label: "Review issues", route: "diagnostics" });
+});
+
+test("modules view lists Heating and Water Safety from the known-module catalog", async () => {
+  const { app, viewRoot } = buildApp({ responses: unconfiguredResponses() });
+  app.navigate("modules");
+  await settle(app);
+  assert.ok(viewRoot.textContent.includes("Heating"));
+  assert.ok(viewRoot.textContent.includes("Water Safety"));
+  assert.ok(viewRoot.textContent.includes("Not configured"), "unconfigured modules are listed truthfully");
+});
+
+test("observability mode hides canonical edit actions on settings", async () => {
+  const canonicalClient = fakeCanonicalClient();
+  const { app, viewRoot } = buildApp({ canonicalClient });
+  app.navigate("settings");
+  await settle(app);
+  assert.ok(viewRoot.textContent.includes("Configure in Home Assistant"));
+  assert.ok(!viewRoot.findButton("Edit configuration"));
+  assert.ok(viewRoot.textContent.includes("canonical-active-22"), "read-only canonical summary remains");
+});
+
+test("observability setup hub shows experimental warning", async () => {
+  const { app, viewRoot } = buildApp({ responses: unconfiguredResponses() });
+  app.navigate("setup");
+  await settle(app);
+  assert.ok(viewRoot.textContent.includes("Experimental"));
 });
 
 test("module helpers distinguish unconfigured modules from setup readiness", () => {
@@ -761,7 +803,7 @@ test("fresh install water safety view shows not configured instead of disabled",
 });
 
 test("selecting Water Safety from the setup hub opens the water wizard container", async () => {
-  const { app, waterWizardRoot } = buildApp({ responses: unconfiguredResponses() });
+  const { app, waterWizardRoot } = buildApp({ responses: unconfiguredResponses(), observabilityMode: false });
   app.navigate("setup");
   await settle(app);
   app.openSetupModule("water_safety");
@@ -804,6 +846,8 @@ test("visibleItems hides hidden items and sorts by order", () => {
 
 test("stateMeta maps every module state to a label and tone", () => {
   assert.deepEqual(CW.stateMeta("active"), { label: "Active", tone: "positive" });
+  assert.deepEqual(CW.stateMeta("draft_incomplete"), { label: "Draft incomplete", tone: "warning" });
+  assert.deepEqual(CW.stateMeta("draft_ready"), { label: "Draft ready", tone: "info" });
   assert.deepEqual(CW.stateMeta("incomplete"), { label: "Incomplete setup", tone: "warning" });
   assert.deepEqual(CW.stateMeta("attention"), { label: "Needs attention", tone: "negative" });
   assert.deepEqual(CW.stateMeta("disabled"), { label: "Disabled", tone: "neutral" });
