@@ -109,6 +109,7 @@ def test_water_draft_validates_and_canonicalizes_with_explicit_v1_meaning() -> N
         "zone_id": "utility",
     }
     assert canonical.module_payload["notification_target_roles"] == (NOTIFY_ROLE,)
+    assert canonical.module_payload["shutoff_valve_target_roles"] == ()
 
 
 def test_water_validation_requires_stable_references_without_entity_locator_assumptions() -> None:

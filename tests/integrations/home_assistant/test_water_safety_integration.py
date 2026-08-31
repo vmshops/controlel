@@ -26,6 +26,7 @@ from controlel.application.water_safety import (
     WaterOutputAction,
     WaterOutputCommand,
     WaterOutputCommandResult,
+    WaterOutputKind,
     WaterOutputOutcome,
     WaterSafetyEvent,
     WaterSafetyRuntime,
@@ -37,10 +38,12 @@ from controlel.domain.water_safety import (
     WaterSafetySnapshot,
     WaterSafetyState,
 )
+from custom_components.controlel.water_safety_activation import _restored_snapshot_for_effective
 
 T0 = datetime(2026, 8, 29, 8, 0, tzinfo=UTC)
 NOTIFY = "water_safety.notification.home"
 SIREN = "water_safety.siren.hall"
+SHUTOFF_VALVE = "water_safety.shutoff_valve.main"
 
 
 @dataclass
@@ -95,8 +98,14 @@ def _notify_ref(service: str) -> ProviderReference:
     )
 
 
-def _draft(*, grace: float = 30.0, repeat: float | None = 120.0, critical: bool = False) -> DraftRevision:
-    bindings = (
+def _draft(
+    *,
+    grace: float = 30.0,
+    repeat: float | None = 120.0,
+    critical: bool = False,
+    shutoff_valves: bool = False,
+) -> DraftRevision:
+    bindings = [
         BindingSelection(
             role=WATER_SAFETY_SENSOR_ROLE,
             reference=_reference("moisture-entity", "binary_sensor.utility_moisture"),
@@ -115,7 +124,16 @@ def _draft(*, grace: float = 30.0, repeat: float | None = 120.0, critical: bool 
             selection_origin=SelectionOrigin.MANUAL,
             user_confirmed=True,
         ),
-    )
+    ]
+    if shutoff_valves:
+        bindings.append(
+            BindingSelection(
+                role=SHUTOFF_VALVE,
+                reference=_reference("water-valve-entity", "valve.utility_water_main"),
+                selection_origin=SelectionOrigin.MANUAL,
+                user_confirmed=True,
+            )
+        )
     return DraftRevision(
         draft_id="water-draft",
         revision=1,
@@ -137,13 +155,14 @@ def _draft(*, grace: float = 30.0, repeat: float | None = 120.0, critical: bool 
             "fault_repeat_interval_seconds": repeat,
             "notification_target_roles": [NOTIFY],
             "siren_target_roles": [SIREN],
+            "shutoff_valve_target_roles": [SHUTOFF_VALVE] if shutoff_valves else [],
             "messages": {},
         },
-        bindings=bindings,
+        bindings=tuple(bindings),
     )
 
 
-def _effective(draft: DraftRevision | None = None):
+def _effective(draft: DraftRevision | None = None, *, revision_id: str = "water-revision"):
     draft = draft or _draft()
     adapter = WaterSafetySetupAdapter()
     report = adapter.validate(draft, report_id="report", evaluated_at=T0)
@@ -152,7 +171,7 @@ def _effective(draft: DraftRevision | None = None):
         draft,
         report,
         configuration_id="water-config",
-        revision_id="water-revision",
+        revision_id=revision_id,
         revision=1,
         provider="home_assistant",
         provider_instance_id="home",
@@ -351,6 +370,39 @@ def test_restart_restores_wet_state() -> None:
     restarted.start(_observation(MoistureCondition.WET, restart_at), started_at=restart_at)
     assert restarted.state is WaterSafetyState.WET
     assert restarted.snapshot.active_incident is not None
+
+
+def test_same_sensor_activation_during_incident_preserves_incident_and_closes_new_valve_once() -> None:
+    original_effective, _ = _effective()
+    original_output = RecordingOutput()
+    original = WaterSafetyRuntime(original_effective, original_output)
+    original.start(_observation(MoistureCondition.WET, T0), started_at=T0)
+    incident_id = original.snapshot.active_incident.incident_id
+
+    candidate_effective, _ = _effective(_draft(shutoff_valves=True), revision_id="water-revision-with-valve")
+    carried = _restored_snapshot_for_effective(original.snapshot, candidate_effective)
+    candidate_output = RecordingOutput()
+    candidate = WaterSafetyRuntime(candidate_effective, candidate_output, restored_snapshot=carried)
+    candidate.start(
+        _observation(MoistureCondition.WET, T0 + timedelta(seconds=5)),
+        started_at=T0 + timedelta(seconds=5),
+    )
+
+    assert candidate.snapshot.active_incident.incident_id == incident_id
+    valve_commands = [
+        command for command in candidate_output.commands if command.output_kind is WaterOutputKind.SHUTOFF_VALVE
+    ]
+    assert [command.action for command in valve_commands] == [WaterOutputAction.REQUEST_VALVE_CLOSE]
+    assert WaterOutputAction.NOTIFY_WET not in _actions(candidate_output)
+
+
+def test_changed_authority_without_active_incident_starts_from_current_observation() -> None:
+    original_effective, _ = _effective()
+    original = WaterSafetyRuntime(original_effective, RecordingOutput())
+    original.start(_observation(MoistureCondition.DRY, T0), started_at=T0)
+    candidate_effective, _ = _effective(_draft(shutoff_valves=True), revision_id="water-revision-with-valve")
+
+    assert _restored_snapshot_for_effective(original.snapshot, candidate_effective) is None
 
 
 def test_cross_surface_config_semantics_match_canonical_payload() -> None:

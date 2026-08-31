@@ -59,6 +59,18 @@ def _notification_command() -> WaterOutputCommand:
     )
 
 
+def _valve_command(entity_id: str, *, sequence: int) -> WaterOutputCommand:
+    return WaterOutputCommand(
+        command_id=f"utility-water:command:valve:{sequence}",
+        requested_at=NOW,
+        owner=OWNER,
+        output_kind=WaterOutputKind.SHUTOFF_VALVE,
+        action=WaterOutputAction.REQUEST_VALVE_CLOSE,
+        target_role=f"water_safety.shutoff_valve.target_{sequence}",
+        target=_reference(entity_id),
+    )
+
+
 @pytest.mark.asyncio
 async def test_siren_on_and_off_are_requests_without_physical_state_claim(hass) -> None:
     calls: list[tuple[str, str]] = []
@@ -128,6 +140,45 @@ async def test_unavailable_and_failed_sirens_are_isolated_from_other_outputs(has
     assert working.outcome is WaterOutputOutcome.ACCEPTED
     assert notified.outcome is WaterOutputOutcome.ACCEPTED
     assert siren_calls == ["siren.failed", "siren.working"]
+    assert len(notifications) == 1
+    assert "unavailable" in caplog.text
+    assert "service request failed" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_valve_close_requests_are_truthful_and_failures_are_isolated(hass, caplog) -> None:
+    calls: list[str] = []
+    notifications: list[str] = []
+
+    async def valve_handler(call) -> None:
+        entity_id = call.data[ATTR_ENTITY_ID]
+        calls.append(entity_id)
+        if entity_id == "valve.failed":
+            raise HomeAssistantError("test close failure")
+
+    async def notify_handler(call) -> None:
+        notifications.append(call.data["message"])
+
+    hass.services.async_register("valve", "close_valve", valve_handler)
+    hass.services.async_register("notify", "phone", notify_handler)
+    hass.states.async_set("valve.unavailable", STATE_UNAVAILABLE)
+    hass.states.async_set("valve.failed", "open")
+    hass.states.async_set("valve.working", "open")
+    port = HomeAssistantWaterSafetyOutputPort(hass, HomeAssistantEventLoopBridge(hass.loop))
+
+    unavailable = await hass.async_add_executor_job(port.request, _valve_command("valve.unavailable", sequence=1))
+    failed = await hass.async_add_executor_job(port.request, _valve_command("valve.failed", sequence=2))
+    working = await hass.async_add_executor_job(port.request, _valve_command("valve.working", sequence=3))
+    notified = await hass.async_add_executor_job(port.request, _notification_command())
+
+    assert unavailable.outcome is WaterOutputOutcome.FAILED
+    assert unavailable.failure_code == "home_assistant_shutoff_valve_unavailable"
+    assert failed.outcome is WaterOutputOutcome.FAILED
+    assert failed.failure_code == "home_assistant_service_call_failed"
+    assert working.outcome is WaterOutputOutcome.ACCEPTED
+    assert notified.outcome is WaterOutputOutcome.ACCEPTED
+    assert calls == ["valve.failed", "valve.working"]
+    assert hass.states.get("valve.working").state == "open"
     assert len(notifications) == 1
     assert "unavailable" in caplog.text
     assert "service request failed" in caplog.text

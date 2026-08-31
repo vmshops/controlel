@@ -70,6 +70,7 @@
           "water_safety_area_sensor": "Area & moisture sensor",
           "water_safety_notifications": "Notifications",
           "water_safety_sirens": "Sirens",
+          "water_safety_shutoff_valves": "Automatic water shutoff",
           "water_safety_sensor_fault": "Sensor fault handling",
           "water_safety_messages": "Messages",
           "water_safety_validation": "Validation / Activation",
@@ -106,6 +107,13 @@
         "description": "{siren_behavior} Saving updates only the inactive Water draft. Configured targets not present in current compatible discovery: {unavailable_sirens}.",
         "data": {
           "water_safety_siren_targets": "Alarm-output sirens"
+        }
+      },
+      "water_safety_shutoff_valves": {
+        "title": "Water Safety — Automatic water shutoff",
+        "description": "{shutoff_valve_behavior} Saving updates only the inactive Water draft. Configured targets not present in current compatible discovery: {unavailable_shutoff_valves}.",
+        "data": {
+          "water_safety_shutoff_valve_targets": "Water shutoff valves"
         }
       },
       "water_safety_sensor_fault": {
@@ -203,6 +211,7 @@
       "invalid_water_area_sensor": "The Water area or moisture sensor selection is no longer valid. Review the current Home Assistant entities and try again.",
       "invalid_water_notification_targets": "One or more notification targets are invalid or unavailable. Review the current Home Assistant notify services and try again.",
       "invalid_water_siren_targets": "One or more siren targets are incompatible or no longer registered. Select compatible Home Assistant siren entities and try again.",
+      "invalid_water_shutoff_valve_targets": "One or more shutoff valve targets are incompatible or no longer registered. Select water-class Home Assistant valve entities that support closing and try again.",
       "validation_failed": "The draft is not activation-ready. Correct the reported issues and validate again."
     },
     "abort": {

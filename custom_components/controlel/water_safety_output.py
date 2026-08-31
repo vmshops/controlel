@@ -72,8 +72,12 @@ class SirenUnavailableError(RuntimeError):
     """The configured siren has no currently usable HA state."""
 
 
+class ShutoffValveUnavailableError(RuntimeError):
+    """The configured shutoff valve has no currently usable HA state."""
+
+
 class HomeAssistantWaterSafetyOutputPort:
-    """Dispatch notification and siren requests; physical state remains unknown."""
+    """Dispatch notification, siren, and valve requests; physical state remains unknown."""
 
     def __init__(
         self,
@@ -90,14 +94,28 @@ class HomeAssistantWaterSafetyOutputPort:
         try:
             if command.output_kind is WaterOutputKind.NOTIFICATION:
                 self._bridge.run_coroutine(lambda: self._async_notify(command))
-            else:
+            elif command.output_kind is WaterOutputKind.SIREN:
                 self._bridge.run_coroutine(lambda: self._async_siren(command))
+            else:
+                self._bridge.run_coroutine(lambda: self._async_close_shutoff_valve(command))
         except SirenUnavailableError:
             failure_code = "home_assistant_siren_unavailable"
             self._logger.warning(
                 "Water Safety siren request was not sent because the target is unavailable (role=%s, action=%s)",
                 command.target_role,
                 command.action.value,
+            )
+            return WaterOutputCommandResult(
+                command_id=command.command_id,
+                occurred_at=datetime.now(UTC),
+                outcome=WaterOutputOutcome.FAILED,
+                failure_code=failure_code,
+            )
+        except ShutoffValveUnavailableError:
+            failure_code = "home_assistant_shutoff_valve_unavailable"
+            self._logger.warning(
+                "Water Safety shutoff valve close request was not sent because the target is unavailable (role=%s)",
+                command.target_role,
             )
             return WaterOutputCommandResult(
                 command_id=command.command_id,
@@ -167,6 +185,25 @@ class HomeAssistantWaterSafetyOutputPort:
             )
             return
         raise ValueError(f"unsupported siren entity domain: {domain}")
+
+    async def _async_close_shutoff_valve(self, command: WaterOutputCommand) -> None:
+        entity_id = command.target.current_locator
+        if entity_id is None or "." not in entity_id:
+            raise ValueError("shutoff valve target requires an entity locator")
+        if command.action is not WaterOutputAction.REQUEST_VALVE_CLOSE:
+            raise ValueError("shutoff valve target requires a close request")
+        state = self._hass.states.get(entity_id)
+        if state is None or state.state in {STATE_UNAVAILABLE, STATE_UNKNOWN}:
+            raise ShutoffValveUnavailableError(f"shutoff valve target is unavailable: {entity_id}")
+        domain = entity_id.split(".", 1)[0]
+        if domain != "valve":
+            raise ValueError(f"unsupported shutoff valve entity domain: {domain}")
+        await self._hass.services.async_call(
+            "valve",
+            "close_valve",
+            blocking=True,
+            target={"entity_id": entity_id},
+        )
 
 
 def _default_message(message_code: str | None, language: str) -> str:

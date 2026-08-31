@@ -5,7 +5,7 @@ from controlel.application.state.water_safety_diagnostics import (
     WaterSafetyActionsAvailableV1,
     WaterSafetyDiagnosticsSnapshotV1,
 )
-from controlel.application.water_safety.model import WaterOutputOutcome, WaterSafetyDiagnostics
+from controlel.application.water_safety.model import WaterOutputKind, WaterOutputOutcome, WaterSafetyDiagnostics
 from controlel.domain.water_safety import WaterSafetyState
 
 
@@ -23,7 +23,9 @@ class WaterSafetyDiagnosticsProjector:
         sensor_condition = None if latest is None else latest.condition.value
         incident = diagnostics.active_incident
         incident_silenced = incident is not None and incident.silenced_at is not None
-        owned_sirens = diagnostics.owned_outputs
+        owned_sirens = tuple(
+            output for output in diagnostics.owned_outputs if output.output_kind is WaterOutputKind.SIREN
+        )
         last_siren_outcome = _last_siren_command_outcome(owned_sirens)
         return WaterSafetyDiagnosticsSnapshotV1(
             schema_version=WATER_SAFETY_DIAGNOSTICS_SCHEMA_VERSION,
