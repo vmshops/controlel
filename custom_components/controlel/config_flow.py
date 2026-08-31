@@ -32,6 +32,11 @@ from .activation_backend import async_activate_canonical_revision
 from .const import CONFIG_ENTRY_VERSION, DOMAIN, INTEGRATION_VERSION
 from .core_capabilities import water_safety_core_available
 from .setup_backend import async_get_setup_backend
+from .water_safety_area_sensor import (
+    WaterSafetyAreaSensorEditor,
+    async_load_water_safety_area_sensor_editor,
+    async_save_water_safety_area_sensor_draft,
+)
 from .water_safety_configure_view import (
     WaterSafetySection,
     async_build_water_safety_configure_view,
@@ -101,6 +106,9 @@ NOTIFICATION_WINDOW = "notification_rate_window_seconds"
 CRITICAL_NOTIFICATION_MAXIMUM = "critical_notification_maximum_per_window"
 CRITICAL_NOTIFICATION_WINDOW = "critical_notification_rate_window_seconds"
 NOTIFICATION_HISTORY = "notification_history_capacity"
+WATER_AREA = "water_safety_area_id"
+WATER_MOISTURE_SENSOR = "water_safety_moisture_entity_id"
+WATER_SHOW_ALL_COMPATIBLE = "show_all_compatible_entities"
 
 _FORM_PATHS = {
     "heating.zones[].display_name": ZONE_NAME,
@@ -208,6 +216,8 @@ class ControlelOptionsFlow(OptionsFlow):
         self._document: dict[str, Any] | None = None
         self._validation: CanonicalConfigurationValidationV3 | None = None
         self._candidate: CanonicalConfigurationRevisionV3 | None = None
+        self._water_area_sensor_show_all = False
+        self._water_area_sensor_pending: dict[str, Any] | None = None
 
     async def _service(self) -> Any:
         return (await async_get_setup_backend(self.hass, self.config_entry)).configuration_v3
@@ -265,7 +275,84 @@ class ControlelOptionsFlow(OptionsFlow):
         return await self._async_step_water_safety_section("water_safety_status", "status", user_input)
 
     async def async_step_water_safety_area_sensor(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        return await self._async_step_water_safety_section("water_safety_area_sensor", "area_sensor", user_input)
+        if user_input is None:
+            self._water_area_sensor_show_all = False
+            self._water_area_sensor_pending = None
+
+        errors: dict[str, str] = {}
+        values = dict(user_input or self._water_area_sensor_pending or {})
+        preferred_area_id = _optional_input(values.get(WATER_AREA))
+        backend = await async_get_setup_backend(self.hass, self.config_entry)
+        editor = await async_load_water_safety_area_sensor_editor(
+            self.hass,
+            backend.repository,
+            self.config_entry.data,
+            snapshot_id=_id("ha-water-area-sensor-snapshot"),
+            captured_at=_now(),
+            preferred_area_id=preferred_area_id,
+        )
+
+        if user_input is not None:
+            requested_show_all = bool(user_input.get(WATER_SHOW_ALL_COMPATIBLE, False))
+            if requested_show_all and not self._water_area_sensor_show_all:
+                self._water_area_sensor_show_all = True
+                self._water_area_sensor_pending = dict(user_input)
+                return self._show_water_safety_area_sensor_form(editor, values, errors, use_values=True)
+            try:
+                saved_at = _now()
+                await async_save_water_safety_area_sensor_draft(
+                    self.hass,
+                    backend.repository,
+                    editor,
+                    area_id=preferred_area_id,
+                    moisture_entity_id=_optional_input(user_input.get(WATER_MOISTURE_SENSOR)),
+                    saved_at=saved_at,
+                    report_id=_id("ha-water-area-sensor-report"),
+                )
+            except (KeyError, SetupConflictError, SetupNotFoundError, TypeError, ValueError, ValidationError):
+                errors["base"] = "invalid_water_area_sensor"
+            else:
+                self._water_area_sensor_show_all = False
+                self._water_area_sensor_pending = None
+                return await self.async_step_water_safety()
+
+        return self._show_water_safety_area_sensor_form(
+            editor,
+            values,
+            errors,
+            use_values=user_input is not None or self._water_area_sensor_pending is not None,
+        )
+
+    def _show_water_safety_area_sensor_form(
+        self,
+        editor: WaterSafetyAreaSensorEditor,
+        values: Mapping[str, Any],
+        errors: Mapping[str, str],
+        *,
+        use_values: bool,
+    ) -> ConfigFlowResult:
+        area_id = _optional_input(values.get(WATER_AREA)) if use_values else editor.area_id
+        sensor_id = _optional_input(values.get(WATER_MOISTURE_SENSOR)) if use_values else editor.moisture_entity_id
+        candidates = list(editor.visible_entity_ids(show_all=self._water_area_sensor_show_all))
+        if sensor_id is not None and sensor_id not in candidates:
+            candidates.append(sensor_id)
+        scope = (
+            "all compatible entities" if self._water_area_sensor_show_all or area_id is None else "the selected area"
+        )
+        return self.async_show_form(
+            step_id="water_safety_area_sensor",
+            data_schema=_water_safety_area_sensor_schema(
+                area_id=area_id,
+                sensor_id=sensor_id,
+                candidate_entity_ids=tuple(candidates),
+                show_all=self._water_area_sensor_show_all,
+            ),
+            errors=dict(errors),
+            description_placeholders={
+                "candidate_scope": scope,
+                "candidate_count": str(len(candidates)),
+            },
+        )
 
     async def async_step_water_safety_notifications(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         return await self._async_step_water_safety_section("water_safety_notifications", "notifications", user_input)
@@ -729,6 +816,37 @@ def _locator(reference: Mapping[str, Any] | None) -> str | None:
 
 def _optional_marker(name: str, value: str | None) -> vol.Marker:
     return vol.Optional(name, default=value) if value else vol.Optional(name)
+
+
+def _suggested_optional_marker(name: str, value: str | None) -> vol.Marker:
+    if value is None:
+        return vol.Optional(name)
+    return vol.Optional(name, description={"suggested_value": value})
+
+
+def _optional_input(value: object) -> str | None:
+    return value if isinstance(value, str) and value else None
+
+
+def _water_safety_area_sensor_schema(
+    *,
+    area_id: str | None,
+    sensor_id: str | None,
+    candidate_entity_ids: tuple[str, ...],
+    show_all: bool,
+) -> vol.Schema:
+    return vol.Schema(
+        {
+            _suggested_optional_marker(WATER_AREA, area_id): selector.AreaSelector(),
+            _suggested_optional_marker(WATER_MOISTURE_SENSOR, sensor_id): selector.EntitySelector(
+                selector.EntitySelectorConfig(
+                    filter={"domain": "binary_sensor", "device_class": "moisture"},
+                    include_entities=list(candidate_entity_ids),
+                )
+            ),
+            vol.Optional(WATER_SHOW_ALL_COMPATIBLE, default=show_all): selector.BooleanSelector(),
+        }
+    )
 
 
 def _number(unit: str | None = None, *, minimum: float | None = None) -> selector.NumberSelector:

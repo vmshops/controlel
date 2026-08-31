@@ -332,7 +332,7 @@ async def async_get_setup_service(
     if existing is not None:
         return existing
 
-    repository = await _repository_for_entry(hass, entry)
+    repository = (await async_get_setup_backend(hass, entry)).repository
     legacy_status = _legacy_status(entry)
 
     if module_key == _WATER_SAFETY_MODULE_KEY:

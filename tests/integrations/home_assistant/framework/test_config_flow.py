@@ -7,16 +7,19 @@ from copy import deepcopy
 import pytest
 from homeassistant import config_entries, data_entry_flow
 from homeassistant.const import ATTR_UNIT_OF_MEASUREMENT, UnitOfTemperature
+from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import selector
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 import custom_components.controlel as component
 from controlel.application.configuration import ConfigurationEditabilityV3, canonical_field_registry_v3
+from controlel.application.setup import ActiveReference
 from controlel.domain.value_objects.temperature import Temperature
 from controlel.infrastructure.home_assistant import ACTIVE_REFERENCE_KEY
 from custom_components.controlel import config_flow as cf
 from custom_components.controlel.const import DOMAIN
-from custom_components.controlel.setup_backend import async_get_setup_backend
+from custom_components.controlel.setup_backend import async_get_setup_backend, async_get_setup_service
 
 
 def _defaults(result) -> dict[str, object]:
@@ -33,6 +36,15 @@ def _defaults(result) -> dict[str, object]:
 
 def _fields(result) -> set[str]:
     return {marker.schema for marker in result["data_schema"].schema}
+
+
+def _field(result, name: str):
+    return next(validator for marker, validator in result["data_schema"].schema.items() if marker.schema == name)
+
+
+def _suggested(result, name: str):
+    marker = next(marker for marker in result["data_schema"].schema if marker.schema == name)
+    return marker.description.get("suggested_value")
 
 
 def _register_bindings(hass, *, platform: str = "configure-test") -> tuple[str, str]:
@@ -58,6 +70,34 @@ def _register_bindings(hass, *, platform: str = "configure-test") -> tuple[str, 
     )
     hass.states.async_set(source.entity_id, "off")
     return sensor.entity_id, source.entity_id
+
+
+def _register_water_candidates(hass):
+    areas = ar.async_get(hass)
+    utility = areas.async_create("Utility room")
+    garage = areas.async_create("Garage")
+    registry = er.async_get(hass)
+
+    def create(domain: str, unique_id: str, *, area_id: str | None, device_class: str | None):
+        entry = registry.async_get_or_create(
+            domain,
+            "water-configure-test",
+            unique_id,
+            suggested_object_id=unique_id,
+            original_device_class=device_class,
+        )
+        if area_id is not None:
+            entry = registry.async_update_entity(entry.entity_id, area_id=area_id)
+        return entry.entity_id
+
+    inside = create("binary_sensor", "utility_water", area_id=utility.id, device_class="moisture")
+    outside = create("binary_sensor", "garage_water", area_id=garage.id, device_class="moisture")
+    unrelated = (
+        create("binary_sensor", "utility_door", area_id=utility.id, device_class="door"),
+        create("binary_sensor", "utility_leak_named_only", area_id=utility.id, device_class=None),
+        create("sensor", "utility_moisture_percent", area_id=utility.id, device_class="moisture"),
+    )
+    return utility, garage, inside, outside, unrelated
 
 
 async def _empty_entry(hass, *, title: str = "Canonical heating") -> MockConfigEntry:
@@ -445,6 +485,13 @@ async def _open_water_menu(hass, entry, *, hub=None):
     return water
 
 
+async def _water_drafts(hass, entry):
+    from custom_components.controlel.water_safety_configure_view import async_list_module_drafts
+
+    backend = await async_get_setup_backend(hass, entry)
+    return await async_list_module_drafts(backend.repository, "water_safety")
+
+
 async def _seed_water_draft(hass, entry, *, complete: bool = False):
     from datetime import UTC, datetime
 
@@ -588,7 +635,6 @@ async def test_water_safety_submenu_navigation_returns_to_module_menu(hass) -> N
     water = await _open_water_menu(hass, entry)
     for step_id in (
         "water_safety_status",
-        "water_safety_area_sensor",
         "water_safety_notifications",
         "water_safety_sirens",
         "water_safety_sensor_fault",
@@ -601,6 +647,16 @@ async def test_water_safety_submenu_navigation_returns_to_module_menu(hass) -> N
         assert "section_detail" in section["description_placeholders"]
         water = await _choose(hass, section, "back_to_water_safety")
         assert water["step_id"] == "water_safety"
+
+    area_sensor = await _choose(hass, water, "water_safety_area_sensor")
+    assert area_sensor["type"] is data_entry_flow.FlowResultType.FORM
+    assert area_sensor["step_id"] == "water_safety_area_sensor"
+    assert _fields(area_sensor) == {
+        cf.WATER_AREA,
+        cf.WATER_MOISTURE_SENSOR,
+        cf.WATER_SHOW_ALL_COMPATIBLE,
+    }
+    hass.config_entries.options.async_abort(area_sensor["flow_id"])
 
 
 @pytest.mark.asyncio
@@ -619,8 +675,161 @@ async def test_fresh_water_safety_menu_reports_not_configured(hass) -> None:
     status = await _choose(hass, water, "water_safety_status")
     assert status["description_placeholders"]["section_detail"] == "Not configured."
     area = await _choose(hass, await _choose(hass, status, "back_to_water_safety"), "water_safety_area_sensor")
-    assert area["description_placeholders"]["section_detail"] == "Not configured."
+    assert area["type"] is data_entry_flow.FlowResultType.FORM
+    assert cf.WATER_AREA not in _defaults(area)
+    assert cf.WATER_MOISTURE_SENSOR not in _defaults(area)
     assert "Disabled" not in water["description_placeholders"]["water_safety_summary"]
+
+
+@pytest.mark.asyncio
+async def test_water_area_only_save_is_partial_durable_and_reloadable(hass) -> None:
+    utility, _garage, inside, outside, _unrelated = _register_water_candidates(hass)
+    entry = await _empty_entry(hass)
+    area_form = await _choose(hass, await _open_water_menu(hass, entry), "water_safety_area_sensor")
+
+    initial_selector = _field(area_form, cf.WATER_MOISTURE_SENSOR)
+    assert isinstance(initial_selector, selector.EntitySelector)
+    assert set(initial_selector.config["include_entities"]) == {inside, outside}
+    saved_menu = await hass.config_entries.options.async_configure(
+        area_form["flow_id"],
+        {
+            cf.WATER_AREA: utility.id,
+            cf.WATER_SHOW_ALL_COMPATIBLE: False,
+        },
+    )
+
+    assert saved_menu["step_id"] == "water_safety"
+    assert "Draft incomplete" in saved_menu["description_placeholders"]["water_safety_summary"]
+    draft = (await _water_drafts(hass, entry))[0]
+    assert dict(draft.settings) == {
+        "zone_id": utility.id,
+        "zone_name": utility.name,
+        "area_id": utility.id,
+        "area_name": utility.name,
+    }
+    assert draft.bindings == ()
+    assert ACTIVE_REFERENCE_KEY not in entry.data
+    backend = await async_get_setup_backend(hass, entry)
+    water_service = await async_get_setup_service(hass, entry, module_key="water_safety")
+    assert water_service._repository is backend.repository
+
+    reloaded = await _choose(hass, saved_menu, "water_safety_area_sensor")
+    assert _suggested(reloaded, cf.WATER_AREA) == utility.id
+    filtered = _field(reloaded, cf.WATER_MOISTURE_SENSOR)
+    assert filtered.config["include_entities"] == [inside]
+
+
+@pytest.mark.asyncio
+async def test_water_compatible_sensor_can_be_saved_without_area(hass) -> None:
+    _utility, _garage, inside, _outside, _unrelated = _register_water_candidates(hass)
+    entry = await _empty_entry(hass)
+    form = await _choose(hass, await _open_water_menu(hass, entry), "water_safety_area_sensor")
+
+    saved_menu = await hass.config_entries.options.async_configure(
+        form["flow_id"],
+        {
+            cf.WATER_MOISTURE_SENSOR: inside,
+            cf.WATER_SHOW_ALL_COMPATIBLE: False,
+        },
+    )
+
+    assert saved_menu["step_id"] == "water_safety"
+    draft = (await _water_drafts(hass, entry))[0]
+    assert set(draft.settings) == {"sensor_id"}
+    assert draft.bindings[0].role == "water_safety.moisture_sensor"
+    assert draft.bindings[0].reference.current_locator == inside
+    assert draft.bindings[0].reference.native_id is not None
+    assert draft.bindings[0].user_confirmed is True
+
+
+@pytest.mark.asyncio
+async def test_water_area_filters_default_candidates_and_show_all_expands_without_saving(hass) -> None:
+    utility, _garage, inside, outside, unrelated = _register_water_candidates(hass)
+    entry = await _empty_entry(hass)
+    form = await _choose(hass, await _open_water_menu(hass, entry), "water_safety_area_sensor")
+    area_saved = await hass.config_entries.options.async_configure(
+        form["flow_id"],
+        {cf.WATER_AREA: utility.id, cf.WATER_SHOW_ALL_COMPATIBLE: False},
+    )
+    draft_before = (await _water_drafts(hass, entry))[0]
+
+    filtered_form = await _choose(hass, area_saved, "water_safety_area_sensor")
+    filtered = _field(filtered_form, cf.WATER_MOISTURE_SENSOR)
+    assert filtered.config["include_entities"] == [inside]
+    expanded = await hass.config_entries.options.async_configure(
+        filtered_form["flow_id"],
+        {cf.WATER_AREA: utility.id, cf.WATER_SHOW_ALL_COMPATIBLE: True},
+    )
+
+    assert expanded["type"] is data_entry_flow.FlowResultType.FORM
+    expanded_selector = _field(expanded, cf.WATER_MOISTURE_SENSOR)
+    assert expanded_selector.config["include_entities"] == [inside, outside]
+    assert all(entity_id not in expanded_selector.config["include_entities"] for entity_id in unrelated)
+    assert (await _water_drafts(hass, entry))[0] == draft_before
+
+    saved = await hass.config_entries.options.async_configure(
+        expanded["flow_id"],
+        {
+            cf.WATER_AREA: utility.id,
+            cf.WATER_MOISTURE_SENSOR: outside,
+            cf.WATER_SHOW_ALL_COMPATIBLE: True,
+        },
+    )
+    assert saved["step_id"] == "water_safety"
+    edited = (await _water_drafts(hass, entry))[0]
+    assert edited.revision == draft_before.revision + 1
+    assert edited.bindings[0].reference.current_locator == outside
+
+
+@pytest.mark.asyncio
+async def test_water_existing_draft_can_change_and_clear_area_sensor_section(hass) -> None:
+    utility, garage, inside, _outside, _unrelated = _register_water_candidates(hass)
+    entry = await _empty_entry(hass)
+    form = await _choose(hass, await _open_water_menu(hass, entry), "water_safety_area_sensor")
+    first_menu = await hass.config_entries.options.async_configure(
+        form["flow_id"],
+        {
+            cf.WATER_AREA: utility.id,
+            cf.WATER_MOISTURE_SENSOR: inside,
+            cf.WATER_SHOW_ALL_COMPATIBLE: False,
+        },
+    )
+    first = (await _water_drafts(hass, entry))[0]
+
+    edit = await _choose(hass, first_menu, "water_safety_area_sensor")
+    changed_menu = await hass.config_entries.options.async_configure(
+        edit["flow_id"],
+        {cf.WATER_AREA: garage.id, cf.WATER_SHOW_ALL_COMPATIBLE: False},
+    )
+    changed = (await _water_drafts(hass, entry))[0]
+    assert changed.revision == first.revision + 1
+    assert changed.settings["area_id"] == garage.id
+    assert "sensor_id" not in changed.settings
+    assert changed.bindings == ()
+
+    clear = await _choose(hass, changed_menu, "water_safety_area_sensor")
+    cleared_menu = await hass.config_entries.options.async_configure(
+        clear["flow_id"],
+        {cf.WATER_SHOW_ALL_COMPATIBLE: False},
+    )
+    cleared = (await _water_drafts(hass, entry))[0]
+    assert cleared.revision == changed.revision + 1
+    assert dict(cleared.settings) == {}
+    assert cleared.bindings == ()
+    assert "Draft incomplete" in cleared_menu["description_placeholders"]["water_safety_summary"]
+
+
+@pytest.mark.asyncio
+async def test_water_back_without_save_does_not_create_or_update_draft(hass) -> None:
+    _register_water_candidates(hass)
+    entry = await _empty_entry(hass)
+    form = await _choose(hass, await _open_water_menu(hass, entry), "water_safety_area_sensor")
+
+    hass.config_entries.options.async_abort(form["flow_id"])
+
+    assert await _water_drafts(hass, entry) == ()
+    assert entry.data == {}
+    assert entry.options == {}
 
 
 @pytest.mark.asyncio
@@ -642,8 +851,39 @@ async def test_configured_water_safety_menu(hass) -> None:
     water = await _open_water_menu(hass, entry)
     assert active.canonical_revision_id in water["description_placeholders"]["water_safety_summary"]
     area = await _choose(hass, water, "water_safety_area_sensor")
-    assert "Utility room" in area["description_placeholders"]["section_detail"]
-    assert "binary_sensor.utility_moisture" in area["description_placeholders"]["section_detail"]
+    assert _suggested(area, cf.WATER_AREA) == "utility-room"
+    assert _suggested(area, cf.WATER_MOISTURE_SENSOR) == "binary_sensor.utility_moisture"
+
+
+@pytest.mark.asyncio
+async def test_water_active_configuration_is_unchanged_by_native_draft_edit(hass) -> None:
+    areas = ar.async_get(hass)
+    garage = areas.async_create("Garage")
+    entry = MockConfigEntry(domain=DOMAIN, title="Water active draft edit", data={}, options={})
+    entry.add_to_hass(hass)
+    assert await component.async_setup(hass, {})
+    old_draft, canonical, active = await _seed_configured_water(hass, entry)
+    active_data = deepcopy(dict(entry.data))
+    backend = await async_get_setup_backend(hass, entry)
+    await backend.repository.delete_draft(old_draft.draft_id, expected_revision=old_draft.revision)
+    assert await _water_drafts(hass, entry) == ()
+
+    form = await _choose(hass, await _open_water_menu(hass, entry), "water_safety_area_sensor")
+    saved = await hass.config_entries.options.async_configure(
+        form["flow_id"],
+        {cf.WATER_AREA: garage.id, cf.WATER_SHOW_ALL_COMPATIBLE: False},
+    )
+
+    assert saved["step_id"] == "water_safety"
+    assert entry.data == active_data
+    assert ActiveReference.model_validate(entry.data[ACTIVE_REFERENCE_KEY]) == active
+    assert await backend.repository.get_canonical_revision(canonical.revision_id) == canonical
+    edited = (await _water_drafts(hass, entry))[0]
+    assert edited.revision == 1
+    assert edited.settings["area_id"] == garage.id
+    assert edited.base_active_revision_id == active.canonical_revision_id
+    assert edited.environment_id == active.environment_id
+    assert active.canonical_revision_id in saved["description_placeholders"]["water_safety_summary"]
 
 
 @pytest.mark.asyncio
