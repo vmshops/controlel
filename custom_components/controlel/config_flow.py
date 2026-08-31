@@ -50,6 +50,11 @@ from .water_safety_notifications import (
     async_save_water_safety_notifications_draft,
     async_test_water_safety_notification,
 )
+from .water_safety_sirens import (
+    WaterSafetySirensEditor,
+    async_load_water_safety_sirens_editor,
+    async_save_water_safety_sirens_draft,
+)
 
 WIZARD_URL = f"/{DOMAIN}"
 WATER_WIZARD_URL = f"/{DOMAIN}_static/water-wizard.html"
@@ -118,6 +123,7 @@ WATER_MOISTURE_SENSOR = "water_safety_moisture_entity_id"
 WATER_SHOW_ALL_COMPATIBLE = "show_all_compatible_entities"
 WATER_NOTIFICATION_TARGETS = "water_safety_notification_targets"
 WATER_TEST_NOTIFICATION = "water_safety_test_notification"
+WATER_SIREN_TARGETS = "water_safety_siren_targets"
 
 _FORM_PATHS = {
     "heating.zones[].display_name": ZONE_NAME,
@@ -449,7 +455,61 @@ class ControlelOptionsFlow(OptionsFlow):
         )
 
     async def async_step_water_safety_sirens(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        return await self._async_step_water_safety_section("water_safety_sirens", "sirens", user_input)
+        backend = await async_get_setup_backend(self.hass, self.config_entry)
+        editor = await async_load_water_safety_sirens_editor(
+            self.hass,
+            backend.repository,
+            self.config_entry.data,
+            snapshot_id=_id("ha-water-sirens-snapshot"),
+            captured_at=_now(),
+        )
+        errors: dict[str, str] = {}
+        target_ids = (
+            _water_entity_targets_input(user_input.get(WATER_SIREN_TARGETS))
+            if user_input is not None
+            else editor.selected_target_ids
+        )
+        if user_input is not None:
+            try:
+                await async_save_water_safety_sirens_draft(
+                    backend.repository,
+                    editor,
+                    target_ids=target_ids,
+                    saved_at=_now(),
+                    report_id=_id("ha-water-sirens-report"),
+                )
+            except (KeyError, SetupConflictError, SetupNotFoundError, TypeError, ValueError, ValidationError):
+                errors[WATER_SIREN_TARGETS] = "invalid_water_siren_targets"
+            else:
+                return await self.async_step_water_safety()
+
+        return self._show_water_safety_sirens_form(editor, target_ids=target_ids, errors=errors)
+
+    def _show_water_safety_sirens_form(
+        self,
+        editor: WaterSafetySirensEditor,
+        *,
+        target_ids: tuple[str, ...],
+        errors: Mapping[str, str],
+    ) -> ConfigFlowResult:
+        candidates = list(editor.compatible_target_ids)
+        candidates.extend(target for target in target_ids if target not in candidates)
+        unavailable = ", ".join(editor.unavailable_target_ids) or "None"
+        return self.async_show_form(
+            step_id="water_safety_sirens",
+            data_schema=_water_safety_sirens_schema(
+                target_ids=target_ids,
+                candidate_entity_ids=tuple(candidates),
+            ),
+            errors=dict(errors),
+            description_placeholders={
+                "siren_behavior": (
+                    "Sirens are alarm outputs only. Water alarm state continues to come from moisture evidence. "
+                    "A service request does not prove that a siren physically sounded."
+                ),
+                "unavailable_sirens": unavailable,
+            },
+        )
 
     async def async_step_water_safety_sensor_fault(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         return await self._async_step_water_safety_section("water_safety_sensor_fault", "sensor_fault", user_input)
@@ -927,6 +987,14 @@ def _notification_targets_input(value: object) -> tuple[str, ...]:
     return tuple(str(item) for item in value)
 
 
+def _water_entity_targets_input(value: object) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, list | tuple):
+        raise ValueError("Water Safety entity targets must be a list")
+    return tuple(str(item) for item in value)
+
+
 def _water_safety_area_sensor_schema(
     *,
     area_id: str | None,
@@ -971,6 +1039,25 @@ def _water_safety_notifications_schema(
                 )
             ),
             vol.Optional(WATER_TEST_NOTIFICATION, default=test_requested): selector.BooleanSelector(),
+        }
+    )
+
+
+def _water_safety_sirens_schema(
+    *,
+    target_ids: tuple[str, ...],
+    candidate_entity_ids: tuple[str, ...],
+) -> vol.Schema:
+    return vol.Schema(
+        {
+            vol.Optional(WATER_SIREN_TARGETS, default=list(target_ids)): selector.EntitySelector(
+                selector.EntitySelectorConfig(
+                    domain="siren",
+                    include_entities=list(candidate_entity_ids),
+                    multiple=True,
+                    reorder=True,
+                )
+            )
         }
     )
 

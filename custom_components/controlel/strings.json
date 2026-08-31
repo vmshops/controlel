@@ -103,9 +103,9 @@
       },
       "water_safety_sirens": {
         "title": "Water Safety — Sirens",
-        "description": "{section_detail}",
-        "menu_options": {
-          "back_to_water_safety": "Back to Water Safety"
+        "description": "{siren_behavior} Saving updates only the inactive Water draft. Configured targets not present in current compatible discovery: {unavailable_sirens}.",
+        "data": {
+          "water_safety_siren_targets": "Alarm-output sirens"
         }
       },
       "water_safety_sensor_fault": {
@@ -202,6 +202,7 @@
       "invalid_configuration": "The configuration is invalid.",
       "invalid_water_area_sensor": "The Water area or moisture sensor selection is no longer valid. Review the current Home Assistant entities and try again.",
       "invalid_water_notification_targets": "One or more notification targets are invalid or unavailable. Review the current Home Assistant notify services and try again.",
+      "invalid_water_siren_targets": "One or more siren targets are incompatible or no longer registered. Select compatible Home Assistant siren entities and try again.",
       "validation_failed": "The draft is not activation-ready. Correct the reported issues and validate again."
     },
     "abort": {

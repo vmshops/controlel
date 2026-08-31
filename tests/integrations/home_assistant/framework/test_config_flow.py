@@ -110,6 +110,22 @@ def _register_notify_targets(hass, *services: str, calls: list[tuple[str, dict[s
     return tuple(f"notify.{service}" for service in services)
 
 
+def _register_siren_candidates(hass):
+    registry = er.async_get(hass)
+
+    def create(domain: str, unique_id: str) -> str:
+        return registry.async_get_or_create(
+            domain,
+            "water-siren-configure-test",
+            unique_id,
+            suggested_object_id=unique_id,
+        ).entity_id
+
+    compatible = (create("siren", "hall_alarm"), create("siren", "cellar_alarm"))
+    incompatible = (create("switch", "garage_siren"), create("alarm_control_panel", "home_alarm"))
+    return (*compatible, incompatible)
+
+
 async def _empty_entry(hass, *, title: str = "Canonical heating") -> MockConfigEntry:
     entry = MockConfigEntry(domain=DOMAIN, title=title, data={}, options={})
     entry.add_to_hass(hass)
@@ -645,7 +661,6 @@ async def test_water_safety_submenu_navigation_returns_to_module_menu(hass) -> N
     water = await _open_water_menu(hass, entry)
     for step_id in (
         "water_safety_status",
-        "water_safety_sirens",
         "water_safety_sensor_fault",
         "water_safety_messages",
         "water_safety_validation",
@@ -662,6 +677,14 @@ async def test_water_safety_submenu_navigation_returns_to_module_menu(hass) -> N
     assert notifications["step_id"] == "water_safety_notifications"
     assert _fields(notifications) == {cf.WATER_NOTIFICATION_TARGETS, cf.WATER_TEST_NOTIFICATION}
     hass.config_entries.options.async_abort(notifications["flow_id"])
+
+    water = await _open_water_menu(hass, entry)
+
+    sirens = await _choose(hass, water, "water_safety_sirens")
+    assert sirens["type"] is data_entry_flow.FlowResultType.FORM
+    assert sirens["step_id"] == "water_safety_sirens"
+    assert _fields(sirens) == {cf.WATER_SIREN_TARGETS}
+    hass.config_entries.options.async_abort(sirens["flow_id"])
 
     water = await _open_water_menu(hass, entry)
 
@@ -1034,6 +1057,129 @@ async def test_water_unavailable_notification_target_is_reported_truthfully(hass
     assert rejected["type"] is data_entry_flow.FlowResultType.FORM
     assert rejected["errors"] == {cf.WATER_NOTIFICATION_TARGETS: "invalid_water_notification_targets"}
     assert (await _water_drafts(hass, entry))[0] == before
+
+
+@pytest.mark.asyncio
+async def test_water_siren_defaults_save_no_output_in_incomplete_draft(hass) -> None:
+    entry = await _empty_entry(hass)
+    form = await _choose(hass, await _open_water_menu(hass, entry), "water_safety_sirens")
+
+    assert _defaults(form) == {cf.WATER_SIREN_TARGETS: []}
+    saved = await hass.config_entries.options.async_configure(form["flow_id"], _defaults(form))
+
+    assert saved["step_id"] == "water_safety"
+    assert "Draft incomplete" in saved["description_placeholders"]["water_safety_summary"]
+    draft = (await _water_drafts(hass, entry))[0]
+    assert dict(draft.settings) == {"siren_target_roles": ()}
+    assert draft.bindings == ()
+    assert ACTIVE_REFERENCE_KEY not in entry.data
+
+
+@pytest.mark.asyncio
+async def test_water_siren_discovery_accepts_only_native_siren_entities(hass) -> None:
+    hall, cellar, incompatible = _register_siren_candidates(hass)
+    entry = await _empty_entry(hass)
+    form = await _choose(hass, await _open_water_menu(hass, entry), "water_safety_sirens")
+
+    target_selector = _field(form, cf.WATER_SIREN_TARGETS)
+    assert isinstance(target_selector, selector.EntitySelector)
+    assert target_selector.config["domain"] == ["siren"]
+    assert target_selector.config["multiple"] is True
+    assert set(target_selector.config["include_entities"]) == {hall, cellar}
+    assert set(incompatible).isdisjoint(target_selector.config["include_entities"])
+    hass.config_entries.options.async_abort(form["flow_id"])
+    assert await _water_drafts(hass, entry) == ()
+
+
+@pytest.mark.asyncio
+async def test_water_multiple_sirens_are_durable_reloadable_editable_and_clearable(hass) -> None:
+    hall, cellar, _incompatible = _register_siren_candidates(hass)
+    entry = await _empty_entry(hass)
+    form = await _choose(hass, await _open_water_menu(hass, entry), "water_safety_sirens")
+    first_menu = await hass.config_entries.options.async_configure(
+        form["flow_id"],
+        {cf.WATER_SIREN_TARGETS: [hall, cellar]},
+    )
+    first = (await _water_drafts(hass, entry))[0]
+
+    roles = tuple(first.settings["siren_target_roles"])
+    assert roles == tuple(sorted(roles))
+    assert len(roles) == 2
+    assert {binding.reference.current_locator for binding in first.bindings} == {hall, cellar}
+    assert all(binding.user_confirmed for binding in first.bindings)
+
+    reloaded = await _choose(hass, first_menu, "water_safety_sirens")
+    assert set(_defaults(reloaded)[cf.WATER_SIREN_TARGETS]) == {hall, cellar}
+    edited_menu = await hass.config_entries.options.async_configure(
+        reloaded["flow_id"],
+        {cf.WATER_SIREN_TARGETS: [cellar]},
+    )
+    edited = (await _water_drafts(hass, entry))[0]
+    assert edited.revision == first.revision + 1
+    assert [binding.reference.current_locator for binding in edited.bindings] == [cellar]
+
+    clear = await _choose(hass, edited_menu, "water_safety_sirens")
+    cleared_menu = await hass.config_entries.options.async_configure(
+        clear["flow_id"],
+        {cf.WATER_SIREN_TARGETS: []},
+    )
+    cleared = (await _water_drafts(hass, entry))[0]
+    assert cleared.revision == edited.revision + 1
+    assert list(cleared.settings["siren_target_roles"]) == []
+    assert cleared.bindings == ()
+    assert "Draft incomplete" in cleared_menu["description_placeholders"]["water_safety_summary"]
+
+
+@pytest.mark.asyncio
+async def test_water_removed_siren_is_visible_as_unavailable_and_cannot_be_resaved(hass) -> None:
+    hall, _cellar, _incompatible = _register_siren_candidates(hass)
+    entry = await _empty_entry(hass)
+    form = await _choose(hass, await _open_water_menu(hass, entry), "water_safety_sirens")
+    saved = await hass.config_entries.options.async_configure(
+        form["flow_id"],
+        {cf.WATER_SIREN_TARGETS: [hall]},
+    )
+    before = (await _water_drafts(hass, entry))[0]
+    er.async_get(hass).async_remove(hall)
+
+    edit = await _choose(hass, saved, "water_safety_sirens")
+    assert _defaults(edit)[cf.WATER_SIREN_TARGETS] == [hall]
+    assert hall in edit["description_placeholders"]["unavailable_sirens"]
+    rejected = await hass.config_entries.options.async_configure(
+        edit["flow_id"],
+        {cf.WATER_SIREN_TARGETS: [hall]},
+    )
+
+    assert rejected["type"] is data_entry_flow.FlowResultType.FORM
+    assert rejected["errors"] == {cf.WATER_SIREN_TARGETS: "invalid_water_siren_targets"}
+    assert (await _water_drafts(hass, entry))[0] == before
+
+
+@pytest.mark.asyncio
+async def test_water_siren_edit_of_active_creates_draft_without_reloading_authority(hass) -> None:
+    hall, _cellar, _incompatible = _register_siren_candidates(hass)
+    entry = MockConfigEntry(domain=DOMAIN, title="Water active siren edit", data={}, options={})
+    entry.add_to_hass(hass)
+    assert await component.async_setup(hass, {})
+    old_draft, canonical, active = await _seed_configured_water(hass, entry)
+    active_data = deepcopy(dict(entry.data))
+    backend = await async_get_setup_backend(hass, entry)
+    await backend.repository.delete_draft(old_draft.draft_id, expected_revision=old_draft.revision)
+
+    form = await _choose(hass, await _open_water_menu(hass, entry), "water_safety_sirens")
+    saved = await hass.config_entries.options.async_configure(
+        form["flow_id"],
+        {cf.WATER_SIREN_TARGETS: [hall]},
+    )
+
+    assert saved["step_id"] == "water_safety"
+    assert entry.data == active_data
+    assert ActiveReference.model_validate(entry.data[ACTIVE_REFERENCE_KEY]) == active
+    assert await backend.repository.get_canonical_revision(canonical.revision_id) == canonical
+    draft = (await _water_drafts(hass, entry))[0]
+    assert draft.base_active_revision_id == active.canonical_revision_id
+    siren_bindings = [binding for binding in draft.bindings if binding.role.startswith("water_safety.siren.")]
+    assert [binding.reference.current_locator for binding in siren_bindings] == [hall]
 
 
 @pytest.mark.asyncio
