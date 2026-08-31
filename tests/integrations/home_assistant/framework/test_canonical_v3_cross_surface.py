@@ -91,6 +91,11 @@ async def _choose(hass, result, step_id: str):
     )
 
 
+async def _open_heating_menu(hass, entry):
+    hub = await hass.config_entries.options.async_init(entry.entry_id)
+    return await _choose(hass, hub, "heating")
+
+
 async def _through_groups(hass, result, *, target: float | None = None, turn_on_diff: float | None = None):
     assert result["step_id"] == "zone"
     values = _defaults(result)
@@ -278,7 +283,7 @@ async def _wizard_greenfield_activate(hass, entry, client, sensor_id: str, sourc
 
 
 async def _configure_edit_target(hass, entry, *, expected_target: float, new_target: float) -> None:
-    initial = await hass.config_entries.options.async_init(entry.entry_id)
+    initial = await _open_heating_menu(hass, entry)
     assert "edit_active" in initial["menu_options"]
     edit = await _choose(hass, initial, "edit_active")
     assert edit["step_id"] == "zone"
@@ -386,7 +391,7 @@ async def test_wizard_configure_heating_cross_surface_lifecycle_preserves_author
     assert final_active["runtime_evidence"]["authority_loaded"] is True
     assert all(item["status"] == "RESOLVED" for item in final_active["reference_health"])
 
-    configure_read = await hass.config_entries.options.async_init(entry.entry_id)
+    configure_read = await _open_heating_menu(hass, entry)
     configure_edit = await _choose(hass, configure_read, "edit_active")
     configure_zone = _defaults(configure_edit)
     assert configure_zone[cf.TARGET_TEMPERATURE] == 22.0

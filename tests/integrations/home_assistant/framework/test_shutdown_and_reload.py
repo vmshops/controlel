@@ -102,6 +102,11 @@ async def _choose(hass, result, step_id: str):
     )
 
 
+async def _open_heating_menu(hass, entry):
+    hub = await hass.config_entries.options.async_init(entry.entry_id)
+    return await _choose(hass, hub, "heating")
+
+
 async def _save_and_prepare_activation(hass, result):
     steps = ("zone", "sensor", "heat_source", "heat_delivery", "safety_timing", "diagnostics", "notifications")
     for step_id in steps[steps.index(result["step_id"]) :]:
@@ -210,7 +215,7 @@ async def test_explicit_canonical_activations_reload_once_and_leave_one_runtime(
         assert await hass.config_entries.async_setup(entry.entry_id)
         first_host = entry.runtime_data.host
 
-        initial = await hass.config_entries.options.async_init(entry.entry_id)
+        initial = await _open_heating_menu(hass, entry)
         convert = await _choose(hass, initial, "convert_legacy")
         review = await hass.config_entries.options.async_configure(convert["flow_id"], {})
         activate = await _save_and_prepare_activation(hass, review)
@@ -219,7 +224,7 @@ async def test_explicit_canonical_activations_reload_once_and_leave_one_runtime(
         await hass.async_block_till_done()
         second_host = entry.runtime_data.host
 
-        initial = await hass.config_entries.options.async_init(entry.entry_id)
+        initial = await _open_heating_menu(hass, entry)
         edit = await _choose(hass, initial, "edit_active")
         zone = _defaults(edit)
         zone[cf.TARGET_TEMPERATURE] = 21.5
@@ -278,7 +283,7 @@ async def test_invalid_canonical_draft_edit_does_not_reload_runtime(
 
     with patch.object(runtime_assembly_module, "ControlRuntime", ReloadRuntime):
         assert await hass.config_entries.async_setup(entry.entry_id)
-        initial = await hass.config_entries.options.async_init(entry.entry_id)
+        initial = await _open_heating_menu(hass, entry)
         convert = await _choose(hass, initial, "convert_legacy")
         result = await hass.config_entries.options.async_configure(convert["flow_id"], {})
         result = await hass.config_entries.options.async_configure(result["flow_id"], _defaults(result))

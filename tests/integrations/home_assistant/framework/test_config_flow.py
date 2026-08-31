@@ -75,6 +75,21 @@ async def _choose(hass, result, step_id: str):
     )
 
 
+async def _open_hub(hass, entry):
+    hub = await hass.config_entries.options.async_init(entry.entry_id)
+    assert hub["type"] is data_entry_flow.FlowResultType.MENU
+    assert hub["step_id"] == "init"
+    return hub
+
+
+async def _open_heating_menu(hass, entry, *, hub=None):
+    if hub is None:
+        hub = await _open_hub(hass, entry)
+    heating = await _choose(hass, hub, "heating")
+    assert heating["step_id"] == "heating"
+    return heating
+
+
 async def _through_groups(hass, result, *, target: float | None = None, measurement_age: float | None = None):
     assert result["step_id"] == "zone"
     values = _defaults(result)
@@ -96,10 +111,9 @@ async def _through_groups(hass, result, *, target: float | None = None, measurem
 
 
 async def _start_greenfield_draft(hass, entry, sensor_id: str, source_id: str):
-    initial = await hass.config_entries.options.async_init(entry.entry_id)
-    assert initial["type"] is data_entry_flow.FlowResultType.MENU
-    assert initial["menu_options"][0] == "open_wizard"
-    start = await _choose(hass, initial, "start_greenfield")
+    heating = await _open_heating_menu(hass, entry)
+    assert heating["menu_options"][0] == "open_wizard"
+    start = await _choose(hass, heating, "start_greenfield")
     assert start["step_id"] == "start_greenfield"
     return await hass.config_entries.options.async_configure(
         start["flow_id"],
@@ -222,7 +236,7 @@ async def test_active_v3_edit_changes_one_field_only_and_requires_explicit_activ
         entry.runtime_data.loaded_configuration.canonical_revision_id
     )
 
-    initial = await hass.config_entries.options.async_init(entry.entry_id)
+    initial = await _open_heating_menu(hass, entry)
     edit = await _choose(hass, initial, "edit_active")
     saved = await _save_draft(hass, await _through_groups(hass, edit, target=23.5))
 
@@ -256,7 +270,7 @@ async def test_durable_draft_can_be_resumed_and_abandoned(hass) -> None:
     draft = (await backend.configuration_v3.list_drafts())[0]
     hass.config_entries.options.async_abort(result["flow_id"])
 
-    initial = await hass.config_entries.options.async_init(entry.entry_id)
+    initial = await _open_heating_menu(hass, entry)
     assert "resume_draft" in initial["menu_options"]
     resume = await _choose(hass, initial, "resume_draft")
     resumed = await hass.config_entries.options.async_configure(resume["flow_id"], {"draft_id": draft.draft_id})
@@ -264,7 +278,7 @@ async def test_durable_draft_can_be_resumed_and_abandoned(hass) -> None:
     assert _defaults(resumed)[cf.ZONE_NAME] == "Living room"
     hass.config_entries.options.async_abort(resumed["flow_id"])
 
-    initial = await hass.config_entries.options.async_init(entry.entry_id)
+    initial = await _open_heating_menu(hass, entry)
     abandon = await _choose(hass, initial, "abandon_draft")
     abandoned = await hass.config_entries.options.async_configure(abandon["flow_id"], {"draft_id": draft.draft_id})
     assert abandoned["type"] is data_entry_flow.FlowResultType.ABORT
@@ -292,7 +306,7 @@ async def test_legacy_requires_explicit_conversion_and_never_mixes_authorities(
     original_data, original_options = deepcopy(dict(entry.data)), deepcopy(dict(entry.options))
     original_runtime = entry.runtime_data
 
-    initial = await hass.config_entries.options.async_init(entry.entry_id)
+    initial = await _open_heating_menu(hass, entry)
     assert "convert_legacy" in initial["menu_options"]
     assert "edit_active" not in initial["menu_options"]
     assert "start_greenfield" not in initial["menu_options"]
@@ -404,3 +418,82 @@ async def test_real_single_entry_guard_aborts_second_flow(hass) -> None:
     )
     assert result["type"] is data_entry_flow.FlowResultType.ABORT
     assert result["reason"] == "single_instance_allowed"
+
+
+@pytest.mark.asyncio
+async def test_configure_opens_hub_with_module_menu(hass) -> None:
+    entry = await _empty_entry(hass)
+    hub = await _open_hub(hass, entry)
+    assert hub["description_placeholders"]["hub_explanation"] == cf.HUB_EXPLANATION
+    assert list(hub["menu_options"]) == list(cf.HUB_MENU_OPTIONS)
+
+
+@pytest.mark.asyncio
+async def test_heating_route_reaches_existing_configuration_menu(hass) -> None:
+    entry = await _empty_entry(hass)
+    heating = await _open_heating_menu(hass, entry)
+    assert "start_greenfield" in heating["menu_options"]
+    assert "open_wizard" in heating["menu_options"]
+    assert "back_to_hub" in heating["menu_options"]
+
+
+@pytest.mark.asyncio
+async def test_water_safety_route_and_back_navigation(hass) -> None:
+    from custom_components.controlel.core_capabilities import water_safety_core_available
+
+    entry = await _empty_entry(hass)
+    hub = await _open_hub(hass, entry)
+    water = await _choose(hass, hub, "water_safety")
+    assert water["step_id"] == "water_safety"
+    if water_safety_core_available():
+        assert "open_water_wizard" in water["menu_options"]
+    assert "back_to_hub" in water["menu_options"]
+    hub_again = await _choose(hass, water, "back_to_hub")
+    assert hub_again["step_id"] == "init"
+    assert list(hub_again["menu_options"]) == list(cf.HUB_MENU_OPTIONS)
+
+    if water_safety_core_available():
+        water = await _choose(hass, hub_again, "water_safety")
+        wizard = await _choose(hass, water, "open_water_wizard")
+        assert wizard["type"] is data_entry_flow.FlowResultType.EXTERNAL_STEP
+        assert wizard["url"] == cf.WATER_WIZARD_URL
+
+
+@pytest.mark.asyncio
+async def test_hub_back_navigation_from_placeholders(hass) -> None:
+    entry = await _empty_entry(hass)
+    for step_id in ("notifications_hub", "general_hub", "diagnostics_advanced"):
+        hub = await _open_hub(hass, entry)
+        submenu = await _choose(hass, hub, step_id)
+        assert submenu["step_id"] == step_id
+        assert submenu["menu_options"] == ["back_to_hub"]
+        hub_again = await _choose(hass, submenu, "back_to_hub")
+        assert hub_again["step_id"] == "init"
+
+
+@pytest.mark.asyncio
+async def test_fresh_unconfigured_entry_opens_hub_without_heating_auto_entry(hass) -> None:
+    initial = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": config_entries.SOURCE_USER},
+    )
+    await hass.config_entries.flow.async_configure(initial["flow_id"], {})
+    entry = hass.config_entries.async_entries(DOMAIN)[0]
+    hub = await _open_hub(hass, entry)
+    assert hub["step_id"] == "init"
+    assert "heating" in hub["menu_options"]
+    assert "start_greenfield" not in hub["menu_options"]
+
+
+@pytest.mark.asyncio
+async def test_configured_entry_heating_route_remains_compatible(hass) -> None:
+    sensor_id, source_id = _register_bindings(hass, platform="configured-hub-test")
+    entry = await _empty_entry(hass)
+    created = await _through_groups(hass, await _start_greenfield_draft(hass, entry, sensor_id, source_id))
+    activated = await _prepare_activation(hass, await _save_draft(hass, created))
+    await hass.config_entries.options.async_configure(activated["flow_id"], {})
+    await hass.async_block_till_done()
+
+    heating = await _open_heating_menu(hass, entry)
+    assert "edit_active" in heating["menu_options"]
+    assert "start_greenfield" not in heating["menu_options"]

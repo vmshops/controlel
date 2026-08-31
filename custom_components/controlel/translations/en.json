@@ -39,6 +39,17 @@
     "step": {
       "init": {
         "title": "Configure Controlel",
+        "description": "{hub_explanation}",
+        "menu_options": {
+          "heating": "Heating",
+          "water_safety": "Water Safety",
+          "notifications_hub": "Notifications",
+          "general_hub": "General",
+          "diagnostics_advanced": "Diagnostics / Advanced"
+        }
+      },
+      "heating": {
+        "title": "Heating",
         "description": "{configure_explanation} Choose Open Setup Wizard below to launch the guided Wizard.",
         "menu_options": {
           "open_wizard": "Open Setup Wizard",
@@ -47,7 +58,37 @@
           "convert_v2": "Convert active canonical v2 configuration",
           "convert_legacy": "Convert legacy configuration to v3",
           "resume_draft": "Resume a durable draft",
-          "abandon_draft": "Abandon a durable draft"
+          "abandon_draft": "Abandon a durable draft",
+          "back_to_hub": "Back to Controlel Configure"
+        }
+      },
+      "water_safety": {
+        "title": "Water Safety",
+        "description": "Configure Water Safety moisture detection, notifications and sirens.",
+        "menu_options": {
+          "open_water_wizard": "Open Water Safety Setup Wizard",
+          "back_to_hub": "Back to Controlel Configure"
+        }
+      },
+      "notifications_hub": {
+        "title": "Notifications",
+        "description": "Platform-wide notification delivery is not yet available in native Home Assistant Configure. Heating notification preferences are edited in the Heating module.",
+        "menu_options": {
+          "back_to_hub": "Back to Controlel Configure"
+        }
+      },
+      "general_hub": {
+        "title": "General",
+        "description": "General Controlel settings are not yet available in native Home Assistant Configure.",
+        "menu_options": {
+          "back_to_hub": "Back to Controlel Configure"
+        }
+      },
+      "diagnostics_advanced": {
+        "title": "Diagnostics / Advanced",
+        "description": "Platform-wide diagnostics and advanced settings are not yet available in native Home Assistant Configure. Heating diagnostic preferences are edited in the Heating module.",
+        "menu_options": {
+          "back_to_hub": "Back to Controlel Configure"
         }
       },
       "start_greenfield": {

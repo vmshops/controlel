@@ -30,12 +30,19 @@ from controlel.infrastructure.home_assistant.setup_discovery import HA_AREA_KIND
 
 from .activation_backend import async_activate_canonical_revision
 from .const import CONFIG_ENTRY_VERSION, DOMAIN, INTEGRATION_VERSION
+from .core_capabilities import water_safety_core_available
 from .setup_backend import async_get_setup_backend
 
 WIZARD_URL = f"/{DOMAIN}"
+WATER_WIZARD_URL = f"/{DOMAIN}_static/water-wizard.html"
+HUB_MENU_OPTIONS = ("heating", "water_safety", "notifications_hub", "general_hub", "diagnostics_advanced")
 TOP_EXPLANATION = (
     "You can configure Controlel here manually or use the simpler guided Setup Wizard in the Controlel panel. "
     "Both edit the same configuration."
+)
+HUB_EXPLANATION = (
+    "Controlel is a multi-module platform. Choose a module below. "
+    "You can leave any module without completing its configuration."
 )
 
 ZONE_NAME = "zone_display_name"
@@ -190,21 +197,57 @@ class ControlelOptionsFlow(OptionsFlow):
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         del user_input
-        drafts = await (await self._service()).list_drafts()
         authority = await self._authority_kind()
         if authority == "mixed":
             return self.async_abort(reason="canonical_legacy_mixed")
+        return self.async_show_menu(
+            step_id="init",
+            menu_options=list(HUB_MENU_OPTIONS),
+            description_placeholders={"hub_explanation": HUB_EXPLANATION},
+        )
+
+    async def async_step_back_to_hub(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        return await self.async_step_init(user_input)
+
+    async def async_step_heating(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        del user_input
+        drafts = await (await self._service()).list_drafts()
+        authority = await self._authority_kind()
         menu = ["open_wizard"]
         menu.append(
             {"v3": "edit_active", "v2": "convert_v2", "legacy": "convert_legacy"}.get(authority, "start_greenfield")
         )
         if drafts:
             menu.extend(("resume_draft", "abandon_draft"))
+        menu.append("back_to_hub")
         return self.async_show_menu(
-            step_id="init",
+            step_id="heating",
             menu_options=menu,
             description_placeholders={"configure_explanation": TOP_EXPLANATION},
         )
+
+    async def async_step_water_safety(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        del user_input
+        menu = ["back_to_hub"]
+        if water_safety_core_available():
+            menu.insert(0, "open_water_wizard")
+        return self.async_show_menu(step_id="water_safety", menu_options=menu)
+
+    async def async_step_open_water_wizard(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        del user_input
+        return self.async_external_step(step_id="open_water_wizard", url=WATER_WIZARD_URL)
+
+    async def async_step_notifications_hub(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        del user_input
+        return self.async_show_menu(step_id="notifications_hub", menu_options=["back_to_hub"])
+
+    async def async_step_general_hub(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        del user_input
+        return self.async_show_menu(step_id="general_hub", menu_options=["back_to_hub"])
+
+    async def async_step_diagnostics_advanced(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        del user_input
+        return self.async_show_menu(step_id="diagnostics_advanced", menu_options=["back_to_hub"])
 
     async def _authority_kind(self) -> str:
         raw = self.config_entry.data.get(ACTIVE_REFERENCE_KEY)
