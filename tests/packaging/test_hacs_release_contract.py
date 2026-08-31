@@ -29,6 +29,7 @@ def test_hacs_source_contract_is_exact() -> None:
     assert set(files) == EXPECTED_ARCHIVE_FILES
     assert "water_safety_configure_view.py" in files
     assert "water_safety_area_sensor.py" in files
+    assert "water_safety_notifications.py" in files
     config_flow_source = files["config_flow.py"].decode("utf-8")
     assert "water_safety_configure_view" in config_flow_source
     assert "frontend/i18n.js" in files

@@ -100,6 +100,16 @@ def _register_water_candidates(hass):
     return utility, garage, inside, outside, unrelated
 
 
+def _register_notify_targets(hass, *services: str, calls: list[tuple[str, dict[str, object]]] | None = None):
+    async def record(call) -> None:
+        if calls is not None:
+            calls.append((call.service, dict(call.data)))
+
+    for service in services:
+        hass.services.async_register("notify", service, record)
+    return tuple(f"notify.{service}" for service in services)
+
+
 async def _empty_entry(hass, *, title: str = "Canonical heating") -> MockConfigEntry:
     entry = MockConfigEntry(domain=DOMAIN, title=title, data={}, options={})
     entry.add_to_hass(hass)
@@ -635,7 +645,6 @@ async def test_water_safety_submenu_navigation_returns_to_module_menu(hass) -> N
     water = await _open_water_menu(hass, entry)
     for step_id in (
         "water_safety_status",
-        "water_safety_notifications",
         "water_safety_sirens",
         "water_safety_sensor_fault",
         "water_safety_messages",
@@ -647,6 +656,14 @@ async def test_water_safety_submenu_navigation_returns_to_module_menu(hass) -> N
         assert "section_detail" in section["description_placeholders"]
         water = await _choose(hass, section, "back_to_water_safety")
         assert water["step_id"] == "water_safety"
+
+    notifications = await _choose(hass, water, "water_safety_notifications")
+    assert notifications["type"] is data_entry_flow.FlowResultType.FORM
+    assert notifications["step_id"] == "water_safety_notifications"
+    assert _fields(notifications) == {cf.WATER_NOTIFICATION_TARGETS, cf.WATER_TEST_NOTIFICATION}
+    hass.config_entries.options.async_abort(notifications["flow_id"])
+
+    water = await _open_water_menu(hass, entry)
 
     area_sensor = await _choose(hass, water, "water_safety_area_sensor")
     assert area_sensor["type"] is data_entry_flow.FlowResultType.FORM
@@ -830,6 +847,193 @@ async def test_water_back_without_save_does_not_create_or_update_draft(hass) -> 
     assert await _water_drafts(hass, entry) == ()
     assert entry.data == {}
     assert entry.options == {}
+
+
+@pytest.mark.asyncio
+async def test_water_notification_defaults_save_empty_incomplete_draft(hass) -> None:
+    entry = await _empty_entry(hass)
+    form = await _choose(hass, await _open_water_menu(hass, entry), "water_safety_notifications")
+
+    assert _defaults(form) == {
+        cf.WATER_NOTIFICATION_TARGETS: [],
+        cf.WATER_TEST_NOTIFICATION: False,
+    }
+    saved = await hass.config_entries.options.async_configure(form["flow_id"], _defaults(form))
+
+    assert saved["step_id"] == "water_safety"
+    assert "Draft incomplete" in saved["description_placeholders"]["water_safety_summary"]
+    draft = (await _water_drafts(hass, entry))[0]
+    assert dict(draft.settings) == {"notification_target_roles": ()}
+    assert draft.bindings == ()
+    backend = await async_get_setup_backend(hass, entry)
+    report = await backend.repository.get_latest_validation_report(draft.draft_id)
+    assert report is not None
+    assert report.activation_ready is False
+    assert report.issues
+    assert ACTIVE_REFERENCE_KEY not in entry.data
+
+
+@pytest.mark.asyncio
+async def test_water_notification_one_target_is_durable_and_reloadable(hass) -> None:
+    (phone,) = _register_notify_targets(hass, "mobile_app_phone")
+    entry = await _empty_entry(hass)
+    form = await _choose(hass, await _open_water_menu(hass, entry), "water_safety_notifications")
+
+    target_selector = _field(form, cf.WATER_NOTIFICATION_TARGETS)
+    assert isinstance(target_selector, selector.SelectSelector)
+    assert target_selector.config["multiple"] is True
+    assert target_selector.config["options"] == [{"value": phone, "label": phone}]
+    saved = await hass.config_entries.options.async_configure(
+        form["flow_id"],
+        {cf.WATER_NOTIFICATION_TARGETS: [phone], cf.WATER_TEST_NOTIFICATION: False},
+    )
+
+    draft = (await _water_drafts(hass, entry))[0]
+    assert list(draft.settings["notification_target_roles"]) == ["water_safety.notification.primary"]
+    assert len(draft.bindings) == 1
+    assert draft.bindings[0].reference.current_locator == phone
+    assert draft.bindings[0].user_confirmed is True
+    reloaded = await _choose(hass, saved, "water_safety_notifications")
+    assert _defaults(reloaded)[cf.WATER_NOTIFICATION_TARGETS] == [phone]
+
+
+@pytest.mark.asyncio
+async def test_water_notification_multiple_targets_can_be_edited_and_cleared(hass) -> None:
+    phone, tablet, wall = _register_notify_targets(hass, "phone", "tablet", "wall_panel")
+    entry = await _empty_entry(hass)
+    form = await _choose(hass, await _open_water_menu(hass, entry), "water_safety_notifications")
+    first_menu = await hass.config_entries.options.async_configure(
+        form["flow_id"],
+        {cf.WATER_NOTIFICATION_TARGETS: [phone, tablet], cf.WATER_TEST_NOTIFICATION: False},
+    )
+    first = (await _water_drafts(hass, entry))[0]
+    first_roles = tuple(first.settings["notification_target_roles"])
+    assert len(first_roles) == 2
+    assert {binding.role: binding.reference.current_locator for binding in first.bindings} == dict(
+        zip(first_roles, (phone, tablet), strict=True)
+    )
+
+    edit = await _choose(hass, first_menu, "water_safety_notifications")
+    edited_menu = await hass.config_entries.options.async_configure(
+        edit["flow_id"],
+        {cf.WATER_NOTIFICATION_TARGETS: [tablet, wall], cf.WATER_TEST_NOTIFICATION: False},
+    )
+    edited = (await _water_drafts(hass, entry))[0]
+    assert edited.revision == first.revision + 1
+    assert edited.settings["notification_target_roles"][0] == first_roles[1]
+    assert {binding.role: binding.reference.current_locator for binding in edited.bindings} == dict(
+        zip(edited.settings["notification_target_roles"], (tablet, wall), strict=True)
+    )
+
+    clear = await _choose(hass, edited_menu, "water_safety_notifications")
+    cleared_menu = await hass.config_entries.options.async_configure(
+        clear["flow_id"],
+        {cf.WATER_NOTIFICATION_TARGETS: [], cf.WATER_TEST_NOTIFICATION: False},
+    )
+    cleared = (await _water_drafts(hass, entry))[0]
+    assert cleared.revision == edited.revision + 1
+    assert list(cleared.settings["notification_target_roles"]) == []
+    assert cleared.bindings == ()
+    assert "Draft incomplete" in cleared_menu["description_placeholders"]["water_safety_summary"]
+
+
+@pytest.mark.asyncio
+async def test_water_notification_back_without_save_does_not_mutate_draft(hass) -> None:
+    (phone,) = _register_notify_targets(hass, "phone")
+    entry = await _empty_entry(hass)
+    form = await _choose(hass, await _open_water_menu(hass, entry), "water_safety_notifications")
+    saved = await hass.config_entries.options.async_configure(
+        form["flow_id"],
+        {cf.WATER_NOTIFICATION_TARGETS: [phone], cf.WATER_TEST_NOTIFICATION: False},
+    )
+    before = (await _water_drafts(hass, entry))[0]
+
+    edit = await _choose(hass, saved, "water_safety_notifications")
+    hass.config_entries.options.async_abort(edit["flow_id"])
+
+    assert (await _water_drafts(hass, entry))[0] == before
+    assert ACTIVE_REFERENCE_KEY not in entry.data
+
+
+@pytest.mark.asyncio
+async def test_water_notification_edit_of_active_creates_draft_only(hass) -> None:
+    old_target, new_target = _register_notify_targets(hass, "mobile_app_phone", "family")
+    entry = MockConfigEntry(domain=DOMAIN, title="Water active notification edit", data={}, options={})
+    entry.add_to_hass(hass)
+    assert await component.async_setup(hass, {})
+    old_draft, canonical, active = await _seed_configured_water(hass, entry)
+    active_data = deepcopy(dict(entry.data))
+    backend = await async_get_setup_backend(hass, entry)
+    await backend.repository.delete_draft(old_draft.draft_id, expected_revision=old_draft.revision)
+
+    form = await _choose(hass, await _open_water_menu(hass, entry), "water_safety_notifications")
+    assert _defaults(form)[cf.WATER_NOTIFICATION_TARGETS] == [old_target]
+    saved = await hass.config_entries.options.async_configure(
+        form["flow_id"],
+        {cf.WATER_NOTIFICATION_TARGETS: [new_target], cf.WATER_TEST_NOTIFICATION: False},
+    )
+
+    assert saved["step_id"] == "water_safety"
+    assert entry.data == active_data
+    assert ActiveReference.model_validate(entry.data[ACTIVE_REFERENCE_KEY]) == active
+    assert await backend.repository.get_canonical_revision(canonical.revision_id) == canonical
+    draft = (await _water_drafts(hass, entry))[0]
+    assert draft.base_active_revision_id == active.canonical_revision_id
+    assert [
+        binding.reference.current_locator
+        for binding in draft.bindings
+        if binding.role.startswith("water_safety.notification.")
+    ] == [new_target]
+
+
+@pytest.mark.asyncio
+async def test_water_notification_test_reports_acceptance_without_saving(hass) -> None:
+    calls: list[tuple[str, dict[str, object]]] = []
+    phone, tablet = _register_notify_targets(hass, "phone", "tablet", calls=calls)
+    entry = await _empty_entry(hass)
+    form = await _choose(hass, await _open_water_menu(hass, entry), "water_safety_notifications")
+
+    tested = await hass.config_entries.options.async_configure(
+        form["flow_id"],
+        {cf.WATER_NOTIFICATION_TARGETS: [phone, tablet], cf.WATER_TEST_NOTIFICATION: True},
+    )
+
+    assert tested["type"] is data_entry_flow.FlowResultType.FORM
+    assert tested["step_id"] == "water_safety_notifications"
+    result = tested["description_placeholders"]["notification_test_result"]
+    assert "accepted 2" in result
+    assert "did not verify delivery" in result
+    assert "No configuration was saved" in result
+    assert [service for service, _data in calls] == ["phone", "tablet"]
+    assert all("delivery is not verified" in str(data["message"]) for _service, data in calls)
+    assert await _water_drafts(hass, entry) == ()
+    assert entry.data == {}
+    assert entry.options == {}
+
+
+@pytest.mark.asyncio
+async def test_water_unavailable_notification_target_is_reported_truthfully(hass) -> None:
+    (phone,) = _register_notify_targets(hass, "phone")
+    entry = await _empty_entry(hass)
+    form = await _choose(hass, await _open_water_menu(hass, entry), "water_safety_notifications")
+    saved = await hass.config_entries.options.async_configure(
+        form["flow_id"],
+        {cf.WATER_NOTIFICATION_TARGETS: [phone], cf.WATER_TEST_NOTIFICATION: False},
+    )
+    before = (await _water_drafts(hass, entry))[0]
+    hass.services.async_remove("notify", "phone")
+
+    edit = await _choose(hass, saved, "water_safety_notifications")
+    options = _field(edit, cf.WATER_NOTIFICATION_TARGETS).config["options"]
+    assert options == [{"value": phone, "label": f"{phone} (currently unavailable)"}]
+    rejected = await hass.config_entries.options.async_configure(
+        edit["flow_id"],
+        {cf.WATER_NOTIFICATION_TARGETS: [phone], cf.WATER_TEST_NOTIFICATION: False},
+    )
+
+    assert rejected["type"] is data_entry_flow.FlowResultType.FORM
+    assert rejected["errors"] == {cf.WATER_NOTIFICATION_TARGETS: "invalid_water_notification_targets"}
+    assert (await _water_drafts(hass, entry))[0] == before
 
 
 @pytest.mark.asyncio

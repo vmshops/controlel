@@ -10,6 +10,7 @@ from uuid import uuid4
 
 import voluptuous as vol
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult, FlowType, OptionsFlow
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import selector
 from pydantic import ValidationError
 
@@ -42,6 +43,12 @@ from .water_safety_configure_view import (
     async_build_water_safety_configure_view,
     water_safety_menu_summary,
     water_safety_section_detail,
+)
+from .water_safety_notifications import (
+    WaterSafetyNotificationsEditor,
+    async_load_water_safety_notifications_editor,
+    async_save_water_safety_notifications_draft,
+    async_test_water_safety_notification,
 )
 
 WIZARD_URL = f"/{DOMAIN}"
@@ -109,6 +116,8 @@ NOTIFICATION_HISTORY = "notification_history_capacity"
 WATER_AREA = "water_safety_area_id"
 WATER_MOISTURE_SENSOR = "water_safety_moisture_entity_id"
 WATER_SHOW_ALL_COMPATIBLE = "show_all_compatible_entities"
+WATER_NOTIFICATION_TARGETS = "water_safety_notification_targets"
+WATER_TEST_NOTIFICATION = "water_safety_test_notification"
 
 _FORM_PATHS = {
     "heating.zones[].display_name": ZONE_NAME,
@@ -218,6 +227,7 @@ class ControlelOptionsFlow(OptionsFlow):
         self._candidate: CanonicalConfigurationRevisionV3 | None = None
         self._water_area_sensor_show_all = False
         self._water_area_sensor_pending: dict[str, Any] | None = None
+        self._water_notification_test_result = "No test request has been sent."
 
     async def _service(self) -> Any:
         return (await async_get_setup_backend(self.hass, self.config_entry)).configuration_v3
@@ -355,7 +365,88 @@ class ControlelOptionsFlow(OptionsFlow):
         )
 
     async def async_step_water_safety_notifications(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        return await self._async_step_water_safety_section("water_safety_notifications", "notifications", user_input)
+        if user_input is None:
+            self._water_notification_test_result = "No test request has been sent."
+        backend = await async_get_setup_backend(self.hass, self.config_entry)
+        editor = await async_load_water_safety_notifications_editor(
+            self.hass,
+            backend.repository,
+            self.config_entry.data,
+            snapshot_id=_id("ha-water-notifications-snapshot"),
+            captured_at=_now(),
+        )
+        errors: dict[str, str] = {}
+        target_ids = (
+            _notification_targets_input(user_input.get(WATER_NOTIFICATION_TARGETS))
+            if user_input is not None
+            else editor.selected_target_ids
+        )
+        if user_input is not None:
+            try:
+                if bool(user_input.get(WATER_TEST_NOTIFICATION, False)):
+                    accepted = await async_test_water_safety_notification(
+                        self.hass,
+                        editor,
+                        target_ids=target_ids,
+                    )
+                    self._water_notification_test_result = (
+                        f"Home Assistant accepted {len(accepted)} notification service request(s). "
+                        "Controlel did not verify delivery. No configuration was saved."
+                    )
+                    user_input = {**user_input, WATER_TEST_NOTIFICATION: False}
+                else:
+                    saved_at = _now()
+                    await async_save_water_safety_notifications_draft(
+                        backend.repository,
+                        editor,
+                        target_ids=target_ids,
+                        saved_at=saved_at,
+                        report_id=_id("ha-water-notifications-report"),
+                    )
+                    return await self.async_step_water_safety()
+            except (
+                HomeAssistantError,
+                KeyError,
+                SetupConflictError,
+                SetupNotFoundError,
+                TypeError,
+                ValueError,
+                ValidationError,
+            ):
+                errors[WATER_NOTIFICATION_TARGETS] = "invalid_water_notification_targets"
+
+        return self._show_water_safety_notifications_form(
+            editor,
+            target_ids=target_ids,
+            test_requested=bool(user_input and user_input.get(WATER_TEST_NOTIFICATION, False)),
+            errors=errors,
+        )
+
+    def _show_water_safety_notifications_form(
+        self,
+        editor: WaterSafetyNotificationsEditor,
+        *,
+        target_ids: tuple[str, ...],
+        test_requested: bool,
+        errors: Mapping[str, str],
+    ) -> ConfigFlowResult:
+        return self.async_show_form(
+            step_id="water_safety_notifications",
+            data_schema=_water_safety_notifications_schema(
+                target_ids=target_ids,
+                available_target_ids=editor.available_target_ids,
+                unavailable_target_ids=editor.unavailable_target_ids,
+                test_requested=test_requested,
+            ),
+            errors=dict(errors),
+            description_placeholders={
+                "notification_behavior": (
+                    "The existing Water Safety contract sends wet incident and recovery notifications to the same "
+                    "configured targets. Clearing all targets saves an incomplete draft."
+                ),
+                "notification_test_result": self._water_notification_test_result,
+            },
+        )
 
     async def async_step_water_safety_sirens(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         return await self._async_step_water_safety_section("water_safety_sirens", "sirens", user_input)
@@ -828,6 +919,14 @@ def _optional_input(value: object) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
+def _notification_targets_input(value: object) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, list | tuple):
+        raise ValueError("notification targets must be a list")
+    return tuple(str(item) for item in value)
+
+
 def _water_safety_area_sensor_schema(
     *,
     area_id: str | None,
@@ -845,6 +944,33 @@ def _water_safety_area_sensor_schema(
                 )
             ),
             vol.Optional(WATER_SHOW_ALL_COMPATIBLE, default=show_all): selector.BooleanSelector(),
+        }
+    )
+
+
+def _water_safety_notifications_schema(
+    *,
+    target_ids: tuple[str, ...],
+    available_target_ids: tuple[str, ...],
+    unavailable_target_ids: tuple[str, ...],
+    test_requested: bool,
+) -> vol.Schema:
+    options: list[selector.SelectOptionDict] = [{"value": target, "label": target} for target in available_target_ids]
+    options.extend(
+        {"value": target, "label": f"{target} (currently unavailable)"}
+        for target in unavailable_target_ids
+        if target not in available_target_ids
+    )
+    return vol.Schema(
+        {
+            vol.Optional(WATER_NOTIFICATION_TARGETS, default=list(target_ids)): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=options,
+                    multiple=True,
+                    mode=selector.SelectSelectorMode.DROPDOWN,
+                )
+            ),
+            vol.Optional(WATER_TEST_NOTIFICATION, default=test_requested): selector.BooleanSelector(),
         }
     )
 

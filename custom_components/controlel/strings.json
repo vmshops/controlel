@@ -95,9 +95,10 @@
       },
       "water_safety_notifications": {
         "title": "Water Safety — Notifications",
-        "description": "{section_detail}",
-        "menu_options": {
-          "back_to_water_safety": "Back to Water Safety"
+        "description": "{notification_behavior} Saving updates only the inactive Water draft. {notification_test_result}",
+        "data": {
+          "water_safety_notification_targets": "Wet incident & recovery notification targets",
+          "water_safety_test_notification": "Test notification instead of saving"
         }
       },
       "water_safety_sirens": {
@@ -200,6 +201,7 @@
     "error": {
       "invalid_configuration": "The configuration is invalid.",
       "invalid_water_area_sensor": "The Water area or moisture sensor selection is no longer valid. Review the current Home Assistant entities and try again.",
+      "invalid_water_notification_targets": "One or more notification targets are invalid or unavailable. Review the current Home Assistant notify services and try again.",
       "validation_failed": "The draft is not activation-ready. Correct the reported issues and validate again."
     },
     "abort": {
