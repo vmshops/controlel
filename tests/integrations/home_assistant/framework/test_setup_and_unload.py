@@ -1,7 +1,7 @@
 from dataclasses import replace
 from datetime import UTC, datetime
 from threading import get_ident
-from unittest.mock import patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from homeassistant.const import ATTR_UNIT_OF_MEASUREMENT, UnitOfTemperature
@@ -9,13 +9,15 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 import controlel.application.runtime.control_runtime_assembly as runtime_assembly_module
 import custom_components.controlel as component
+import custom_components.controlel.setup_write_websocket as setup_transport
+from controlel.application.setup import ActiveReference
 from controlel.domain.repositories.sensor_repository import SensorRepository
 from controlel.domain.repositories.zone_repository import ZoneRepository
 from controlel.domain.runtime_supervision import CommandAuthority, SupervisorPhase
 from controlel.domain.source_control import ReportedSourceState, SourceOwnership
 from controlel.domain.value_objects.sensor_id import SensorId
+from controlel.infrastructure.home_assistant import MODULE_ACTIVE_REFERENCES_KEY
 from custom_components.controlel import ControlelEntryRuntime
-from custom_components.controlel.config import HomeAssistantConfigurationError
 from custom_components.controlel.const import (
     CONF_INDETERMINATE_GRACE_PERIOD,
     CONF_MINIMUM_HEATING_OFF_TIME,
@@ -222,13 +224,14 @@ async def test_partial_setup_failure_cleans_every_constructed_resource_and_prese
     with (
         patch.object(runtime_assembly_module, "ControlRuntime", FailingRuntime),
         patch.object(component, "HomeAssistantControlelHost", CapturingHost),
-        pytest.raises(RuntimeError, match="demonstrated setup failure"),
     ):
-        await component.async_setup_entry(hass, entry)
+        assert await component.async_setup_entry(hass, entry)
 
     host = hosts[0]
     runtime = FailingRuntime.instances[0]
-    assert not hasattr(entry, "runtime_data")
+    assert isinstance(entry.runtime_data, ControlelEntryRuntime)
+    assert entry.runtime_data.host is None
+    assert entry.runtime_data.module_errors["heating"] == "heating_lifecycle_failed:RuntimeError"
     assert host.accepting is False
     assert host.stopped is True
     assert host._executor.closed is True
@@ -248,7 +251,204 @@ async def test_invalid_stored_configuration_is_not_classified_as_transient(hass,
     entry_data["primary_measurement_max_age"] = 0
     entry = MockConfigEntry(domain=DOMAIN, data=entry_data)
 
-    with pytest.raises(HomeAssistantConfigurationError):
-        await component.async_setup_entry(hass, entry)
+    assert await component.async_setup_entry(hass, entry)
 
-    assert not hasattr(entry, "runtime_data")
+    assert entry.runtime_data.host is None
+    assert entry.runtime_data.module_errors["heating"] == "heating_lifecycle_failed:HomeAssistantConfigurationError"
+
+
+def _water_active_reference() -> ActiveReference:
+    return ActiveReference(
+        environment_id="ha-installation-id",
+        module_key="water_safety",
+        module_instance_id="utility-water",
+        canonical_revision_id="water-canonical-1",
+        semantic_configuration_fingerprint="b" * 64,
+        generation=1,
+        committing_operation_id="water-attempt-1",
+    )
+
+
+def _water_activation_message(entry_id: str) -> dict[str, object]:
+    return {
+        "id": 7,
+        "config_entry_id": entry_id,
+        "module_key": "water_safety",
+        "draft_id": "water-draft",
+        "snapshot_id": "snapshot-1",
+        "captured_at": datetime(2026, 8, 30, 12, 0, tzinfo=UTC),
+        "report_id": "report-1",
+        "notification_roles": [],
+        "siren_roles": ["water_safety.siren.primary"],
+        "preferred_area_id": "utility-room",
+        "preferred_floor_id": None,
+        "canonical_revision_id": "water-revision",
+        "attempt_id": "attempt-1",
+    }
+
+
+@pytest.mark.asyncio
+async def test_empty_entry_loads_shell_and_never_unloads_unforwarded_platforms(hass) -> None:
+    entry = MockConfigEntry(domain=DOMAIN, data={})
+    entry.add_to_hass(hass)
+
+    with (
+        patch.object(component, "water_safety_core_available", return_value=False),
+        patch.object(hass.config_entries, "async_forward_entry_setups", new=AsyncMock()) as forward,
+        patch.object(hass.config_entries, "async_unload_platforms", new=AsyncMock(return_value=True)) as unload,
+    ):
+        assert await component.async_setup_entry(hass, entry)
+        assert entry.runtime_data.host is None
+        assert entry.runtime_data.loaded_platforms == ()
+        assert forward.await_count == 0
+
+        assert await component.async_unload_entry(hass, entry)
+        assert await component.async_unload_entry(hass, entry)
+        assert unload.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_water_only_restart_does_not_construct_or_forward_heating(hass) -> None:
+    water_host = AsyncMock()
+    active = _water_active_reference()
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={MODULE_ACTIVE_REFERENCES_KEY: {"water_safety": active.model_dump(mode="json")}},
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.controlel.water_safety_activation."
+            "WaterSafetyActivationService.async_start_from_active_reference",
+            new=AsyncMock(return_value=water_host),
+        ) as start_water,
+        patch.object(hass.config_entries, "async_forward_entry_setups", new=AsyncMock()) as forward,
+    ):
+        assert await component.async_setup_entry(hass, entry)
+
+    assert entry.runtime_data.host is None
+    assert entry.runtime_data.water_safety_host is water_host
+    assert start_water.await_count == 1
+    assert forward.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_heating_and_water_load_independently(hass, entry_data) -> None:
+    water_host = AsyncMock()
+    active = _water_active_reference()
+    entry_data[MODULE_ACTIVE_REFERENCES_KEY] = {"water_safety": active.model_dump(mode="json")}
+    entry = MockConfigEntry(domain=DOMAIN, data=entry_data)
+    entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.controlel.water_safety_activation."
+        "WaterSafetyActivationService.async_start_from_active_reference",
+        new=AsyncMock(return_value=water_host),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+
+    assert entry.runtime_data.host is not None
+    assert entry.runtime_data.water_safety_host is water_host
+    assert entry.runtime_data.loaded_platforms == ("sensor", "binary_sensor")
+
+
+@pytest.mark.asyncio
+async def test_failed_water_restart_preserves_heating_and_reports_degraded_module(hass, entry_data) -> None:
+    active = _water_active_reference()
+    entry_data[MODULE_ACTIVE_REFERENCES_KEY] = {"water_safety": active.model_dump(mode="json")}
+    entry = MockConfigEntry(domain=DOMAIN, data=entry_data)
+    entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.controlel.water_safety_activation."
+        "WaterSafetyActivationService.async_start_from_active_reference",
+        new=AsyncMock(side_effect=RuntimeError("water candidate failed")),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+
+    assert entry.runtime_data.host is not None
+    assert entry.runtime_data.water_safety_host is None
+    assert entry.runtime_data.module_errors["water_safety"] == "water_safety_lifecycle_failed:RuntimeError"
+    assert entry.runtime_data.loaded_platforms == ("sensor", "binary_sensor")
+
+
+@pytest.mark.asyncio
+async def test_empty_entry_can_activate_water_without_loading_heating(hass) -> None:
+    entry = MockConfigEntry(domain=DOMAIN, data={})
+    entry.add_to_hass(hass)
+    with patch(
+        "custom_components.controlel.panel.async_register_controlel_panel",
+        new=AsyncMock(),
+    ):
+        assert await component.async_setup_entry(hass, entry)
+
+    candidate = AsyncMock()
+    service = AsyncMock()
+    service.validate_water_draft.return_value = {"status": "valid"}
+    connection = Mock()
+    with (
+        patch.object(setup_transport, "water_safety_core_available", return_value=True),
+        patch.object(setup_transport, "async_get_setup_service", new=AsyncMock(return_value=service)),
+        patch(
+            "custom_components.controlel.water_safety_activation."
+            "WaterSafetyActivationService.activate_canonical_revision",
+            new=AsyncMock(return_value=candidate),
+        ),
+    ):
+        await setup_transport._activate_water_setup(
+            hass,
+            connection,
+            _water_activation_message(entry.entry_id),
+        )
+
+    assert entry.runtime_data.host is None
+    assert entry.runtime_data.water_safety_host is candidate
+    assert entry.runtime_data.loaded_platforms == ()
+    assert entry.runtime_data.frontend_api_unregister is not None
+    connection.send_error.assert_not_called()
+    connection.send_result.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_failed_water_activation_preserves_shell_heating_and_previous_water(hass, entry_data) -> None:
+    entry = MockConfigEntry(domain=DOMAIN, data=entry_data)
+    entry.add_to_hass(hass)
+    with patch(
+        "custom_components.controlel.panel.async_register_controlel_panel",
+        new=AsyncMock(),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+
+    heating_host = entry.runtime_data.host
+    previous_water_host = AsyncMock()
+    entry.runtime_data.water_safety_host = previous_water_host
+    frontend_api_unregister = entry.runtime_data.frontend_api_unregister
+    service = AsyncMock()
+    service.validate_water_draft.return_value = {"status": "valid"}
+    connection = Mock()
+    with (
+        patch.object(setup_transport, "water_safety_core_available", return_value=True),
+        patch.object(setup_transport, "async_get_setup_service", new=AsyncMock(return_value=service)),
+        patch(
+            "custom_components.controlel.water_safety_activation."
+            "WaterSafetyActivationService.activate_canonical_revision",
+            new=AsyncMock(side_effect=RuntimeError("candidate failed")),
+        ),
+    ):
+        await setup_transport._activate_water_setup(
+            hass,
+            connection,
+            _water_activation_message(entry.entry_id),
+        )
+
+    assert entry.runtime_data.host is heating_host
+    assert entry.runtime_data.water_safety_host is previous_water_host
+    assert entry.runtime_data.frontend_api_unregister is frontend_api_unregister
+    previous_water_host.async_stop.assert_not_awaited()
+    connection.send_result.assert_not_called()
+    connection.send_error.assert_called_once_with(
+        7,
+        setup_transport.websocket_api.ERR_HOME_ASSISTANT_ERROR,
+        "Water Safety activation failed; the previous configuration remains active",
+    )

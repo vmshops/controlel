@@ -3,7 +3,7 @@
 These tests verify the real HA panel integration:
   - the packaged frontend is served through a registered static path;
   - the sidebar panel is registered with the correct module_url and config;
-  - unloading the entry removes the panel;
+  - unloading/reloading modules preserves the durable shell panel;
   - reloading does not duplicate the panel registration;
   - the packaged frontend assets are present and complete.
 
@@ -94,8 +94,8 @@ async def test_panel_registered_with_correct_module_url_and_config(hass, entry_d
 
 
 @pytest.mark.asyncio
-async def test_unload_removes_panel(hass, entry_data, http_component) -> None:
-    """Unloading the entry removes the Controlel sidebar panel."""
+async def test_unload_preserves_shell_panel(hass, entry_data, http_component) -> None:
+    """Module unload cannot make the independently durable shell disappear."""
     entry = MockConfigEntry(domain=DOMAIN, title="Living room", data=entry_data)
     entry.add_to_hass(hass)
 
@@ -103,8 +103,8 @@ async def test_unload_removes_panel(hass, entry_data, http_component) -> None:
     assert frontend.async_panel_exists(hass, FRONTEND_URL_PATH) is True
 
     assert await hass.config_entries.async_unload(entry.entry_id) is True
-    assert frontend.async_panel_exists(hass, FRONTEND_URL_PATH) is False
-    assert _panel(hass) is None
+    assert frontend.async_panel_exists(hass, FRONTEND_URL_PATH) is True
+    assert _panel(hass) is not None
 
 
 @pytest.mark.asyncio
@@ -117,15 +117,16 @@ async def test_reload_does_not_duplicate_panel(hass, entry_data, http_component)
     assert frontend.async_panel_exists(hass, FRONTEND_URL_PATH) is True
     first_panel = _panel(hass)
 
-    # Unload and reload: the panel must be re-registered exactly once.
+    # Unload and reload: the existing shell panel remains registered exactly once.
     assert await hass.config_entries.async_unload(entry.entry_id) is True
-    assert frontend.async_panel_exists(hass, FRONTEND_URL_PATH) is False
+    assert frontend.async_panel_exists(hass, FRONTEND_URL_PATH) is True
 
     assert await hass.config_entries.async_setup(entry.entry_id) is True
     assert frontend.async_panel_exists(hass, FRONTEND_URL_PATH) is True
     second_panel = _panel(hass)
     assert second_panel is not None
     assert second_panel.config["config_entry_id"] == entry.entry_id
+    assert second_panel is first_panel
 
     # Exactly one panel is registered for the Controlel URL path.
     panels = hass.data.get(frontend.DATA_PANELS, {})

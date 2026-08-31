@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
-from typing import Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from controlel.application.services.operational_event_stream import (
     OperationalEventStreamSnapshot,
@@ -28,7 +28,6 @@ from controlel.frontend_api.v1 import (
     ZoneEvidenceV1,
 )
 from controlel.infrastructure.time.system_clock import SystemClock
-from typing import TYPE_CHECKING, Any
 
 from .core_capabilities import water_safety_core_available
 
@@ -76,8 +75,9 @@ SetupEvidenceSource = Callable[[], SetupEvidenceV1]
 class HomeAssistantFrontendApiHostBridge:
     """Expose heating and optional Water Safety evidence through one Frontend API host."""
 
-    heating_host: FrontendApiHostV1
+    heating_host: FrontendApiHostV1 | None
     water_safety_host: object | None = None
+    module_errors: Mapping[str, str] | None = None
 
     @property
     def frontend_api_operational_evidence(
@@ -91,11 +91,13 @@ class HomeAssistantFrontendApiHostBridge:
         bool,
         ReportedSourceEvidence | None,
     ]:
+        if self.heating_host is None:
+            raise RuntimeError("Heating operational evidence is not configured")
         return self.heating_host.frontend_api_operational_evidence
 
     @property
     def frontend_api_setup_ready(self) -> bool:
-        return self.heating_host.frontend_api_setup_ready
+        return self.heating_host is not None and self.heating_host.frontend_api_setup_ready
 
     @property
     def frontend_api_water_safety_evidence(self) -> Any | None:
@@ -109,30 +111,43 @@ class HomeAssistantFrontendApiHostBridge:
 class HomeAssistantFrontendApiEvidenceSourceV1:
     """Map existing HA/application snapshots without entering control paths."""
 
-    host: FrontendApiHostV1
+    host: HomeAssistantFrontendApiHostBridge
     setup_source: SetupEvidenceSource | None = None
 
     def snapshot(self) -> FrontendApiEvidenceV1:
+        water_safety = self.host.frontend_api_water_safety_evidence if water_safety_core_available() else None
+        errors = dict(self.host.module_errors or {})
+        if self.host.heating_host is None:
+            return _shell_evidence(water_safety, errors)
         operational, trace, total_trace, events, mode, normal_authority, reported = (
             self.host.frontend_api_operational_evidence
         )
         latest = _latest_decision(trace, operational.zone_id, operational.sensor_id)
         status = _runtime_status(operational)
-        water_safety = (
-            self.host.frontend_api_water_safety_evidence if water_safety_core_available() else None
-        )
         modules = [
             ModuleEvidenceV1(
                 module_id="heating",
-                status=("active" if status == "active" else "error" if status == "degraded" else "inactive"),
-                reason=_module_reason(operational),
+                status=(
+                    "error"
+                    if "heating" in errors
+                    else "active"
+                    if status == "active"
+                    else "error"
+                    if status == "degraded"
+                    else "inactive"
+                ),
+                reason=errors.get("heating") or _module_reason(operational),
             ),
         ]
         if water_safety_core_available():
-            modules.append(_water_safety_module(water_safety))
+            modules.append(
+                ModuleEvidenceV1(module_id="water_safety", status="error", reason=errors["water_safety"])
+                if "water_safety" in errors
+                else _water_safety_module(water_safety)
+            )
         evidence = FrontendApiEvidenceV1(
             system=SystemEvidenceV1(
-                status=status,
+                status="degraded" if errors else status,
                 operating_mode=mode[0],
                 operating_mode_reason=mode[1],
                 operating_mode_since=mode[2],
@@ -188,22 +203,58 @@ class HomeAssistantFrontendApiEvidenceSourceV1:
 
 
 def create_frontend_api_provider_v1(
-    host: FrontendApiHostV1,
+    host: FrontendApiHostV1 | None,
     *,
     water_safety_host: object | None = None,
     setup_source: SetupEvidenceSource | None = None,
+    module_errors: Mapping[str, str] | None = None,
 ) -> FrontendApiProviderV1:
     """Compose the host-independent provider over one loaded HA entry."""
 
-    bridge = host if isinstance(host, HomeAssistantFrontendApiHostBridge) else HomeAssistantFrontendApiHostBridge(
-        heating_host=host,
-        water_safety_host=water_safety_host,
+    bridge = (
+        host
+        if isinstance(host, HomeAssistantFrontendApiHostBridge)
+        else HomeAssistantFrontendApiHostBridge(
+            heating_host=host,
+            water_safety_host=water_safety_host,
+            module_errors=module_errors,
+        )
     )
     source = HomeAssistantFrontendApiEvidenceSourceV1(
         host=bridge,
         setup_source=setup_source,
     )
     return FrontendApiProviderV1(source=source, clock=SystemClock())
+
+
+def _shell_evidence(water_safety: Any | None, errors: Mapping[str, str]) -> FrontendApiEvidenceV1:
+    heating = ModuleEvidenceV1(
+        module_id="heating",
+        status="error" if "heating" in errors else "inactive",
+        reason=errors.get("heating") or "heating_not_configured",
+    )
+    water = (
+        ModuleEvidenceV1(module_id="water_safety", status="error", reason=errors["water_safety"])
+        if "water_safety" in errors
+        else _water_safety_module(water_safety)
+    )
+    has_error = heating.status == "error" or water.status == "error"
+    any_active = heating.status == "active" or water.status == "active"
+    return FrontendApiEvidenceV1(
+        system=SystemEvidenceV1(
+            status="degraded" if has_error else "active" if any_active else "stopped",
+            operating_mode="water_safety" if water_safety is not None else "unconfigured",
+            operating_mode_reason=next(iter(errors.values())) if errors else None,
+        ),
+        modules=(heating, water),
+        setup=SetupEvidenceV1(
+            state="invalid" if errors else "ready" if water_safety is not None else "incomplete",
+            reason_code=(
+                next(iter(errors.values())) if errors else None if water_safety is not None else "no_modules_configured"
+            ),
+        ),
+        water_safety=water_safety,
+    )
 
 
 def _water_safety_snapshot_to_evidence(snapshot: WaterSafetyDiagnosticsSnapshotV1) -> WaterSafetyEvidenceV1:

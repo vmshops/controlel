@@ -301,9 +301,7 @@ class WaterSafetySetupAdapter:
             preferred_area_name=preferred_area_name,
             notification_roles=notification_roles,
             siren_roles=siren_roles,
-            moisture_sensor_native_id=(
-                None if moisture_candidate is None else moisture_candidate.reference.native_id
-            ),
+            moisture_sensor_native_id=(None if moisture_candidate is None else moisture_candidate.reference.native_id),
             overrides=settings,
         )
         bindings: list[BindingSelection] = []
@@ -683,9 +681,10 @@ def _candidate_sort_key(
     }[candidate.confidence]
     area_rank = 0 if preferred_area_id is None or candidate.reference.area_id == preferred_area_id else 1
     floor_rank = 0 if preferred_floor_id is None or candidate.reference.floor_id == preferred_floor_id else 1
+    area_first = candidate.role == WATER_SAFETY_SENSOR_ROLE or candidate.role.startswith(SIREN_ROLE_PREFIX)
     return (
-        confidence_rank,
-        area_rank,
+        area_rank if area_first else confidence_rank,
+        confidence_rank if area_first else area_rank,
         floor_rank,
         candidate.reference.current_locator or "",
         candidate.reference.native_id or "",

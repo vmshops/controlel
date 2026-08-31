@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime
 from typing import Any, Protocol
@@ -19,6 +20,8 @@ from controlel.infrastructure.home_assistant import (
 from .const import DOMAIN
 from .core_capabilities import water_safety_core_available
 from .setup_backend import async_get_setup_service
+
+LOGGER = logging.getLogger(__name__)
 
 SETUP_WRITE_API_VERSION = 1
 SETUP_WRITE_V1_DISCOVERY = f"{DOMAIN}/setup/write/v1/discovery"
@@ -185,6 +188,14 @@ async def _send(
             msg["id"],
             websocket_api.ERR_INVALID_FORMAT,
             "Controlel setup request is invalid",
+        )
+        return
+    except Exception:
+        LOGGER.exception("Controlel setup write operation failed; active module runtimes are unchanged")
+        connection.send_error(
+            msg["id"],
+            websocket_api.ERR_HOME_ASSISTANT_ERROR,
+            "Controlel setup operation failed; the active configuration remains unchanged",
         )
         return
     connection.send_result(
@@ -388,10 +399,33 @@ async def _activate_water_setup(
         )
         return
 
+    try:
+        result = await service.validate_water_draft(
+            msg["draft_id"],
+            snapshot_id=msg["snapshot_id"],
+            evaluated_at=msg["captured_at"],
+            report_id=msg["report_id"],
+            notification_roles=tuple(msg.get("notification_roles") or ()),
+            siren_roles=tuple(msg.get("siren_roles") or ()),
+            preferred_area_id=msg.get("preferred_area_id"),
+            preferred_floor_id=msg.get("preferred_floor_id"),
+        )
+    except SetupNotFoundError:
+        connection.send_error(msg["id"], websocket_api.ERR_NOT_FOUND, "Controlel setup draft was not found")
+        return
+    except SetupConflictError:
+        connection.send_error(msg["id"], ERR_SETUP_CONFLICT, "Controlel setup request conflicts with current state")
+        return
+    except (TypeError, ValueError, ValidationError):
+        connection.send_error(
+            msg["id"],
+            websocket_api.ERR_INVALID_FORMAT,
+            "Controlel setup request is invalid",
+        )
+        return
+
     runtime_data = getattr(entry, "runtime_data", None)
     existing_host = getattr(runtime_data, "water_safety_host", None) if runtime_data is not None else None
-    if existing_host is not None:
-        await existing_host.async_stop()
 
     from .frontend_api import create_frontend_api_provider_v1
     from .frontend_api_websocket import register_frontend_api_provider_v1, register_water_safety_action_handler_v1
@@ -417,54 +451,48 @@ async def _activate_water_setup(
             "Controlel setup request is invalid",
         )
         return
+    except Exception:
+        LOGGER.exception("Water Safety activation failed; the last-known-good module runtimes remain active")
+        connection.send_error(
+            msg["id"],
+            websocket_api.ERR_HOME_ASSISTANT_ERROR,
+            "Water Safety activation failed; the previous configuration remains active",
+        )
+        return
 
     if runtime_data is not None:
         runtime_data.water_safety_host = water_host
-        heating_host = runtime_data.host
-        if heating_host is not None:
-            if runtime_data.frontend_api_unregister is not None:
-                runtime_data.frontend_api_unregister()
-            runtime_data.frontend_api_unregister = register_frontend_api_provider_v1(
-                hass,
-                entry.entry_id,
-                create_frontend_api_provider_v1(heating_host, water_safety_host=water_host),
-            )
-
-            async def _water_safety_action(action: str) -> dict[str, object]:
-                return await water_host.async_frontend_api_water_safety_action(action)
-
-            if runtime_data.water_safety_action_unregister is not None:
-                runtime_data.water_safety_action_unregister()
-            runtime_data.water_safety_action_unregister = register_water_safety_action_handler_v1(
-                hass,
-                entry.entry_id,
-                _water_safety_action,
-            )
-
-    try:
-        result = await service.validate_water_draft(
-            msg["draft_id"],
-            snapshot_id=msg["snapshot_id"],
-            evaluated_at=msg["captured_at"],
-            report_id=msg["report_id"],
-            notification_roles=tuple(msg.get("notification_roles") or ()),
-            siren_roles=tuple(msg.get("siren_roles") or ()),
-            preferred_area_id=msg.get("preferred_area_id"),
-            preferred_floor_id=msg.get("preferred_floor_id"),
+        runtime_data.module_errors.pop("water_safety", None)
+        if runtime_data.frontend_api_unregister is not None:
+            runtime_data.frontend_api_unregister()
+        runtime_data.frontend_api_unregister = register_frontend_api_provider_v1(
+            hass,
+            entry.entry_id,
+            create_frontend_api_provider_v1(
+                runtime_data.host,
+                water_safety_host=water_host,
+                module_errors=runtime_data.module_errors,
+            ),
         )
-    except SetupNotFoundError:
-        connection.send_error(msg["id"], websocket_api.ERR_NOT_FOUND, "Controlel setup draft was not found")
-        return
-    except SetupConflictError:
-        connection.send_error(msg["id"], ERR_SETUP_CONFLICT, "Controlel setup request conflicts with current state")
-        return
-    except (TypeError, ValueError, ValidationError):
-        connection.send_error(
-            msg["id"],
-            websocket_api.ERR_INVALID_FORMAT,
-            "Controlel setup request is invalid",
+
+        async def _water_safety_action(action: str) -> dict[str, object]:
+            active_host = runtime_data.water_safety_host
+            if active_host is None:
+                raise RuntimeError("Water Safety is not configured for this entry")
+            return await active_host.async_frontend_api_water_safety_action(action)
+
+        if runtime_data.water_safety_action_unregister is not None:
+            runtime_data.water_safety_action_unregister()
+        runtime_data.water_safety_action_unregister = register_water_safety_action_handler_v1(
+            hass,
+            entry.entry_id,
+            _water_safety_action,
         )
-        return
+    if existing_host is not None and existing_host is not water_host:
+        try:
+            await existing_host.async_stop()
+        except Exception:
+            LOGGER.exception("Failed to stop replaced Water Safety runtime")
 
     connection.send_result(
         msg["id"],

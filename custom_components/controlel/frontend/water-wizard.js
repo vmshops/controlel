@@ -10,6 +10,7 @@
   const NOTIFICATION_ROLE_PREFIX = "water_safety.notification.";
   const SIREN_ROLE_PREFIX = "water_safety.siren.";
   const DEFAULT_NOTIFICATION_ROLES = ["water_safety.notification.primary"];
+  const DEFAULT_SIREN_ROLES = ["water_safety.siren.primary"];
   const AREA_KIND = "home_assistant.area";
   const STEP_COUNT = 7;
   const STEPS = [
@@ -56,6 +57,24 @@
       .sort();
   }
 
+  function candidatesForArea(candidates, areaId, showAll) {
+    if (showAll || !areaId) return candidates.slice();
+    return candidates.filter((item) => item.area_id === areaId);
+  }
+
+  function rankCandidatesByArea(candidates, areaId) {
+    return candidates.slice().sort((left, right) => {
+      const leftRank = areaId && left.area_id === areaId ? 0 : 1;
+      const rightRank = areaId && right.area_id === areaId ? 0 : 1;
+      if (leftRank !== rightRank) return leftRank - rightRank;
+      const areaOrder = String(left.area_id || "").localeCompare(String(right.area_id || ""));
+      if (areaOrder !== 0) return areaOrder;
+      return String(left.current_locator || left.native_id || "").localeCompare(
+        String(right.current_locator || right.native_id || "")
+      );
+    });
+  }
+
   function createSetupWaterWizard(options) {
     const opts = options && typeof options === "object" ? options : {};
     const client = opts.client;
@@ -90,6 +109,7 @@
       recommendations: [],
       session: null,
       dirty: false,
+      showAllMoistureCandidates: false,
       lastSavedAt: null,
       draft: {
         areaId: null,
@@ -218,7 +238,13 @@
     }
 
     function requestContext() {
-      return { snapshot_id: makeId("snapshot"), captured_at: now() };
+      return {
+        snapshot_id: makeId("snapshot"),
+        captured_at: now(),
+        preferred_area_id: state.draft.areaId,
+        notification_roles: state.draft.notificationRoles.slice(),
+        siren_roles: DEFAULT_SIREN_ROLES.slice(),
+      };
     }
 
     async function startDiscovery({ forceNewDraft = false } = {}) {
@@ -286,6 +312,9 @@
 
     function selectArea(areaId) {
       state.draft.areaId = areaId;
+      delete state.draft.selections[MOISTURE_SENSOR_ROLE];
+      delete state.draft.confirmations[MOISTURE_SENSOR_ROLE];
+      state.showAllMoistureCandidates = false;
       state.dirty = true;
       render();
     }
@@ -586,7 +615,12 @@
 
     function renderRole(role, heading, lead) {
       const item = recommendation(role);
-      const candidates = recommendationCandidates(item);
+      const allCandidates = recommendationCandidates(item);
+      const candidates = role === MOISTURE_SENSOR_ROLE
+        ? candidatesForArea(allCandidates, state.draft.areaId, state.showAllMoistureCandidates)
+        : role && role.startsWith(SIREN_ROLE_PREFIX)
+          ? rankCandidatesByArea(allCandidates, state.draft.areaId)
+          : allCandidates;
       const selectedId = state.draft.selections[role];
       if (!item || candidates.length === 0) {
         return el("div", { class: "panel" },
@@ -594,6 +628,7 @@
           noteBox(t("wizard.no_candidates"), "warning")
         );
       }
+      const hiddenMoistureCandidates = role === MOISTURE_SENSOR_ROLE && candidates.length < allCandidates.length;
       return el("div", { class: "panel" },
         el("h3", { class: "panel__title" }, heading),
         el("p", { class: "panel__lead" }, lead),
@@ -605,7 +640,13 @@
           confirmed: Boolean(state.draft.confirmations[role]),
           onConfirm: item.explicit_confirmation_required ? (value) => confirmCandidate(role, value) : null,
           roleLabel: heading,
-        })))
+        }))),
+        hiddenMoistureCandidates
+          ? el("button", {
+              class: "btn btn--ghost",
+              onclick: () => { state.showAllMoistureCandidates = true; render(); },
+            }, t("wizard.water.show_all_sensors"))
+          : null
       );
     }
 
@@ -920,9 +961,12 @@
     MOISTURE_SENSOR_ROLE,
     NOTIFICATION_ROLE_PREFIX,
     SIREN_ROLE_PREFIX,
+    DEFAULT_SIREN_ROLES,
     STEPS,
     candidateView,
     recommendationCandidates,
+    candidatesForArea,
+    rankCandidatesByArea,
     rolesWithPrefix,
     createSetupWaterWizard,
   };

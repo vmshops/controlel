@@ -26,6 +26,7 @@ from controlel.application.setup import (
 )
 from controlel.infrastructure.home_assistant import (
     ACTIVE_REFERENCE_KEY,
+    MODULE_ACTIVE_REFERENCES_KEY,
     ConfigEntryActiveReferenceStore,
     HeatingBindingSelectionRequest,
     HeatingSetupHostService,
@@ -504,6 +505,67 @@ def test_legacy_settings_must_be_converted_before_config_entry_can_select_canoni
     with pytest.raises(SetupConflictError, match="explicitly converted"):
         active_reference_store(entry).set(reference)
     assert entry.data == {"sensor_id": "legacy-sensor"}
+
+
+def test_module_scoped_active_references_preserve_heating_and_water_authority() -> None:
+    entry = FakeConfigEntry()
+    heating = ActiveReference(
+        environment_id="ha-installation-id",
+        module_key="heating",
+        module_instance_id="main-heating",
+        canonical_revision_id="heating-canonical-3",
+        semantic_configuration_fingerprint="a" * 64,
+        generation=3,
+        committing_operation_id="heating-attempt-3",
+    )
+    water = ActiveReference(
+        environment_id="ha-installation-id",
+        module_key="water_safety",
+        module_instance_id="utility-water",
+        canonical_revision_id="water-canonical-1",
+        semantic_configuration_fingerprint="b" * 64,
+        generation=1,
+        committing_operation_id="water-attempt-1",
+    )
+
+    def update(data: object) -> None:
+        assert isinstance(data, dict)
+        entry.data = data
+
+    heating_store = ConfigEntryActiveReferenceStore(entry, update, module_key="heating")
+    water_store = ConfigEntryActiveReferenceStore(entry, update, module_key="water_safety")
+    heating_store.set(heating)
+    water_store.set(water)
+
+    assert heating_store.get() == heating
+    assert water_store.get() == water
+    assert ActiveReference.model_validate(entry.data[ACTIVE_REFERENCE_KEY]) == heating
+    scoped = entry.data[MODULE_ACTIVE_REFERENCES_KEY]
+    assert isinstance(scoped, dict)
+    assert ActiveReference.model_validate(scoped["water_safety"]) == water
+
+
+def test_water_authority_can_coexist_with_legacy_heating_settings() -> None:
+    entry = FakeConfigEntry(data={"sensor_id": "legacy-heating-sensor"})
+    water = ActiveReference(
+        environment_id="ha-installation-id",
+        module_key="water_safety",
+        module_instance_id="utility-water",
+        canonical_revision_id="water-canonical-1",
+        semantic_configuration_fingerprint="b" * 64,
+        generation=1,
+        committing_operation_id="water-attempt-1",
+    )
+
+    def update(data: object) -> None:
+        assert isinstance(data, dict)
+        entry.data = data
+
+    ConfigEntryActiveReferenceStore(entry, update, module_key="water_safety").set(water)
+
+    assert entry.data["sensor_id"] == "legacy-heating-sensor"
+    assert ACTIVE_REFERENCE_KEY not in entry.data
+    assert ConfigEntryActiveReferenceStore(entry, update, module_key="water_safety").get() == water
 
 
 @async_test

@@ -10,15 +10,15 @@ import pytest
 from controlel.application.configuration.water_safety_setup_adapter import (
     DEFAULT_NOTIFICATION_ROLE,
     WATER_SAFETY_SENSOR_ROLE,
-    WaterSafetyRecommendationSet,
     WaterSafetyRecommendationConfidence,
+    WaterSafetyRecommendationSet,
     WaterSafetySetupAdapter,
 )
 from controlel.application.setup import DiscoverySnapshot, IdentityQuality, InMemorySetupRepository, ProviderReference
 from controlel.infrastructure.home_assistant import HomeAssistantDiscoveryAdapter
 from controlel.infrastructure.home_assistant.setup_discovery import (
-    HOME_ASSISTANT_PROVIDER,
     HA_ENDPOINT_KIND,
+    HOME_ASSISTANT_PROVIDER,
 )
 
 from .conftest import NOW
@@ -124,7 +124,14 @@ SIREN_SWITCH = replace(
     domain="switch",
     unique_id="hall-siren-switch",
 )
-DEFAULT_ENTITIES = (MOISTURE_BINARY, MOISTURE_SENSOR, MOISTURE_HINT, SIREN, SIREN_SWITCH)
+TAPO_HUB_SIREN = replace(
+    SIREN,
+    id="entity-tapo-hub-siren",
+    entity_id="siren.temp_tapo_marsa_h200_hub_siren",
+    platform="tapo_control",
+    unique_id="tapo-h200-hub-siren",
+)
+DEFAULT_ENTITIES = (MOISTURE_BINARY, MOISTURE_SENSOR, MOISTURE_HINT, SIREN, SIREN_SWITCH, TAPO_HUB_SIREN)
 NOTIFY_PRIMARY = "notify.mobile_app"
 NOTIFY_BACKUP = "notify.persistent_notification"
 SIREN_ROLE = "water_safety.siren.hall"
@@ -244,8 +251,28 @@ def test_recommendations_classify_moisture_notify_and_siren_candidates() -> None
     assert siren.recommended_candidate is not None
     assert siren.recommended_candidate.reference.native_id == SIREN.id
     assert siren.confidence is WaterSafetyRecommendationConfidence.HIGH
-    assert siren.alternatives[0].reference.native_id == SIREN_SWITCH.id
+    assert {item.reference.native_id for item in siren.alternatives} == {
+        SIREN_SWITCH.id,
+        TAPO_HUB_SIREN.id,
+    }
     assert "alert.siren" in siren.recommended_candidate.capabilities
+
+
+def test_real_ha_siren_domain_entity_is_included_globally_with_explainable_evidence() -> None:
+    recommendations = WaterSafetySetupAdapter().recommend(
+        _snapshot(entities=(TAPO_HUB_SIREN,)),
+        siren_roles=(SIREN_ROLE,),
+        preferred_area_id="different-area",
+    )
+
+    siren = _recommendation(recommendations, SIREN_ROLE)
+    candidates = siren.candidates
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    assert candidate.reference.current_locator == "siren.temp_tapo_marsa_h200_hub_siren"
+    assert candidate.evidence["domain"] == "siren"
+    assert candidate.evidence["preferred_area_match"] is False
+    assert "water_safety.candidate.siren_domain" in candidate.reason_codes
 
 
 def test_moisture_sensor_and_locator_hint_confidence_levels() -> None:
@@ -279,7 +306,9 @@ def test_draft_creation_applies_defaults_and_requires_explicit_confirmation() ->
     assert list(draft.settings["notification_target_roles"]) == [DEFAULT_NOTIFICATION_ROLE]
     assert draft.settings["sensor_id"] == MOISTURE_BINARY.id
     assert all(not binding.user_confirmed for binding in draft.bindings)
-    report = WaterSafetySetupAdapter().validate(draft, report_id="water-report", evaluated_at=NOW + timedelta(seconds=1))
+    report = WaterSafetySetupAdapter().validate(
+        draft, report_id="water-report", evaluated_at=NOW + timedelta(seconds=1)
+    )
     confirmation_issues = [
         issue for issue in report.issues if issue.code == "water_safety.binding_confirmation_required"
     ]

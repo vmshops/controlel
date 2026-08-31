@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 from importlib import metadata
 from typing import TYPE_CHECKING, Any
 
@@ -49,12 +49,14 @@ PLATFORMS = ("sensor", "binary_sensor")
 
 @dataclass
 class ControlelEntryRuntime:
-    host: HomeAssistantControlelHost | None
-    water_safety_host: object | None
-    config: HomeAssistantIntegrationConfig
+    host: HomeAssistantControlelHost | None = None
+    water_safety_host: object | None = None
+    config: HomeAssistantIntegrationConfig | None = None
     reloading: bool = False
     frontend_api_unregister: Callable[[], None] | None = None
     water_safety_action_unregister: Callable[[], None] | None = None
+    loaded_platforms: tuple[str, ...] = ()
+    module_errors: dict[str, str] = field(default_factory=dict)
 
 
 if TYPE_CHECKING:
@@ -76,6 +78,25 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
 
 
 async def async_setup_entry(
+    hass: HomeAssistant,
+    entry: ControlelConfigEntry,
+) -> bool:
+    """Set up the durable shell and independently load configured modules."""
+
+    if not _heating_configuration_present(entry):
+        return await _async_setup_shell_entry(hass, entry)
+    try:
+        return await _async_setup_configured_entry(hass, entry)
+    except Exception as error:
+        LOGGER.exception("Controlel Heating setup failed; the shell and unrelated modules remain available")
+        return await _async_setup_shell_entry(
+            hass,
+            entry,
+            module_errors={"heating": _module_failure_code("heating", error)},
+        )
+
+
+async def _async_setup_configured_entry(
     hass: HomeAssistant,
     entry: ControlelConfigEntry,
 ) -> bool:
@@ -108,6 +129,7 @@ async def async_setup_entry(
     executor = HomeAssistantRuntimeExecutor()
     host: HomeAssistantControlelHost | None = None
     water_safety_host = None
+    module_errors: dict[str, str] = {}
     failure_sink: HomeAssistantScheduledFailureSink | None = None
     try:
         bridge = HomeAssistantEventLoopBridge(hass.loop)
@@ -257,11 +279,15 @@ async def async_setup_entry(
         if water_safety_core_available():
             from .water_safety_activation import WaterSafetyActivationService
 
-            water_safety_host = await WaterSafetyActivationService().async_start_from_active_reference(
-                hass,
-                entry,
-                bridge=bridge,
-            )
+            try:
+                water_safety_host = await WaterSafetyActivationService().async_start_from_active_reference(
+                    hass,
+                    entry,
+                    bridge=bridge,
+                )
+            except Exception as error:
+                module_errors["water_safety"] = _module_failure_code("water_safety", error)
+                LOGGER.exception("Controlel Water Safety startup failed; Heating remains operational")
     except BaseException:
         try:
             if water_safety_host is not None:
@@ -285,7 +311,11 @@ async def async_setup_entry(
     frontend_api_unregister = register_frontend_api_provider_v1(
         hass,
         entry.entry_id,
-        create_frontend_api_provider_v1(host, water_safety_host=water_safety_host),
+        create_frontend_api_provider_v1(
+            host,
+            water_safety_host=water_safety_host,
+            module_errors=module_errors,
+        ),
     )
 
     async def _water_safety_action(action: str) -> dict[str, object]:
@@ -304,10 +334,20 @@ async def async_setup_entry(
         config=config,
         frontend_api_unregister=frontend_api_unregister,
         water_safety_action_unregister=water_safety_action_unregister,
+        module_errors=module_errors,
     )
     try:
-        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+        for platform in PLATFORMS:
+            await hass.config_entries.async_forward_entry_setups(entry, (platform,))
+            entry.runtime_data.loaded_platforms += (platform,)
     except BaseException:
+        loaded_platforms = entry.runtime_data.loaded_platforms
+        if loaded_platforms:
+            try:
+                await hass.config_entries.async_unload_platforms(entry, loaded_platforms)
+            except Exception:
+                LOGGER.exception("Failed to clean up partially forwarded Controlel platforms")
+            entry.runtime_data.loaded_platforms = ()
         frontend_api_unregister()
         water_safety_action_unregister()
         if water_safety_host is not None:
@@ -341,10 +381,15 @@ async def async_unload_entry(
 ) -> bool:
     """Unload the entry through the host's terminal serialized stop path."""
     runtime_data = entry.runtime_data
-    platforms_unloaded = await hass.config_entries.async_unload_platforms(
-        entry,
-        PLATFORMS,
-    )
+    platforms_unloaded = True
+    if runtime_data.loaded_platforms:
+        platforms_unloaded = await hass.config_entries.async_unload_platforms(
+            entry,
+            runtime_data.loaded_platforms,
+        )
+        if not platforms_unloaded:
+            return False
+        runtime_data.loaded_platforms = ()
     unregister = runtime_data.frontend_api_unregister
     if unregister is not None:
         unregister()
@@ -362,9 +407,6 @@ async def async_unload_entry(
         await host.async_stop()
         runtime_data.host = None
 
-    from .panel import async_remove_controlel_panel
-
-    async_remove_controlel_panel(hass)
     return platforms_unloaded
 
 
@@ -374,6 +416,9 @@ async def async_remove_entry(
 ) -> None:
     """Remove Repairs issues that belong to a deleted config entry."""
     clear_entry_issues(hass, entry.entry_id)
+    from .panel import async_remove_controlel_panel
+
+    async_remove_controlel_panel(hass)
 
 
 async def async_get_setup_service(
@@ -394,6 +439,8 @@ async def _async_update_listener(
     """Update the title and reload once after an atomic options change."""
 
     runtime_data = entry.runtime_data
+    if runtime_data.config is None:
+        return
     config = integration_config_from_entry(entry.data, entry.options)
     if runtime_data.config == config and entry.title == config.zone_name:
         return
@@ -407,3 +454,81 @@ async def _async_update_listener(
         )
     await hass.config_entries.async_reload(entry.entry_id)
     LOGGER.info("Controlel configuration reloaded entry_id=%s", entry.entry_id)
+
+
+def _heating_configuration_present(entry: ControlelConfigEntry) -> bool:
+    """Return whether legacy Heating settings, not another module pointer, exist."""
+
+    from controlel.infrastructure.home_assistant import ACTIVE_REFERENCE_KEY, MODULE_ACTIVE_REFERENCES_KEY
+
+    data_keys = set(entry.data) - {ACTIVE_REFERENCE_KEY, MODULE_ACTIVE_REFERENCES_KEY}
+    if data_keys or entry.options:
+        return True
+    raw_active = entry.data.get(ACTIVE_REFERENCE_KEY)
+    return isinstance(raw_active, Mapping) and raw_active.get("module_key") == "heating"
+
+
+async def _async_setup_shell_entry(
+    hass: HomeAssistant,
+    entry: ControlelConfigEntry,
+    *,
+    module_errors: dict[str, str] | None = None,
+) -> bool:
+    """Keep the panel/API available while optional modules are absent or degraded."""
+
+    from .frontend_api_websocket import (
+        register_frontend_api_provider_v1,
+        register_water_safety_action_handler_v1,
+    )
+
+    runtime_data = ControlelEntryRuntime(module_errors=dict(module_errors or {}))
+    entry.runtime_data = runtime_data
+    if water_safety_core_available():
+        from .water_safety_activation import WaterSafetyActivationService
+
+        try:
+            runtime_data.water_safety_host = await WaterSafetyActivationService().async_start_from_active_reference(
+                hass,
+                entry,
+                bridge=HomeAssistantEventLoopBridge(hass.loop),
+            )
+        except Exception as error:
+            runtime_data.module_errors["water_safety"] = _module_failure_code("water_safety", error)
+            LOGGER.exception("Controlel Water Safety startup failed; the shell remains available")
+
+    runtime_data.frontend_api_unregister = register_frontend_api_provider_v1(
+        hass,
+        entry.entry_id,
+        create_frontend_api_provider_v1(
+            None,
+            water_safety_host=runtime_data.water_safety_host,
+            module_errors=runtime_data.module_errors,
+        ),
+    )
+
+    async def _water_safety_action(action: str) -> dict[str, object]:
+        water_host = runtime_data.water_safety_host
+        if water_host is None:
+            raise RuntimeError("Water Safety is not configured for this entry")
+        return await water_host.async_frontend_api_water_safety_action(action)
+
+    runtime_data.water_safety_action_unregister = register_water_safety_action_handler_v1(
+        hass,
+        entry.entry_id,
+        _water_safety_action,
+    )
+    entry.async_on_unload(runtime_data.frontend_api_unregister)
+    entry.async_on_unload(runtime_data.water_safety_action_unregister)
+    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
+
+    from .panel import async_register_controlel_panel
+
+    try:
+        await async_register_controlel_panel(hass, entry.entry_id)
+    except Exception:
+        LOGGER.exception("Controlel panel registration failed; the integration remains configurable")
+    return True
+
+
+def _module_failure_code(module_key: str, error: Exception) -> str:
+    return f"{module_key}_lifecycle_failed:{type(error).__name__}"

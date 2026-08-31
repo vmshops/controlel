@@ -20,6 +20,8 @@ from controlel.application.setup.repository import ScopeKey
 
 SETUP_STORAGE_VERSION = 1
 ACTIVE_REFERENCE_KEY = "setup_active_reference"
+MODULE_ACTIVE_REFERENCES_KEY = "setup_active_references"
+HEATING_MODULE_KEY = "heating"
 
 
 class HomeAssistantStorePort(Protocol):
@@ -38,33 +40,73 @@ class ConfigEntryPort(Protocol):
 
 
 class ConfigEntryActiveReferenceStore:
-    """Persist only the active authority pointer in a Home Assistant config entry."""
+    """Persist one module's authority without mutating another module's pointer.
+
+    Heating keeps the original singular key as its compatibility/canonical-v3
+    authority. Other modules use the module-scoped mapping. A legacy singular
+    Water Safety pointer remains readable so existing installations migrate on
+    their next successful activation without losing authority on restart.
+    """
 
     def __init__(
         self,
         entry: ConfigEntryPort,
         update_data: Callable[[Mapping[str, object]], None],
+        *,
+        module_key: str | None = None,
     ) -> None:
         self._entry = entry
         self._update_data = update_data
+        self._module_key = module_key
 
     def get(self) -> ActiveReference | None:
+        scoped = self._scoped_values()
+        if self._module_key is not None and self._module_key in scoped:
+            return self._validate(scoped[self._module_key], key=MODULE_ACTIVE_REFERENCES_KEY)
+
         value = self._entry.data.get(ACTIVE_REFERENCE_KEY)
         if value is None:
+            if self._module_key is None and len(scoped) == 1:
+                return self._validate(next(iter(scoped.values())), key=MODULE_ACTIVE_REFERENCES_KEY)
             return None
-        if not isinstance(value, Mapping):
-            raise SetupStorageIntegrityError("config-entry active reference is malformed")
-        return ActiveReference.model_validate(value)
+        reference = self._validate(value, key=ACTIVE_REFERENCE_KEY)
+        if self._module_key is not None and reference.module_key != self._module_key:
+            return None
+        return reference
 
     def set(self, reference: ActiveReference) -> None:
-        non_lifecycle_keys = set(self._entry.data) - {ACTIVE_REFERENCE_KEY}
-        if non_lifecycle_keys:
+        module_key = self._module_key or reference.module_key
+        if reference.module_key != module_key:
+            raise SetupConflictError("active reference does not belong to this module store")
+        lifecycle_keys = {ACTIVE_REFERENCE_KEY, MODULE_ACTIVE_REFERENCES_KEY}
+        non_lifecycle_keys = set(self._entry.data) - lifecycle_keys
+        if module_key == HEATING_MODULE_KEY and non_lifecycle_keys:
             raise SetupConflictError(
                 "legacy config-entry settings must be explicitly converted before canonical activation"
             )
         data = dict(self._entry.data)
-        data[ACTIVE_REFERENCE_KEY] = reference.model_dump(mode="json")
+        if module_key == HEATING_MODULE_KEY:
+            data[ACTIVE_REFERENCE_KEY] = reference.model_dump(mode="json")
+        else:
+            scoped = self._scoped_values()
+            scoped[module_key] = reference.model_dump(mode="json")
+            data[MODULE_ACTIVE_REFERENCES_KEY] = scoped
         self._update_data(data)
+
+    def _scoped_values(self) -> dict[str, object]:
+        value = self._entry.data.get(MODULE_ACTIVE_REFERENCES_KEY, {})
+        if not isinstance(value, Mapping):
+            raise SetupStorageIntegrityError("config-entry module active references are malformed")
+        return {str(key): item for key, item in value.items()}
+
+    @staticmethod
+    def _validate(value: object, *, key: str) -> ActiveReference:
+        if not isinstance(value, Mapping):
+            raise SetupStorageIntegrityError(f"config-entry active reference is malformed: {key}")
+        try:
+            return ActiveReference.model_validate(value)
+        except (TypeError, ValueError) as error:
+            raise SetupStorageIntegrityError(f"config-entry active reference is malformed: {key}") from error
 
 
 class SetupStorageIntegrityError(RuntimeError):

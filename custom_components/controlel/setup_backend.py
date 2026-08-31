@@ -7,6 +7,7 @@ published as part of that package contract.
 
 from __future__ import annotations
 
+from asyncio import Lock
 from collections.abc import Mapping
 from datetime import datetime
 from importlib import import_module
@@ -15,6 +16,7 @@ from typing import Any, cast
 from controlel.application.setup import DiscoverySnapshot
 from controlel.infrastructure.home_assistant import (
     ACTIVE_REFERENCE_KEY,
+    MODULE_ACTIVE_REFERENCES_KEY,
     SETUP_STORAGE_VERSION,
     ConfigEntryActiveReferenceStore,
     HeatingSetupHostService,
@@ -27,9 +29,10 @@ from .const import DOMAIN
 from .core_capabilities import water_safety_core_available
 
 _SETUP_CACHE_KEY = f"{DOMAIN}_setup_backend"
-_LIFECYCLE_DATA_KEYS = frozenset({ACTIVE_REFERENCE_KEY})
+_LIFECYCLE_DATA_KEYS = frozenset({ACTIVE_REFERENCE_KEY, MODULE_ACTIVE_REFERENCES_KEY})
 _HEATING_MODULE_KEY = "heating"
 _WATER_SAFETY_MODULE_KEY = "water_safety"
+_REPOSITORY_LOCK_KEY = "__repository_lock__"
 
 
 def _legacy_status(entry: Any) -> LegacyConfigurationStatusDTO:
@@ -44,7 +47,13 @@ def _legacy_status(entry: Any) -> LegacyConfigurationStatusDTO:
     )
 
 
-async def _repository_for_entry(hass: Any, entry: Any) -> HomeAssistantSetupRepository:
+async def _repository_for_entry(
+    hass: Any,
+    entry: Any,
+    *,
+    module_key: str,
+    lock: Lock,
+) -> HomeAssistantSetupRepository:
     storage_module = import_module("homeassistant.helpers.storage")
     store_type = getattr(storage_module, "Store")
     store = cast(Any, store_type(hass, SETUP_STORAGE_VERSION, f"{DOMAIN}.setup.{entry.entry_id}"))
@@ -52,20 +61,32 @@ async def _repository_for_entry(hass: Any, entry: Any) -> HomeAssistantSetupRepo
     def update_entry_data(data: Mapping[str, object]) -> None:
         hass.config_entries.async_update_entry(entry, data=dict(data))
 
-    active_references = ConfigEntryActiveReferenceStore(entry, update_entry_data)
-    return HomeAssistantSetupRepository(store, active_references)
+    active_references = ConfigEntryActiveReferenceStore(
+        entry,
+        update_entry_data,
+        module_key=module_key,
+    )
+    return HomeAssistantSetupRepository(store, active_references, lock=lock)
 
 
 async def async_get_setup_service(hass: Any, entry: Any, *, module_key: str = _HEATING_MODULE_KEY) -> Any:
     """Return the shared setup service/repository for this config entry and module."""
 
+    if module_key not in {_HEATING_MODULE_KEY, _WATER_SAFETY_MODULE_KEY}:
+        raise ValueError(f"unsupported setup module_key: {module_key}")
     cache = hass.data.setdefault(_SETUP_CACHE_KEY, {})
     entry_cache = cache.setdefault(entry.entry_id, {})
     existing = entry_cache.get(module_key)
     if existing is not None:
         return existing
 
-    repository = await _repository_for_entry(hass, entry)
+    lock = entry_cache.setdefault(_REPOSITORY_LOCK_KEY, Lock())
+    repository = await _repository_for_entry(
+        hass,
+        entry,
+        module_key=module_key,
+        lock=lock,
+    )
     legacy_status = _legacy_status(entry)
 
     if module_key == _WATER_SAFETY_MODULE_KEY:
@@ -100,8 +121,5 @@ async def async_get_setup_service(hass: Any, entry: Any, *, module_key: str = _H
             heating_snapshot_loader,
             legacy_configuration=legacy_status,
         )
-    else:
-        raise ValueError(f"unsupported setup module_key: {module_key}")
-
     entry_cache[module_key] = service
     return service

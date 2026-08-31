@@ -8,10 +8,16 @@ from unittest.mock import AsyncMock
 
 import pytest
 from homeassistant.const import ATTR_UNIT_OF_MEASUREMENT, UnitOfTemperature
+from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 import custom_components.controlel as component
 import custom_components.controlel.setup_write_websocket as setup_transport
+from controlel.application.configuration.heating_setup_adapter import (
+    PRIMARY_TEMPERATURE_ROLE,
+    SOURCE_DISABLE_TARGET_ROLE,
+    SOURCE_ENABLE_TARGET_ROLE,
+)
 from controlel.infrastructure.home_assistant import ACTIVE_REFERENCE_KEY
 from custom_components.controlel.const import CONF_TEMPERATURE_ENTITY_ID, DOMAIN
 from custom_components.controlel.setup_write_websocket import (
@@ -26,6 +32,30 @@ from custom_components.controlel.setup_write_websocket import (
 )
 
 NOW = "2026-08-24T12:00:00Z"
+
+
+def _complete_settings() -> dict[str, object]:
+    return {
+        "zone_id": "living",
+        "zone_name": "Living room",
+        "sensor_id": "living-temperature",
+        "sensor_name": "Living temperature",
+        "target_temperature_celsius": 21.0,
+        "primary_measurement_max_age_seconds": 300.0,
+        "maximum_future_skew_seconds": 5.0,
+        "indeterminate_grace_period_seconds": 60.0,
+        "source_control_mode": "custom",
+        "source_enable": {
+            "domain": "vendor_boiler",
+            "service": "grant_permission",
+            "target_binding_role": SOURCE_ENABLE_TARGET_ROLE,
+        },
+        "source_disable": {
+            "domain": "vendor_boiler",
+            "service": "revoke_permission",
+            "target_binding_role": SOURCE_DISABLE_TARGET_ROLE,
+        },
+    }
 
 
 def _contract_messages(entry_id: str) -> tuple[tuple[str, str, dict[str, object]], ...]:
@@ -171,7 +201,7 @@ async def test_contract_routes_every_operation_to_existing_host_service(
 
 
 @pytest.mark.asyncio
-async def test_valid_start_is_config_entry_scoped_and_never_changes_runtime_control(
+async def test_valid_operations_are_config_entry_scoped_and_never_change_runtime_control(
     hass,
     hass_ws_client,
     entry_data,
@@ -187,6 +217,21 @@ async def test_valid_start_is_config_entry_scoped_and_never_changes_runtime_cont
     assert await hass.config_entries.async_setup(entry.entry_id)
     host = entry.runtime_data.host
     assert host is not None
+    registry = er.async_get(hass)
+    registry.async_get_or_create(
+        "sensor",
+        "test",
+        "setup-temperature",
+        suggested_object_id="setup_temperature",
+        original_device_class="temperature",
+        unit_of_measurement=UnitOfTemperature.CELSIUS,
+    )
+    registry.async_get_or_create(
+        "switch",
+        "test",
+        "setup-boiler",
+        suggested_object_id="setup_boiler",
+    )
     client = await hass_ws_client(hass)
     data_before = deepcopy(dict(entry.data))
     options_before = deepcopy(dict(entry.options))
@@ -196,36 +241,116 @@ async def test_valid_start_is_config_entry_scoped_and_never_changes_runtime_cont
         host.operational_event_diagnostics()["total_emitted"],
     )
 
-    await client.send_json_auto_id(
+    async def send(message: dict[str, object]) -> object:
+        await client.send_json_auto_id({"config_entry_id": entry.entry_id, **message})
+        response = await client.receive_json()
+
+        assert response["success"] is True
+        assert ACTIVE_REFERENCE_KEY not in entry.data
+        assert dict(entry.data) == data_before
+        assert dict(entry.options) == options_before
+        assert (
+            host.snapshot_source.current.revision,
+            host.snapshot_source.total_trace_records,
+            host.operational_event_diagnostics()["total_emitted"],
+        ) == runtime_before
+        assert service_calls == []
+        return response["result"]["result"]
+
+    await send(
+        {
+            "type": SETUP_WRITE_V1_DISCOVERY,
+            "snapshot_id": "snapshot-1",
+            "captured_at": NOW,
+        }
+    )
+    recommendations = await send(
+        {
+            "type": SETUP_WRITE_V1_RECOMMENDATIONS,
+            "snapshot_id": "snapshot-1",
+            "captured_at": NOW,
+        }
+    )
+    assert isinstance(recommendations, list)
+    by_role = {item["role"]: item for item in recommendations}
+    selections = [
+        {
+            "role": role,
+            "candidate_id": by_role[role]["recommended"]["candidate_id"],
+            "user_confirmed": True,
+        }
+        for role in (PRIMARY_TEMPERATURE_ROLE, SOURCE_ENABLE_TARGET_ROLE, SOURCE_DISABLE_TARGET_ROLE)
+    ]
+    settings = _complete_settings()
+
+    session = await send(
         {
             "type": SETUP_WRITE_V1_START,
-            "config_entry_id": entry.entry_id,
             "draft_id": "draft-1",
             "module_instance_id": "main-heating",
             "created_at": NOW,
             "snapshot_id": "snapshot-1",
             "report_id": "report-1",
+            "settings": settings,
+            "selections": selections,
         }
     )
-    response = await client.receive_json()
 
-    assert response["success"] is True
-    assert response["result"]["setup_write_api_version"] == 1
-    assert response["result"]["operation"] == "start"
-    session = response["result"]["result"]
+    assert isinstance(session, dict)
     assert session["draft_id"] == "draft-1"
     assert session["draft_revision"] == 1
     assert session["canonical_revision_id"] is None
     assert session["active_revision_id"] is None
-    assert ACTIVE_REFERENCE_KEY not in entry.data
-    assert dict(entry.data) == data_before
-    assert dict(entry.options) == options_before
-    assert (
-        host.snapshot_source.current.revision,
-        host.snapshot_source.total_trace_records,
-        host.operational_event_diagnostics()["total_emitted"],
-    ) == runtime_before
-    assert service_calls == []
+    await send(
+        {
+            "type": SETUP_WRITE_V1_REOPEN,
+            "draft_id": "draft-1",
+            "snapshot_id": "snapshot-1",
+            "captured_at": NOW,
+        }
+    )
+    await send(
+        {
+            "type": SETUP_WRITE_V1_UPDATE,
+            "draft_id": "draft-1",
+            "expected_revision": 1,
+            "updated_at": NOW,
+            "snapshot_id": "snapshot-1",
+            "report_id": "report-2",
+            "settings": settings,
+            "selections": selections,
+        }
+    )
+    await send(
+        {
+            "type": SETUP_WRITE_V1_VALIDATE,
+            "draft_id": "draft-1",
+            "snapshot_id": "snapshot-1",
+            "evaluated_at": NOW,
+            "report_id": "report-3",
+        }
+    )
+    canonicalized = await send(
+        {
+            "type": SETUP_WRITE_V1_CANONICALIZE,
+            "draft_id": "draft-1",
+            "snapshot_id": "snapshot-1",
+            "created_at": NOW,
+            "validation_report_id": "report-4",
+            "configuration_id": "configuration-1",
+            "revision_id": "canonical-1",
+            "revision": 1,
+            "actor": "user:owner",
+            "source": "setup_write_v1",
+            "change_kind": "CREATE",
+            "reason": "initial_setup",
+            "core_version": "0.13.0",
+        }
+    )
+
+    assert isinstance(canonicalized, dict)
+    assert canonicalized["canonical_revision_id"] == "canonical-1"
+    assert canonicalized["active_revision_id"] is None
 
 
 @pytest.mark.asyncio

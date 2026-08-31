@@ -230,3 +230,29 @@ test("rolesWithPrefix filters recommendation roles", () => {
     ["water_safety.notification.primary"]
   );
 });
+
+test("moisture candidates default to the selected area and can show all", () => {
+  const candidates = [
+    { candidate_id: "utility", area_id: "utility" },
+    { candidate_id: "kitchen", area_id: "kitchen" },
+    { candidate_id: "global", area_id: null },
+  ];
+  assert.deepEqual(
+    CA_WATER_WIZARD.candidatesForArea(candidates, "utility", false).map((item) => item.candidate_id),
+    ["utility"]
+  );
+  assert.equal(CA_WATER_WIZARD.candidatesForArea(candidates, "utility", true).length, 3);
+});
+
+test("siren candidates remain global and are grouped with selected area first", () => {
+  const candidates = [
+    { candidate_id: "garage-b", area_id: "garage", current_locator: "siren.b" },
+    { candidate_id: "utility", area_id: "utility", current_locator: "siren.temp_tapo_marsa_h200_hub_siren" },
+    { candidate_id: "garage-a", area_id: "garage", current_locator: "siren.a" },
+  ];
+  assert.deepEqual(
+    CA_WATER_WIZARD.rankCandidatesByArea(candidates, "utility").map((item) => item.candidate_id),
+    ["utility", "garage-a", "garage-b"]
+  );
+  assert.deepEqual(CA_WATER_WIZARD.DEFAULT_SIREN_ROLES, ["water_safety.siren.primary"]);
+});
