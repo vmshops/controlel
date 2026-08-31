@@ -437,26 +437,230 @@ async def test_heating_route_reaches_existing_configuration_menu(hass) -> None:
     assert "back_to_hub" in heating["menu_options"]
 
 
+async def _open_water_menu(hass, entry, *, hub=None):
+    if hub is None:
+        hub = await _open_hub(hass, entry)
+    water = await _choose(hass, hub, "water_safety")
+    assert water["step_id"] == "water_safety"
+    return water
+
+
+async def _seed_water_draft(hass, entry, *, complete: bool = False):
+    from datetime import UTC, datetime
+
+    from controlel.application.configuration.water_safety_setup_adapter import (
+        DEFAULT_NOTIFICATION_ROLE,
+        WATER_SAFETY_MODULE_KEY,
+        WATER_SAFETY_SENSOR_ROLE,
+        WaterSafetySetupAdapter,
+    )
+    from controlel.application.setup import (
+        BindingSelection,
+        DraftRevision,
+        IdentityQuality,
+        ProviderReference,
+        SelectionOrigin,
+    )
+
+    backend = await async_get_setup_backend(hass, entry)
+    repository = backend.repository
+    now = datetime.now(UTC)
+    bindings = (
+        BindingSelection(
+            role=WATER_SAFETY_SENSOR_ROLE,
+            reference=ProviderReference(
+                provider="home_assistant",
+                provider_instance_id="home",
+                object_kind="home_assistant.entity",
+                native_id="binary_sensor.utility_moisture",
+                identity_quality=IdentityQuality.STABLE,
+                current_locator="binary_sensor.utility_moisture",
+            ),
+            selection_origin=SelectionOrigin.MANUAL,
+            user_confirmed=complete,
+        ),
+        BindingSelection(
+            role=DEFAULT_NOTIFICATION_ROLE,
+            reference=ProviderReference(
+                provider="home_assistant",
+                provider_instance_id="home",
+                object_kind="home_assistant.endpoint",
+                native_id="notify.mobile_app_phone",
+                identity_quality=IdentityQuality.STABLE,
+                current_locator="notify.mobile_app_phone",
+            ),
+            selection_origin=SelectionOrigin.MANUAL,
+            user_confirmed=complete,
+        ),
+    )
+    draft = DraftRevision(
+        draft_id="water-draft",
+        revision=1,
+        environment_id="home",
+        module_key=WATER_SAFETY_MODULE_KEY,
+        module_instance_id="utility-water",
+        module_schema_version=1,
+        created_at=now,
+        updated_at=now,
+        settings={
+            "behavior_contract_version": 1,
+            "zone_id": "utility",
+            "zone_name": "Utility",
+            "area_id": "utility-room",
+            "area_name": "Utility room",
+            "sensor_id": "utility-moisture",
+            "critical_sensor": False,
+            "unavailable_grace_seconds": 30.0,
+            "fault_repeat_interval_seconds": 120.0,
+            "notification_target_roles": [DEFAULT_NOTIFICATION_ROLE],
+            "siren_target_roles": [],
+            "messages": {},
+        },
+        bindings=bindings if complete else (),
+    )
+    await repository.save_draft(draft)
+    adapter = WaterSafetySetupAdapter()
+    report = adapter.validate(draft, report_id="water-report", evaluated_at=now)
+    await repository.save_validation_report(report)
+    return draft, report
+
+
+async def _seed_configured_water(hass, entry):
+    from datetime import UTC, datetime
+
+    from controlel.application.configuration.water_safety_setup_adapter import WaterSafetySetupAdapter
+    from controlel.application.setup import ActiveReference
+
+    draft, report = await _seed_water_draft(hass, entry, complete=True)
+    adapter = WaterSafetySetupAdapter()
+    now = datetime.now(UTC)
+    canonical = adapter.canonicalize(
+        draft,
+        report,
+        configuration_id="water-config",
+        revision_id="water-revision",
+        revision=1,
+        provider="home_assistant",
+        provider_instance_id="home",
+        created_at=now,
+        actor="test",
+        source="home_assistant_native_configure_test",
+        change_kind="CREATE",
+        reason="test",
+        core_version="0.17.0",
+    )
+    backend = await async_get_setup_backend(hass, entry)
+    await backend.repository.add_canonical_revision(canonical)
+    active = ActiveReference(
+        environment_id="home",
+        module_key="water_safety",
+        module_instance_id="utility-water",
+        canonical_revision_id="water-revision",
+        semantic_configuration_fingerprint=canonical.semantic_configuration_fingerprint,
+        generation=1,
+        committing_operation_id="test-op",
+    )
+    hass.config_entries.async_update_entry(
+        entry,
+        data={ACTIVE_REFERENCE_KEY: active.model_dump(mode="json")},
+        options={},
+    )
+    return draft, canonical, active
+
+
 @pytest.mark.asyncio
-async def test_water_safety_route_and_back_navigation(hass) -> None:
+async def test_water_safety_native_menu_structure(hass) -> None:
     from custom_components.controlel.core_capabilities import water_safety_core_available
 
     entry = await _empty_entry(hass)
-    hub = await _open_hub(hass, entry)
-    water = await _choose(hass, hub, "water_safety")
-    assert water["step_id"] == "water_safety"
+    water = await _open_water_menu(hass, entry)
+    expected = list(cf.WATER_SAFETY_MENU_OPTIONS)
     if water_safety_core_available():
-        assert "open_water_wizard" in water["menu_options"]
-    assert "back_to_hub" in water["menu_options"]
+        expected.insert(-1, cf.WATER_SAFETY_EXPERIMENTAL_WIZARD)
+    assert list(water["menu_options"]) == expected
+    assert "open_water_wizard" not in water["menu_options"]
+    assert "not configured" in water["description_placeholders"]["water_safety_summary"].lower()
+
+
+@pytest.mark.asyncio
+async def test_water_safety_submenu_navigation_returns_to_module_menu(hass) -> None:
+    entry = await _empty_entry(hass)
+    water = await _open_water_menu(hass, entry)
+    for step_id in (
+        "water_safety_status",
+        "water_safety_area_sensor",
+        "water_safety_notifications",
+        "water_safety_sirens",
+        "water_safety_sensor_fault",
+        "water_safety_messages",
+        "water_safety_validation",
+    ):
+        section = await _choose(hass, water, step_id)
+        assert section["step_id"] == step_id
+        assert section["menu_options"] == ["back_to_water_safety"]
+        assert "section_detail" in section["description_placeholders"]
+        water = await _choose(hass, section, "back_to_water_safety")
+        assert water["step_id"] == "water_safety"
+
+
+@pytest.mark.asyncio
+async def test_water_safety_back_to_hub_navigation(hass) -> None:
+    entry = await _empty_entry(hass)
+    water = await _open_water_menu(hass, entry)
     hub_again = await _choose(hass, water, "back_to_hub")
     assert hub_again["step_id"] == "init"
     assert list(hub_again["menu_options"]) == list(cf.HUB_MENU_OPTIONS)
 
-    if water_safety_core_available():
-        water = await _choose(hass, hub_again, "water_safety")
-        wizard = await _choose(hass, water, "open_water_wizard")
-        assert wizard["type"] is data_entry_flow.FlowResultType.EXTERNAL_STEP
-        assert wizard["url"] == cf.WATER_WIZARD_URL
+
+@pytest.mark.asyncio
+async def test_fresh_water_safety_menu_reports_not_configured(hass) -> None:
+    entry = await _empty_entry(hass)
+    water = await _open_water_menu(hass, entry)
+    status = await _choose(hass, water, "water_safety_status")
+    assert status["description_placeholders"]["section_detail"] == "Not configured."
+    area = await _choose(hass, await _choose(hass, status, "back_to_water_safety"), "water_safety_area_sensor")
+    assert area["description_placeholders"]["section_detail"] == "Not configured."
+    assert "Disabled" not in water["description_placeholders"]["water_safety_summary"]
+
+
+@pytest.mark.asyncio
+async def test_draft_incomplete_water_safety_menu(hass) -> None:
+    entry = await _empty_entry(hass)
+    await _seed_water_draft(hass, entry, complete=False)
+    water = await _open_water_menu(hass, entry)
+    assert "incomplete draft" in water["description_placeholders"]["water_safety_summary"]
+    validation = await _choose(hass, water, "water_safety_validation")
+    assert "not ready" in validation["description_placeholders"]["section_detail"]
+
+
+@pytest.mark.asyncio
+async def test_configured_water_safety_menu(hass) -> None:
+    entry = MockConfigEntry(domain=DOMAIN, title="Water configured menu", data={}, options={})
+    entry.add_to_hass(hass)
+    assert await component.async_setup(hass, {})
+    _draft, _canonical, active = await _seed_configured_water(hass, entry)
+    water = await _open_water_menu(hass, entry)
+    assert active.canonical_revision_id in water["description_placeholders"]["water_safety_summary"]
+    area = await _choose(hass, water, "water_safety_area_sensor")
+    assert "Utility room" in area["description_placeholders"]["section_detail"]
+    assert "binary_sensor.utility_moisture" in area["description_placeholders"]["section_detail"]
+
+
+@pytest.mark.asyncio
+async def test_water_experimental_wizard_isolation(hass) -> None:
+    from custom_components.controlel.core_capabilities import water_safety_core_available
+
+    if not water_safety_core_available():
+        pytest.skip("Water Safety core unavailable")
+
+    entry = await _empty_entry(hass)
+    water = await _open_water_menu(hass, entry)
+    assert water["menu_options"][0] == "water_safety_status"
+    assert water["menu_options"][-2] == cf.WATER_SAFETY_EXPERIMENTAL_WIZARD
+    wizard = await _choose(hass, water, cf.WATER_SAFETY_EXPERIMENTAL_WIZARD)
+    assert wizard["type"] is data_entry_flow.FlowResultType.EXTERNAL_STEP
+    assert wizard["url"] == cf.WATER_WIZARD_URL
+    assert wizard["step_id"] == "open_water_wizard_experimental"
 
 
 @pytest.mark.asyncio

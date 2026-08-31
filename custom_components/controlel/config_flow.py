@@ -32,10 +32,27 @@ from .activation_backend import async_activate_canonical_revision
 from .const import CONFIG_ENTRY_VERSION, DOMAIN, INTEGRATION_VERSION
 from .core_capabilities import water_safety_core_available
 from .setup_backend import async_get_setup_backend
+from .water_safety_configure_view import (
+    WaterSafetySection,
+    async_build_water_safety_configure_view,
+    water_safety_menu_summary,
+    water_safety_section_detail,
+)
 
 WIZARD_URL = f"/{DOMAIN}"
 WATER_WIZARD_URL = f"/{DOMAIN}_static/water-wizard.html"
 HUB_MENU_OPTIONS = ("heating", "water_safety", "notifications_hub", "general_hub", "diagnostics_advanced")
+WATER_SAFETY_MENU_OPTIONS = (
+    "water_safety_status",
+    "water_safety_area_sensor",
+    "water_safety_notifications",
+    "water_safety_sirens",
+    "water_safety_sensor_fault",
+    "water_safety_messages",
+    "water_safety_validation",
+    "back_to_hub",
+)
+WATER_SAFETY_EXPERIMENTAL_WIZARD = "open_water_wizard_experimental"
 TOP_EXPLANATION = (
     "You can configure Controlel here manually or use the simpler guided Setup Wizard in the Controlel panel. "
     "Both edit the same configuration."
@@ -228,14 +245,65 @@ class ControlelOptionsFlow(OptionsFlow):
 
     async def async_step_water_safety(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         del user_input
-        menu = ["back_to_hub"]
+        menu = list(WATER_SAFETY_MENU_OPTIONS)
         if water_safety_core_available():
-            menu.insert(0, "open_water_wizard")
-        return self.async_show_menu(step_id="water_safety", menu_options=menu)
+            menu.insert(-1, WATER_SAFETY_EXPERIMENTAL_WIZARD)
+        view = await async_build_water_safety_configure_view(
+            (await async_get_setup_backend(self.hass, self.config_entry)).repository,
+            self.config_entry.data,
+        )
+        return self.async_show_menu(
+            step_id="water_safety",
+            menu_options=menu,
+            description_placeholders={"water_safety_summary": water_safety_menu_summary(view)},
+        )
 
-    async def async_step_open_water_wizard(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+    async def async_step_back_to_water_safety(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        return await self.async_step_water_safety(user_input)
+
+    async def async_step_water_safety_status(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        return await self._async_step_water_safety_section("water_safety_status", "status", user_input)
+
+    async def async_step_water_safety_area_sensor(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        return await self._async_step_water_safety_section("water_safety_area_sensor", "area_sensor", user_input)
+
+    async def async_step_water_safety_notifications(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        return await self._async_step_water_safety_section("water_safety_notifications", "notifications", user_input)
+
+    async def async_step_water_safety_sirens(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        return await self._async_step_water_safety_section("water_safety_sirens", "sirens", user_input)
+
+    async def async_step_water_safety_sensor_fault(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        return await self._async_step_water_safety_section("water_safety_sensor_fault", "sensor_fault", user_input)
+
+    async def async_step_water_safety_messages(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        return await self._async_step_water_safety_section("water_safety_messages", "messages", user_input)
+
+    async def async_step_water_safety_validation(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        return await self._async_step_water_safety_section("water_safety_validation", "validation", user_input)
+
+    async def async_step_open_water_wizard_experimental(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
         del user_input
-        return self.async_external_step(step_id="open_water_wizard", url=WATER_WIZARD_URL)
+        return self.async_external_step(step_id="open_water_wizard_experimental", url=WATER_WIZARD_URL)
+
+    async def _async_step_water_safety_section(
+        self,
+        step_id: str,
+        section: WaterSafetySection,
+        user_input: dict[str, Any] | None,
+    ) -> ConfigFlowResult:
+        del user_input
+        view = await async_build_water_safety_configure_view(
+            (await async_get_setup_backend(self.hass, self.config_entry)).repository,
+            self.config_entry.data,
+        )
+        return self.async_show_menu(
+            step_id=step_id,
+            menu_options=["back_to_water_safety"],
+            description_placeholders={"section_detail": water_safety_section_detail(view, section)},
+        )
 
     async def async_step_notifications_hub(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         del user_input

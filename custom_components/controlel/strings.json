@@ -64,10 +64,66 @@
       },
       "water_safety": {
         "title": "Water Safety",
-        "description": "Configure Water Safety moisture detection, notifications and sirens.",
+        "description": "{water_safety_summary}",
         "menu_options": {
-          "open_water_wizard": "Open Water Safety Setup Wizard",
+          "water_safety_status": "Status",
+          "water_safety_area_sensor": "Area & moisture sensor",
+          "water_safety_notifications": "Notifications",
+          "water_safety_sirens": "Sirens",
+          "water_safety_sensor_fault": "Sensor fault handling",
+          "water_safety_messages": "Messages",
+          "water_safety_validation": "Validation / Activation",
+          "open_water_wizard_experimental": "Experimental: Guided Setup",
           "back_to_hub": "Back to Controlel Configure"
+        }
+      },
+      "water_safety_status": {
+        "title": "Water Safety — Status",
+        "description": "{section_detail}",
+        "menu_options": {
+          "back_to_water_safety": "Back to Water Safety"
+        }
+      },
+      "water_safety_area_sensor": {
+        "title": "Water Safety — Area & moisture sensor",
+        "description": "{section_detail}",
+        "menu_options": {
+          "back_to_water_safety": "Back to Water Safety"
+        }
+      },
+      "water_safety_notifications": {
+        "title": "Water Safety — Notifications",
+        "description": "{section_detail}",
+        "menu_options": {
+          "back_to_water_safety": "Back to Water Safety"
+        }
+      },
+      "water_safety_sirens": {
+        "title": "Water Safety — Sirens",
+        "description": "{section_detail}",
+        "menu_options": {
+          "back_to_water_safety": "Back to Water Safety"
+        }
+      },
+      "water_safety_sensor_fault": {
+        "title": "Water Safety — Sensor fault handling",
+        "description": "{section_detail}",
+        "menu_options": {
+          "back_to_water_safety": "Back to Water Safety"
+        }
+      },
+      "water_safety_messages": {
+        "title": "Water Safety — Messages",
+        "description": "{section_detail}",
+        "menu_options": {
+          "back_to_water_safety": "Back to Water Safety"
+        }
+      },
+      "water_safety_validation": {
+        "title": "Water Safety — Validation / Activation",
+        "description": "{section_detail}",
+        "menu_options": {
+          "back_to_water_safety": "Back to Water Safety"
         }
       },
       "notifications_hub": {
