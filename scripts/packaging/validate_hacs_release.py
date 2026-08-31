@@ -58,6 +58,7 @@ EXPECTED_ARCHIVE_FILES = frozenset(
         "strings.json",
         "translations/en.json",
         "water_safety_activation.py",
+        "water_safety_configure_view.py",
         "water_safety_host.py",
         "water_safety_moisture.py",
         "water_safety_output.py",
