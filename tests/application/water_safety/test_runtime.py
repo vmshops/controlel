@@ -9,6 +9,7 @@ from controlel.application.configuration.water_safety_setup_adapter import (
     WATER_SAFETY_SENSOR_ROLE,
     WaterSafetySetupAdapter,
 )
+from controlel.application.services.water_safety_projector import WaterSafetyDiagnosticsProjector
 from controlel.application.setup import (
     BindingSelection,
     DraftRevision,
@@ -40,6 +41,8 @@ NOTIFY_HOME = "water_safety.notification.home"
 NOTIFY_OWNER = "water_safety.notification.owner"
 SIREN_HALL = "water_safety.siren.hall"
 SIREN_CELLAR = "water_safety.siren.cellar"
+VALVE_MAIN = "water_safety.shutoff_valve.main"
+VALVE_BACKUP = "water_safety.shutoff_valve.backup"
 
 
 @dataclass
@@ -92,8 +95,10 @@ def _effective(
     grace: float = 30.0,
     repeat: float | None = 120.0,
     siren_roles: tuple[str, ...] = (SIREN_HALL,),
+    valve_roles: tuple[str, ...] = (),
 ):
     siren_roles = tuple(sorted(siren_roles))
+    valve_roles = tuple(sorted(valve_roles))
     notification_roles = (NOTIFY_HOME, NOTIFY_OWNER)
     references = {
         WATER_SAFETY_SENSOR_ROLE: _reference("moisture-1", "sensor/current-name"),
@@ -102,6 +107,10 @@ def _effective(
         **{
             role: _reference(f"siren-{index}", f"siren/current-{index}")
             for index, role in enumerate(siren_roles, start=1)
+        },
+        **{
+            role: _reference(f"valve-{index}", f"valve/current-{index}")
+            for index, role in enumerate(valve_roles, start=1)
         },
     }
     bindings = tuple(
@@ -134,6 +143,7 @@ def _effective(
             "fault_repeat_interval_seconds": repeat,
             "notification_target_roles": notification_roles,
             "siren_target_roles": siren_roles,
+            "shutoff_valve_target_roles": valve_roles,
             "messages": {
                 "wet": "Custom wet",
                 "recovery": "Custom recovery",
@@ -432,6 +442,100 @@ def test_wet_partial_siren_failure_does_not_block_other_sirens_or_notifications(
     repeated = runtime.observe(_observation(MoistureCondition.WET, T0 + timedelta(minutes=5)))
     assert repeated.output_results == ()
     assert len(output.commands) == command_count
+
+
+def test_wet_closes_all_valves_once_and_partial_failure_does_not_block_other_outputs() -> None:
+    output = RecordingOutput(failing={(VALVE_BACKUP, WaterOutputAction.REQUEST_VALVE_CLOSE)})
+    runtime = _runtime(
+        output,
+        effective=_effective(
+            siren_roles=(SIREN_HALL,),
+            valve_roles=(VALVE_MAIN, VALVE_BACKUP),
+        ),
+    )
+    runtime.start(_observation(MoistureCondition.DRY, T0), started_at=T0)
+
+    wet = runtime.observe(_observation(MoistureCondition.WET, T0 + timedelta(seconds=1)))
+    valve_commands = [command for command in output.commands if command.output_kind is WaterOutputKind.SHUTOFF_VALVE]
+
+    assert wet.state is WaterSafetyState.WET
+    assert [command.action for command in valve_commands] == [
+        WaterOutputAction.REQUEST_VALVE_CLOSE,
+        WaterOutputAction.REQUEST_VALVE_CLOSE,
+    ]
+    assert {result.outcome for result in wet.output_results} == {
+        WaterOutputOutcome.ACCEPTED,
+        WaterOutputOutcome.FAILED,
+    }
+    assert any(command.output_kind is WaterOutputKind.SIREN for command in output.commands)
+    assert any(command.output_kind is WaterOutputKind.NOTIFICATION for command in output.commands)
+    assert all(
+        event.command is None or dict(event.details) == {"physical_state_confirmed": False} for event in wet.events
+    )
+
+    command_count = len(output.commands)
+    repeated = runtime.observe(_observation(MoistureCondition.WET, T0 + timedelta(minutes=5)))
+    recovered = runtime.observe(_observation(MoistureCondition.DRY, T0 + timedelta(minutes=6)))
+
+    assert repeated.output_results == ()
+    assert len([command for command in output.commands if command.output_kind is WaterOutputKind.SHUTOFF_VALVE]) == 2
+    assert recovered.state is WaterSafetyState.OK
+    assert all(
+        command.action is not WaterOutputAction.REQUEST_VALVE_CLOSE for command in output.commands[command_count:]
+    )
+    owned_valves = [output for output in runtime.owned_outputs() if output.output_kind is WaterOutputKind.SHUTOFF_VALVE]
+    assert len(owned_valves) == 2
+    assert all(output.last_requested_action is WaterOutputAction.REQUEST_VALVE_CLOSE for output in owned_valves)
+    projected = WaterSafetyDiagnosticsProjector().project(
+        runtime.diagnostics(),
+        area_name="Utility room",
+        zone_name="Utility",
+    )
+    assert projected.owned_siren_count == 1
+
+
+def test_activation_and_restart_while_wet_deterministically_reassert_close_without_reopen() -> None:
+    effective = _effective(siren_roles=(), valve_roles=(VALVE_MAIN,))
+    first_output = RecordingOutput()
+    first = _runtime(first_output, effective=effective)
+
+    activated = first.start(_observation(MoistureCondition.WET, T0), started_at=T0)
+    incident_id = activated.snapshot.active_incident.incident_id
+    assert _actions(first_output) == [
+        WaterOutputAction.REQUEST_VALVE_CLOSE,
+        WaterOutputAction.NOTIFY_WET,
+        WaterOutputAction.NOTIFY_WET,
+    ]
+
+    restarted_output = RecordingOutput()
+    restarted = _runtime(restarted_output, effective=effective, restored=first.snapshot)
+    restarted_result = restarted.start(
+        _observation(MoistureCondition.WET, T0 + timedelta(seconds=10)),
+        started_at=T0 + timedelta(seconds=10),
+    )
+
+    assert restarted_result.snapshot.active_incident.incident_id == incident_id
+    assert _actions(restarted_output) == [WaterOutputAction.REQUEST_VALVE_CLOSE]
+    recovered = restarted.observe(_observation(MoistureCondition.DRY, T0 + timedelta(seconds=20)))
+    assert recovered.state is WaterSafetyState.OK
+    assert WaterOutputAction.REQUEST_VALVE_CLOSE not in _actions(restarted_output)[1:]
+
+
+def test_reenable_silenced_wet_incident_reasserts_valve_close_without_restarting_siren() -> None:
+    output = RecordingOutput()
+    runtime = _runtime(output, effective=_effective(valve_roles=(VALVE_MAIN,)))
+    runtime.start(_observation(MoistureCondition.WET, T0), started_at=T0)
+    runtime.silence(silenced_at=T0 + timedelta(seconds=1))
+    runtime.disable(disabled_at=T0 + timedelta(seconds=2))
+
+    enabled = runtime.enable(
+        _observation(MoistureCondition.WET, T0 + timedelta(seconds=3)),
+        enabled_at=T0 + timedelta(seconds=3),
+    )
+
+    assert enabled.state is WaterSafetyState.WET
+    assert _actions(output).count(WaterOutputAction.REQUEST_VALVE_CLOSE) == 2
+    assert _actions(output).count(WaterOutputAction.REQUEST_SIREN_ON) == 1
 
 
 def test_reenable_while_still_wet_reuses_incident_and_reasserts_unsilenced_siren() -> None:

@@ -6,6 +6,7 @@ from dataclasses import replace
 from datetime import datetime, timedelta
 
 from controlel.application.configuration.water_safety_setup_adapter import (
+    SHUTOFF_VALVE_ROLE_PREFIX,
     WATER_SAFETY_MODULE_KEY,
     WATER_SAFETY_SENSOR_ROLE,
     WATER_SAFETY_SETUP_SCHEMA_VERSION,
@@ -70,6 +71,7 @@ class WaterSafetyRuntime:
             WATER_SAFETY_SENSOR_ROLE,
             *self._config.notification_target_roles,
             *self._config.siren_target_roles,
+            *self._config.shutoff_valve_target_roles,
         }
         bindings = {binding.role: binding.reference for binding in effective.bindings}
         if set(bindings) != expected_roles:
@@ -90,8 +92,17 @@ class WaterSafetyRuntime:
             module_instance_id=effective.module_instance_id,
         )
         self._owned_outputs = {
-            role: OwnedWaterOutput(owner=self._owner, target_role=role, target=bindings[role])
-            for role in self._config.siren_target_roles
+            role: OwnedWaterOutput(
+                owner=self._owner,
+                target_role=role,
+                target=bindings[role],
+                output_kind=(
+                    WaterOutputKind.SHUTOFF_VALVE
+                    if role.startswith(SHUTOFF_VALVE_ROLE_PREFIX)
+                    else WaterOutputKind.SIREN
+                ),
+            )
+            for role in (*self._config.siren_target_roles, *self._config.shutoff_valve_target_roles)
         }
         self._started = False
         if restored_snapshot is None:
@@ -488,6 +499,7 @@ class WaterSafetyRuntime:
                 observation=observation,
                 incident_id=incident.incident_id,
             )
+            self._request_all_shutoff_valves(observation.observed_at, events, results)
             self._request_all_sirens(WaterOutputAction.REQUEST_SIREN_ON, observation.observed_at, events, results)
             self._notify(
                 WaterOutputAction.NOTIFY_WET,
@@ -498,8 +510,10 @@ class WaterSafetyRuntime:
                 events,
                 results,
             )
-        elif reassert_outputs and incident.silenced_at is None:
-            self._request_all_sirens(WaterOutputAction.REQUEST_SIREN_ON, observation.observed_at, events, results)
+        elif reassert_outputs:
+            self._request_all_shutoff_valves(observation.observed_at, events, results)
+            if incident.silenced_at is None:
+                self._request_all_sirens(WaterOutputAction.REQUEST_SIREN_ON, observation.observed_at, events, results)
 
     def _process_indeterminate(
         self,
@@ -628,6 +642,23 @@ class WaterSafetyRuntime:
                 incident_id=self._active_incident_id,
             )
 
+    def _request_all_shutoff_valves(
+        self,
+        at: datetime,
+        events: list[WaterSafetyEvent],
+        results: list[WaterOutputCommandResult],
+    ) -> None:
+        for role in self._config.shutoff_valve_target_roles:
+            self._dispatch(
+                WaterOutputKind.SHUTOFF_VALVE,
+                WaterOutputAction.REQUEST_VALVE_CLOSE,
+                role,
+                at,
+                events,
+                results,
+                incident_id=self._active_incident_id,
+            )
+
     def _dispatch(
         self,
         kind: WaterOutputKind,
@@ -674,11 +705,12 @@ class WaterSafetyRuntime:
                 failure_code="output_port_exception",
             )
         results.append(result)
-        if kind is WaterOutputKind.SIREN:
+        if kind in {WaterOutputKind.SIREN, WaterOutputKind.SHUTOFF_VALVE}:
             self._owned_outputs[role] = OwnedWaterOutput(
                 owner=self._owner,
                 target_role=role,
                 target=self._bindings[role],
+                output_kind=kind,
                 last_requested_action=action,
                 last_command_outcome=result.outcome,
                 last_requested_at=at,

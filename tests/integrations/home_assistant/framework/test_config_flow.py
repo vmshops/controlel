@@ -6,6 +6,7 @@ from copy import deepcopy
 
 import pytest
 from homeassistant import config_entries, data_entry_flow
+from homeassistant.components.valve import ValveDeviceClass, ValveEntityFeature
 from homeassistant.const import ATTR_UNIT_OF_MEASUREMENT, UnitOfTemperature
 from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import entity_registry as er
@@ -123,6 +124,43 @@ def _register_siren_candidates(hass):
 
     compatible = (create("siren", "hall_alarm"), create("siren", "cellar_alarm"))
     incompatible = (create("switch", "garage_siren"), create("alarm_control_panel", "home_alarm"))
+    return (*compatible, incompatible)
+
+
+def _register_shutoff_valve_candidates(hass):
+    registry = er.async_get(hass)
+
+    def create(
+        domain: str,
+        unique_id: str,
+        *,
+        device_class: str | None = None,
+        supported_features: int = 0,
+    ) -> str:
+        return registry.async_get_or_create(
+            domain,
+            "water-shutoff-configure-test",
+            unique_id,
+            suggested_object_id=unique_id,
+            original_device_class=device_class,
+            supported_features=supported_features,
+        ).entity_id
+
+    close = int(ValveEntityFeature.CLOSE)
+    compatible = (
+        create("valve", "utility_water_main", device_class=ValveDeviceClass.WATER, supported_features=close),
+        create("valve", "street_water_main", device_class=ValveDeviceClass.WATER, supported_features=close),
+    )
+    incompatible = (
+        create(
+            "valve",
+            "utility_water_open_only",
+            device_class=ValveDeviceClass.WATER,
+            supported_features=int(ValveEntityFeature.OPEN),
+        ),
+        create("valve", "utility_gas_main", device_class=ValveDeviceClass.GAS, supported_features=close),
+        create("switch", "legacy_water_valve"),
+    )
     return (*compatible, incompatible)
 
 
@@ -688,6 +726,14 @@ async def test_water_safety_submenu_navigation_returns_to_module_menu(hass) -> N
 
     water = await _open_water_menu(hass, entry)
 
+    shutoff_valves = await _choose(hass, water, "water_safety_shutoff_valves")
+    assert shutoff_valves["type"] is data_entry_flow.FlowResultType.FORM
+    assert shutoff_valves["step_id"] == "water_safety_shutoff_valves"
+    assert _fields(shutoff_valves) == {cf.WATER_SHUTOFF_VALVE_TARGETS}
+    hass.config_entries.options.async_abort(shutoff_valves["flow_id"])
+
+    water = await _open_water_menu(hass, entry)
+
     area_sensor = await _choose(hass, water, "water_safety_area_sensor")
     assert area_sensor["type"] is data_entry_flow.FlowResultType.FORM
     assert area_sensor["step_id"] == "water_safety_area_sensor"
@@ -1180,6 +1226,90 @@ async def test_water_siren_edit_of_active_creates_draft_without_reloading_author
     assert draft.base_active_revision_id == active.canonical_revision_id
     siren_bindings = [binding for binding in draft.bindings if binding.role.startswith("water_safety.siren.")]
     assert [binding.reference.current_locator for binding in siren_bindings] == [hall]
+
+
+@pytest.mark.asyncio
+async def test_water_shutoff_defaults_save_no_output_in_incomplete_draft(hass) -> None:
+    entry = await _empty_entry(hass)
+    form = await _choose(hass, await _open_water_menu(hass, entry), "water_safety_shutoff_valves")
+
+    assert _defaults(form) == {cf.WATER_SHUTOFF_VALVE_TARGETS: []}
+    saved = await hass.config_entries.options.async_configure(form["flow_id"], _defaults(form))
+
+    assert saved["step_id"] == "water_safety"
+    draft = (await _water_drafts(hass, entry))[0]
+    assert dict(draft.settings) == {"shutoff_valve_target_roles": ()}
+    assert draft.bindings == ()
+    assert ACTIVE_REFERENCE_KEY not in entry.data
+
+
+@pytest.mark.asyncio
+async def test_water_shutoff_discovery_is_conservative_and_unavailable_target_cannot_be_resaved(hass) -> None:
+    main, backup, incompatible = _register_shutoff_valve_candidates(hass)
+    entry = await _empty_entry(hass)
+    form = await _choose(hass, await _open_water_menu(hass, entry), "water_safety_shutoff_valves")
+
+    target_selector = _field(form, cf.WATER_SHUTOFF_VALVE_TARGETS)
+    assert isinstance(target_selector, selector.EntitySelector)
+    assert target_selector.config["domain"] == ["valve"]
+    assert target_selector.config["multiple"] is True
+    assert set(target_selector.config["include_entities"]) == {main, backup}
+    assert set(incompatible).isdisjoint(target_selector.config["include_entities"])
+
+    saved = await hass.config_entries.options.async_configure(
+        form["flow_id"],
+        {cf.WATER_SHUTOFF_VALVE_TARGETS: [main]},
+    )
+    before = (await _water_drafts(hass, entry))[0]
+    er.async_get(hass).async_remove(main)
+    edit = await _choose(hass, saved, "water_safety_shutoff_valves")
+    assert _defaults(edit)[cf.WATER_SHUTOFF_VALVE_TARGETS] == [main]
+    assert main in edit["description_placeholders"]["unavailable_shutoff_valves"]
+
+    rejected = await hass.config_entries.options.async_configure(
+        edit["flow_id"],
+        {cf.WATER_SHUTOFF_VALVE_TARGETS: [main]},
+    )
+    assert rejected["errors"] == {cf.WATER_SHUTOFF_VALVE_TARGETS: "invalid_water_shutoff_valve_targets"}
+    assert (await _water_drafts(hass, entry))[0] == before
+
+
+@pytest.mark.asyncio
+async def test_water_multiple_shutoff_valves_are_reloadable_and_preserve_other_water_draft_fields(hass) -> None:
+    main, backup, _incompatible = _register_shutoff_valve_candidates(hass)
+    entry = await _empty_entry(hass)
+    original, _report = await _seed_water_draft(hass, entry, complete=True)
+    form = await _choose(hass, await _open_water_menu(hass, entry), "water_safety_shutoff_valves")
+
+    saved = await hass.config_entries.options.async_configure(
+        form["flow_id"],
+        {cf.WATER_SHUTOFF_VALVE_TARGETS: [main, backup]},
+    )
+    edited = (await _water_drafts(hass, entry))[0]
+
+    assert edited.revision == original.revision + 1
+    assert {key: value for key, value in edited.settings.items() if key != "shutoff_valve_target_roles"} == dict(
+        original.settings
+    )
+    original_bindings = {binding.role: binding for binding in original.bindings}
+    assert all(binding in edited.bindings for binding in original_bindings.values())
+    valve_bindings = [binding for binding in edited.bindings if binding.role.startswith("water_safety.shutoff_valve.")]
+    assert {binding.reference.current_locator for binding in valve_bindings} == {main, backup}
+    assert all(binding.reference.native_id and binding.user_confirmed for binding in valve_bindings)
+
+    reloaded = await _choose(hass, saved, "water_safety_shutoff_valves")
+    assert set(_defaults(reloaded)[cf.WATER_SHUTOFF_VALVE_TARGETS]) == {main, backup}
+    cleared_menu = await hass.config_entries.options.async_configure(
+        reloaded["flow_id"],
+        {cf.WATER_SHUTOFF_VALVE_TARGETS: []},
+    )
+    cleared = (await _water_drafts(hass, entry))[0]
+    assert cleared.revision == edited.revision + 1
+    assert list(cleared.settings["shutoff_valve_target_roles"]) == []
+    assert all(not binding.role.startswith("water_safety.shutoff_valve.") for binding in cleared.bindings)
+    cleared_form = await _choose(hass, cleared_menu, "water_safety_shutoff_valves")
+    assert _defaults(cleared_form)[cf.WATER_SHUTOFF_VALVE_TARGETS] == []
+    hass.config_entries.options.async_abort(cleared_form["flow_id"])
 
 
 @pytest.mark.asyncio

@@ -19,6 +19,7 @@ from controlel.domain.water_safety import (
 class WaterOutputKind(StrEnum):
     NOTIFICATION = "NOTIFICATION"
     SIREN = "SIREN"
+    SHUTOFF_VALVE = "SHUTOFF_VALVE"
 
 
 class WaterOutputAction(StrEnum):
@@ -27,6 +28,7 @@ class WaterOutputAction(StrEnum):
     NOTIFY_SENSOR_FAULT = "NOTIFY_SENSOR_FAULT"
     REQUEST_SIREN_ON = "REQUEST_SIREN_ON"
     REQUEST_SIREN_OFF = "REQUEST_SIREN_OFF"
+    REQUEST_VALVE_CLOSE = "REQUEST_VALVE_CLOSE"
 
 
 class WaterOutputOutcome(StrEnum):
@@ -96,8 +98,16 @@ class WaterOutputCommand:
                 raise ValueError("notification output requires a notification action")
             if not self.message_code:
                 raise ValueError("notification output requires message_code")
-        elif self.action not in {WaterOutputAction.REQUEST_SIREN_ON, WaterOutputAction.REQUEST_SIREN_OFF}:
+        elif self.output_kind is WaterOutputKind.SIREN and self.action not in {
+            WaterOutputAction.REQUEST_SIREN_ON,
+            WaterOutputAction.REQUEST_SIREN_OFF,
+        }:
             raise ValueError("siren output requires a siren action")
+        elif (
+            self.output_kind is WaterOutputKind.SHUTOFF_VALVE
+            and self.action is not WaterOutputAction.REQUEST_VALVE_CLOSE
+        ):
+            raise ValueError("shutoff valve output requires a close action")
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,6 +136,7 @@ class OwnedWaterOutput:
     owner: WaterOutputOwner
     target_role: str
     target: ProviderReference
+    output_kind: WaterOutputKind = WaterOutputKind.SIREN
     last_requested_action: WaterOutputAction | None = None
     last_command_outcome: WaterOutputOutcome | None = None
     last_requested_at: datetime | None = None

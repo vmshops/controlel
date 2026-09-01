@@ -10,6 +10,7 @@ from pydantic import ValidationError
 
 from controlel.application.configuration.water_safety_setup_adapter import (
     NOTIFICATION_ROLE_PREFIX,
+    SHUTOFF_VALVE_ROLE_PREFIX,
     SIREN_ROLE_PREFIX,
     WATER_SAFETY_MODULE_KEY,
     WATER_SAFETY_SENSOR_ROLE,
@@ -26,6 +27,7 @@ WaterSafetySection = Literal[
     "area_sensor",
     "notifications",
     "sirens",
+    "shutoff_valves",
     "sensor_fault",
     "messages",
     "validation",
@@ -161,6 +163,7 @@ def _not_configured_detail(section: WaterSafetySection) -> str:
         "area_sensor": "Not configured.",
         "notifications": "Not configured.",
         "sirens": "Not configured.",
+        "shutoff_valves": "Not configured.",
         "sensor_fault": "Default.",
         "messages": "Default.",
         "validation": "Not configured.",
@@ -211,6 +214,7 @@ def _payload_detail(
 ) -> str:
     notification_bindings = _role_binding_locators(draft, NOTIFICATION_ROLE_PREFIX) if draft is not None else ()
     siren_bindings = _role_binding_locators(draft, SIREN_ROLE_PREFIX) if draft is not None else ()
+    shutoff_valve_bindings = _role_binding_locators(draft, SHUTOFF_VALVE_ROLE_PREFIX) if draft is not None else ()
     if section == "notifications":
         roles = ", ".join(payload.notification_target_roles) or "None"
         targets = ", ".join(notification_bindings) or "Not selected"
@@ -221,6 +225,12 @@ def _payload_detail(
         roles = ", ".join(payload.siren_target_roles)
         targets = ", ".join(siren_bindings) or "Not selected"
         return f"Siren roles: {roles}. Targets: {targets}."
+    if section == "shutoff_valves":
+        if not payload.shutoff_valve_target_roles:
+            return "No automatic shutoff valves configured."
+        roles = ", ".join(payload.shutoff_valve_target_roles)
+        targets = ", ".join(shutoff_valve_bindings) or "Not selected"
+        return f"Shutoff valve roles: {roles}. Targets: {targets}. Recovery is manual; no reopen is requested."
     if section == "sensor_fault":
         repeat = (
             "disabled"

@@ -9,6 +9,7 @@ import pytest
 
 from controlel.application.configuration.water_safety_setup_adapter import (
     DEFAULT_NOTIFICATION_ROLE,
+    SHUTOFF_VALVE_ROLE_PREFIX,
     WATER_SAFETY_SENSOR_ROLE,
     WaterSafetyRecommendationConfidence,
     WaterSafetyRecommendationSet,
@@ -124,10 +125,36 @@ SIREN_SWITCH = replace(
     domain="switch",
     unique_id="hall-siren-switch",
 )
+WATER_SHUTOFF_VALVE = replace(
+    SIREN,
+    id="entity-water-shutoff-valve",
+    entity_id="valve.utility_water_main",
+    domain="valve",
+    unique_id="utility-water-main",
+    device_class="water",
+    original_device_class="water",
+    supported_features=2,
+)
+WATER_VALVE_WITHOUT_CLOSE = replace(
+    WATER_SHUTOFF_VALVE,
+    id="entity-water-valve-without-close",
+    entity_id="valve.utility_water_read_only",
+    unique_id="utility-water-read-only",
+    supported_features=1,
+)
+GAS_SHUTOFF_VALVE = replace(
+    WATER_SHUTOFF_VALVE,
+    id="entity-gas-shutoff-valve",
+    entity_id="valve.utility_gas_main",
+    unique_id="utility-gas-main",
+    device_class="gas",
+    original_device_class="gas",
+)
 DEFAULT_ENTITIES = (MOISTURE_BINARY, MOISTURE_SENSOR, MOISTURE_HINT, SIREN, SIREN_SWITCH)
 NOTIFY_PRIMARY = "notify.mobile_app"
 NOTIFY_BACKUP = "notify.persistent_notification"
 SIREN_ROLE = "water_safety.siren.hall"
+SHUTOFF_VALVE_ROLE = f"{SHUTOFF_VALVE_ROLE_PREFIX}main"
 
 
 def _notify_reference(locator: str, *, provider_instance_id: str = "ha-home") -> ProviderReference:
@@ -180,6 +207,7 @@ def _recommended_draft(
     confirmed: bool = True,
     notification_roles: tuple[str, ...] = (DEFAULT_NOTIFICATION_ROLE,),
     siren_roles: tuple[str, ...] = (),
+    shutoff_valve_roles: tuple[str, ...] = (),
     selected_roles: tuple[str, ...] | None = None,
     settings: dict[str, object] | None = None,
 ):
@@ -188,9 +216,15 @@ def _recommended_draft(
         snapshot,
         notification_roles=notification_roles,
         siren_roles=siren_roles,
+        shutoff_valve_roles=shutoff_valve_roles,
         preferred_area_id=UTILITY.id,
     )
-    roles = selected_roles or (WATER_SAFETY_SENSOR_ROLE, *notification_roles, *siren_roles)
+    roles = selected_roles or (
+        WATER_SAFETY_SENSOR_ROLE,
+        *notification_roles,
+        *siren_roles,
+        *shutoff_valve_roles,
+    )
     selected = {
         role: _recommendation(recommendations, role).recommended_candidate.candidate_id
         for role in roles
@@ -209,6 +243,7 @@ def _recommended_draft(
         preferred_area_name="Utility room",
         notification_roles=notification_roles,
         siren_roles=siren_roles,
+        shutoff_valve_roles=shutoff_valve_roles,
     )
 
 
@@ -260,6 +295,28 @@ def test_moisture_sensor_and_locator_hint_confidence_levels() -> None:
     assert moisture.alternatives[0].confidence is WaterSafetyRecommendationConfidence.LOW
 
 
+def test_shutoff_recommendations_accept_only_water_valves_with_close_support() -> None:
+    recommendations = WaterSafetySetupAdapter().recommend(
+        _snapshot(
+            entities=(
+                WATER_SHUTOFF_VALVE,
+                WATER_VALVE_WITHOUT_CLOSE,
+                GAS_SHUTOFF_VALVE,
+                SIREN,
+            )
+        ),
+        notification_roles=(),
+        shutoff_valve_roles=(SHUTOFF_VALVE_ROLE,),
+    )
+
+    shutoff = _recommendation(recommendations, SHUTOFF_VALVE_ROLE)
+    assert shutoff.recommended_candidate is not None
+    assert shutoff.recommended_candidate.reference.native_id == WATER_SHUTOFF_VALVE.id
+    assert shutoff.recommended_candidate.capabilities == ("safety.water_shutoff.close",)
+    assert shutoff.recommended_candidate.reason_codes == ("water_safety.candidate.water_valve_close",)
+    assert shutoff.alternatives == ()
+
+
 def test_recommendation_order_is_deterministic_and_independent_of_snapshot_input_order() -> None:
     adapter = WaterSafetySetupAdapter()
     forward = adapter.recommend(_snapshot())
@@ -277,6 +334,7 @@ def test_draft_creation_applies_defaults_and_requires_explicit_confirmation() ->
     assert draft.settings["area_name"] == "Utility room"
     assert draft.settings["unavailable_grace_seconds"] == 60.0
     assert list(draft.settings["notification_target_roles"]) == [DEFAULT_NOTIFICATION_ROLE]
+    assert list(draft.settings["shutoff_valve_target_roles"]) == []
     assert draft.settings["sensor_id"] == MOISTURE_BINARY.id
     assert all(not binding.user_confirmed for binding in draft.bindings)
     report = WaterSafetySetupAdapter().validate(

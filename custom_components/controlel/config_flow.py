@@ -50,6 +50,11 @@ from .water_safety_notifications import (
     async_save_water_safety_notifications_draft,
     async_test_water_safety_notification,
 )
+from .water_safety_shutoff_valves import (
+    WaterSafetyShutoffValvesEditor,
+    async_load_water_safety_shutoff_valves_editor,
+    async_save_water_safety_shutoff_valves_draft,
+)
 from .water_safety_sirens import (
     WaterSafetySirensEditor,
     async_load_water_safety_sirens_editor,
@@ -64,6 +69,7 @@ WATER_SAFETY_MENU_OPTIONS = (
     "water_safety_area_sensor",
     "water_safety_notifications",
     "water_safety_sirens",
+    "water_safety_shutoff_valves",
     "water_safety_sensor_fault",
     "water_safety_messages",
     "water_safety_validation",
@@ -124,6 +130,7 @@ WATER_SHOW_ALL_COMPATIBLE = "show_all_compatible_entities"
 WATER_NOTIFICATION_TARGETS = "water_safety_notification_targets"
 WATER_TEST_NOTIFICATION = "water_safety_test_notification"
 WATER_SIREN_TARGETS = "water_safety_siren_targets"
+WATER_SHUTOFF_VALVE_TARGETS = "water_safety_shutoff_valve_targets"
 
 _FORM_PATHS = {
     "heating.zones[].display_name": ZONE_NAME,
@@ -508,6 +515,66 @@ class ControlelOptionsFlow(OptionsFlow):
                     "A service request does not prove that a siren physically sounded."
                 ),
                 "unavailable_sirens": unavailable,
+            },
+        )
+
+    async def async_step_water_safety_shutoff_valves(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> ConfigFlowResult:
+        backend = await async_get_setup_backend(self.hass, self.config_entry)
+        editor = await async_load_water_safety_shutoff_valves_editor(
+            self.hass,
+            backend.repository,
+            self.config_entry.data,
+            snapshot_id=_id("ha-water-shutoff-valves-snapshot"),
+            captured_at=_now(),
+        )
+        errors: dict[str, str] = {}
+        target_ids = (
+            _water_entity_targets_input(user_input.get(WATER_SHUTOFF_VALVE_TARGETS))
+            if user_input is not None
+            else editor.selected_target_ids
+        )
+        if user_input is not None:
+            try:
+                await async_save_water_safety_shutoff_valves_draft(
+                    backend.repository,
+                    editor,
+                    target_ids=target_ids,
+                    saved_at=_now(),
+                    report_id=_id("ha-water-shutoff-valves-report"),
+                )
+            except (KeyError, SetupConflictError, SetupNotFoundError, TypeError, ValueError, ValidationError):
+                errors[WATER_SHUTOFF_VALVE_TARGETS] = "invalid_water_shutoff_valve_targets"
+            else:
+                return await self.async_step_water_safety()
+
+        return self._show_water_safety_shutoff_valves_form(editor, target_ids=target_ids, errors=errors)
+
+    def _show_water_safety_shutoff_valves_form(
+        self,
+        editor: WaterSafetyShutoffValvesEditor,
+        *,
+        target_ids: tuple[str, ...],
+        errors: Mapping[str, str],
+    ) -> ConfigFlowResult:
+        candidates = list(editor.compatible_target_ids)
+        candidates.extend(target for target in target_ids if target not in candidates)
+        unavailable = ", ".join(editor.unavailable_target_ids) or "None"
+        return self.async_show_form(
+            step_id="water_safety_shutoff_valves",
+            data_schema=_water_safety_shutoff_valves_schema(
+                target_ids=target_ids,
+                candidate_entity_ids=tuple(candidates),
+            ),
+            errors=dict(errors),
+            description_placeholders={
+                "shutoff_valve_behavior": (
+                    "On a wet incident, Controlel requests every configured water shutoff valve to close. "
+                    "The request is an action, not proof of physical valve position. Recovery never reopens water."
+                ),
+                "unavailable_shutoff_valves": unavailable,
             },
         )
 
@@ -1053,6 +1120,25 @@ def _water_safety_sirens_schema(
             vol.Optional(WATER_SIREN_TARGETS, default=list(target_ids)): selector.EntitySelector(
                 selector.EntitySelectorConfig(
                     domain="siren",
+                    include_entities=list(candidate_entity_ids),
+                    multiple=True,
+                    reorder=True,
+                )
+            )
+        }
+    )
+
+
+def _water_safety_shutoff_valves_schema(
+    *,
+    target_ids: tuple[str, ...],
+    candidate_entity_ids: tuple[str, ...],
+) -> vol.Schema:
+    return vol.Schema(
+        {
+            vol.Optional(WATER_SHUTOFF_VALVE_TARGETS, default=list(target_ids)): selector.EntitySelector(
+                selector.EntitySelectorConfig(
+                    domain="valve",
                     include_entities=list(candidate_entity_ids),
                     multiple=True,
                     reorder=True,

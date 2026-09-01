@@ -1,14 +1,18 @@
-"""Verify that Home Assistant CI is using the released Controlel core."""
+"""Verify the installed Controlel Core used by Home Assistant CI."""
 
 from __future__ import annotations
 
+import argparse
+import hashlib
 import importlib.metadata
 import inspect
 import json
 import sys
 import tomllib
+import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 from urllib.request import Request, urlopen
 
 import controlel
@@ -126,7 +130,46 @@ def verify_public_artifact_metadata() -> None:
     assert sdist["digests"]["sha256"] == PUBLIC_SDIST_SHA256
 
 
-def main() -> int:
+def _development_wheel_identity(wheel_path: Path) -> tuple[str, str]:
+    with zipfile.ZipFile(wheel_path) as wheel:
+        metadata_names = [name for name in wheel.namelist() if name.endswith(".dist-info/METADATA")]
+        assert len(metadata_names) == 1
+        metadata = wheel.read(metadata_names[0]).decode("utf-8")
+    fields = {
+        key: value
+        for line in metadata.splitlines()
+        if ": " in line
+        for key, value in (line.split(": ", 1),)
+        if key in {"Name", "Version"}
+    }
+    return fields["Name"], fields["Version"]
+
+
+def _verify_development_wheel_install(
+    *,
+    distribution: importlib.metadata.Distribution,
+    wheel_path: Path,
+    expected_version: str,
+) -> str:
+    wheel_path = wheel_path.resolve(strict=True)
+    wheel_name, wheel_version = _development_wheel_identity(wheel_path)
+    assert (wheel_name.casefold(), wheel_version) == ("controlel", expected_version)
+
+    wheel_sha256 = hashlib.sha256(wheel_path.read_bytes()).hexdigest()
+    direct_url_text = distribution.read_text("direct_url.json")
+    assert direct_url_text is not None
+    direct_url = json.loads(direct_url_text)
+    parsed_url = urlparse(direct_url["url"])
+    assert parsed_url.scheme == "file"
+    installed_from = Path(unquote(parsed_url.path)).resolve(strict=True)
+    assert installed_from == wheel_path
+    archive_info = direct_url["archive_info"]
+    assert archive_info["hashes"]["sha256"] == wheel_sha256
+    assert archive_info["hash"] == f"sha256={wheel_sha256}"
+    return wheel_sha256
+
+
+def main(*, development_wheel: Path | None = None) -> int:
     package_path = Path(controlel.__file__).resolve()
     distribution = importlib.metadata.distribution("controlel")
     source_root = (REPOSITORY_ROOT / "src").resolve()
@@ -137,12 +180,22 @@ def main() -> int:
     with (REPOSITORY_ROOT / "pyproject.toml").open("rb") as pyproject_file:
         project = tomllib.load(pyproject_file)["project"]
 
-    assert importlib.metadata.version("controlel") == CORE_VERSION
-    assert controlel.__version__ == CORE_VERSION
+    expected_version = project["version"] if development_wheel is not None else CORE_VERSION
+    expected_requirement = f"controlel=={expected_version}"
+    assert importlib.metadata.version("controlel") == expected_version
+    assert controlel.__version__ == expected_version
     assert "site-packages" in package_path.as_posix()
     assert not package_path.is_relative_to(source_root)
     assert source_root not in {Path(entry or ".").resolve() for entry in sys.path}
-    assert distribution.read_text("direct_url.json") is None
+    development_wheel_sha256 = None
+    if development_wheel is None:
+        assert distribution.read_text("direct_url.json") is None
+    else:
+        development_wheel_sha256 = _verify_development_wheel_install(
+            distribution=distribution,
+            wheel_path=development_wheel,
+            expected_version=expected_version,
+        )
     assert not any(
         path.is_file()
         and ("editable" in path.name.casefold() or ("controlel" in path.name.casefold() and path.suffix == ".pth"))
@@ -154,7 +207,7 @@ def main() -> int:
     ]
     assert project["dependencies"] == ["pydantic>=2.0"]
     assert not any("homeassistant" in dependency.casefold() for dependency in project["dependencies"])
-    assert manifest["requirements"] == [CORE_REQUIREMENT]
+    assert manifest["requirements"] == [expected_requirement]
 
     setup_contracts = (
         ActiveReference,
@@ -285,15 +338,26 @@ def main() -> int:
     assert frontend_water_safety["state"] == "SENSOR_FAULT"
     assert frontend_water_safety["sensor_condition"] == "UNKNOWN"
     assert frontend_water_safety["actions_available"] == ["disable", "test_notification"]
-    verify_public_artifact_metadata()
-
-    print(
-        f"Verified public controlel {CORE_VERSION} at {package_path}; "
-        f"{PUBLIC_WHEEL_FILENAME} SHA-256 {PUBLIC_WHEEL_SHA256}; "
-        f"{PUBLIC_SDIST_FILENAME} SHA-256 {PUBLIC_SDIST_SHA256}"
-    )
+    if development_wheel is None:
+        verify_public_artifact_metadata()
+        print(
+            f"Verified public controlel {CORE_VERSION} at {package_path}; "
+            f"{PUBLIC_WHEEL_FILENAME} SHA-256 {PUBLIC_WHEEL_SHA256}; "
+            f"{PUBLIC_SDIST_FILENAME} SHA-256 {PUBLIC_SDIST_SHA256}"
+        )
+    else:
+        print(
+            f"Verified checked-out controlel {expected_version} wheel at {package_path}; "
+            f"SHA-256 {development_wheel_sha256}"
+        )
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--development-wheel",
+        type=Path,
+        help="Verify an installed wheel built from the current checkout instead of the published PyPI artifact",
+    )
+    raise SystemExit(main(development_wheel=parser.parse_args().development_wheel))

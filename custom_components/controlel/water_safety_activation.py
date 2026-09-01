@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import logging
 import uuid
+from dataclasses import replace
 from datetime import UTC, datetime
 from importlib import import_module
 from typing import Any, cast
 
-from controlel.application.configuration.water_safety_setup_adapter import WATER_SAFETY_MODULE_KEY
+from controlel.application.configuration.water_safety_setup_adapter import (
+    WATER_SAFETY_MODULE_KEY,
+    WaterSafetySetupPayload,
+)
 from controlel.application.setup import (
     ActivationCoordinator,
     CandidateRuntimeReady,
@@ -16,6 +20,8 @@ from controlel.application.setup import (
     LoadedRuntimeConfiguration,
     derive_real_runtime_configuration,
 )
+from controlel.application.setup.json_data import canonical_json
+from controlel.domain.water_safety import WaterSafetySnapshot
 from controlel.infrastructure.home_assistant import (
     SETUP_STORAGE_VERSION,
     ConfigEntryActiveReferenceStore,
@@ -121,6 +127,7 @@ class WaterSafetyActivationService:
         state_store = create_water_safety_state_store(hass, entry.entry_id, bridge)
         evidence_store = create_water_safety_evidence_store(hass, entry.entry_id, bridge)
         restored_snapshot = await state_store.async_load_snapshot()
+        restored_snapshot = _restored_snapshot_for_effective(restored_snapshot, effective)
         host = build_water_safety_host(
             hass,
             effective,
@@ -148,3 +155,48 @@ class WaterSafetyActivationService:
         if existing is not None and hasattr(existing, "_repository"):
             return existing._repository
         return HomeAssistantSetupRepository(store, active_references)
+
+
+def _restored_snapshot_for_effective(
+    restored_snapshot: WaterSafetySnapshot | None,
+    effective: EffectiveRuntimeConfiguration,
+) -> WaterSafetySnapshot | None:
+    """Carry an active incident across an explicit same-sensor authority update."""
+
+    if restored_snapshot is None:
+        return None
+    if (
+        restored_snapshot.canonical_revision_id == effective.canonical_revision_id
+        and restored_snapshot.semantic_configuration_fingerprint == effective.semantic_configuration_fingerprint
+    ):
+        return restored_snapshot
+
+    config = WaterSafetySetupPayload.model_validate_json(canonical_json(effective.module_payload))
+    same_incident_authority = (
+        restored_snapshot.canonical_revision_id != effective.canonical_revision_id
+        and restored_snapshot.environment_id == effective.environment_id
+        and restored_snapshot.module_instance_id == effective.module_instance_id
+        and restored_snapshot.sensor_id == config.sensor_id
+        and restored_snapshot.active_incident is not None
+    )
+    if not same_incident_authority:
+        LOGGER.info(
+            "Water Safety restart snapshot was not reused for changed canonical authority "
+            "(previous_revision=%s, candidate_revision=%s)",
+            restored_snapshot.canonical_revision_id,
+            effective.canonical_revision_id,
+        )
+        return None
+
+    LOGGER.info(
+        "Water Safety active incident will continue across same-sensor canonical activation "
+        "(incident_id=%s, previous_revision=%s, candidate_revision=%s)",
+        restored_snapshot.active_incident.incident_id,
+        restored_snapshot.canonical_revision_id,
+        effective.canonical_revision_id,
+    )
+    return replace(
+        restored_snapshot,
+        canonical_revision_id=effective.canonical_revision_id,
+        semantic_configuration_fingerprint=effective.semantic_configuration_fingerprint,
+    )

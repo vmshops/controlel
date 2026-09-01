@@ -38,14 +38,17 @@ WATER_SAFETY_RECOMMENDATION_POLICY_VERSION = 1
 WATER_SAFETY_SENSOR_ROLE = "water_safety.moisture_sensor"
 NOTIFICATION_ROLE_PREFIX = "water_safety.notification."
 SIREN_ROLE_PREFIX = "water_safety.siren."
+SHUTOFF_VALVE_ROLE_PREFIX = "water_safety.shutoff_valve."
 DEFAULT_NOTIFICATION_ROLE = "water_safety.notification.primary"
 MAX_NOTIFICATION_TARGETS = 16
 MAX_SIREN_TARGETS = 16
+MAX_SHUTOFF_VALVE_TARGETS = 16
 MAX_MESSAGE_LENGTH = 2_000
 MAX_UNAVAILABLE_GRACE_SECONDS = 86_400.0
 MAX_FAULT_REPEAT_SECONDS = 604_800.0
 _HA_ENTITY_KIND = "home_assistant.entity"
 _HA_ENDPOINT_KIND = "home_assistant.endpoint"
+_HA_VALVE_CLOSE_FEATURE = 2
 
 
 class WaterSafetyRecommendationConfidence(StrEnum):
@@ -169,6 +172,7 @@ class WaterSafetySetupPayload(BaseModel):
     fault_repeat_interval_seconds: float | None = Field(default=None, ge=1, le=MAX_FAULT_REPEAT_SECONDS)
     notification_target_roles: tuple[str, ...] = Field(min_length=1, max_length=MAX_NOTIFICATION_TARGETS)
     siren_target_roles: tuple[str, ...] = Field(default=(), max_length=MAX_SIREN_TARGETS)
+    shutoff_valve_target_roles: tuple[str, ...] = Field(default=(), max_length=MAX_SHUTOFF_VALVE_TARGETS)
     messages: WaterSafetyMessages = Field(default_factory=WaterSafetyMessages)
 
     model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
@@ -190,10 +194,20 @@ class WaterSafetySetupPayload(BaseModel):
     def siren_roles_must_be_canonical(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         return _canonical_roles(value, SIREN_ROLE_PREFIX, "siren")
 
+    @field_validator("shutoff_valve_target_roles")
+    @classmethod
+    def shutoff_valve_roles_must_be_canonical(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return _canonical_roles(value, SHUTOFF_VALVE_ROLE_PREFIX, "shutoff valve")
+
     @model_validator(mode="after")
     def output_roles_must_not_overlap(self) -> WaterSafetySetupPayload:
-        if set(self.notification_target_roles) & set(self.siren_target_roles):
-            raise ValueError("notification and siren roles must not overlap")
+        role_sets = (
+            set(self.notification_target_roles),
+            set(self.siren_target_roles),
+            set(self.shutoff_valve_target_roles),
+        )
+        if any(left & right for index, left in enumerate(role_sets) for right in role_sets[index + 1 :]):
+            raise ValueError("Water Safety output roles must not overlap")
         return self
 
 
@@ -211,6 +225,7 @@ class WaterSafetySetupAdapter:
         *,
         notification_roles: tuple[str, ...] = (DEFAULT_NOTIFICATION_ROLE,),
         siren_roles: tuple[str, ...] = (),
+        shutoff_valve_roles: tuple[str, ...] = (),
         preferred_area_id: str | None = None,
         preferred_floor_id: str | None = None,
     ) -> WaterSafetyRecommendationSet:
@@ -219,7 +234,12 @@ class WaterSafetySetupAdapter:
         snapshot_fingerprint = snapshot.content_fingerprint
         if snapshot_fingerprint is None:
             raise ValueError("validated discovery snapshot has no content fingerprint")
-        supported_roles = (WATER_SAFETY_SENSOR_ROLE, *notification_roles, *siren_roles)
+        supported_roles = (
+            WATER_SAFETY_SENSOR_ROLE,
+            *notification_roles,
+            *siren_roles,
+            *shutoff_valve_roles,
+        )
         recommendations: list[WaterSafetyRoleRecommendation] = []
         for role in sorted(supported_roles):
             candidates = tuple(
@@ -280,6 +300,7 @@ class WaterSafetySetupAdapter:
         preferred_area_name: str | None = None,
         notification_roles: tuple[str, ...] = (DEFAULT_NOTIFICATION_ROLE,),
         siren_roles: tuple[str, ...] = (),
+        shutoff_valve_roles: tuple[str, ...] = (),
     ) -> DraftRevision:
         """Persist only explicit selections; a recommendation never confirms itself."""
 
@@ -301,6 +322,7 @@ class WaterSafetySetupAdapter:
             preferred_area_name=preferred_area_name,
             notification_roles=notification_roles,
             siren_roles=siren_roles,
+            shutoff_valve_roles=shutoff_valve_roles,
             moisture_sensor_native_id=(None if moisture_candidate is None else moisture_candidate.reference.native_id),
             overrides=settings,
         )
@@ -383,6 +405,7 @@ class WaterSafetySetupAdapter:
         if normalized is not None:
             expected_roles.update(normalized.notification_target_roles)
             expected_roles.update(normalized.siren_target_roles)
+            expected_roles.update(normalized.shutoff_valve_target_roles)
         for role in sorted(set(bindings_by_role) - expected_roles):
             issues.append(
                 _issue(
@@ -582,6 +605,8 @@ def _classify_candidate(
         return _classify_notify(reference)
     if role.startswith(SIREN_ROLE_PREFIX):
         return _classify_siren(reference)
+    if role.startswith(SHUTOFF_VALVE_ROLE_PREFIX):
+        return _classify_shutoff_valve(reference)
     return None
 
 
@@ -668,6 +693,28 @@ def _classify_siren(
     return None
 
 
+def _classify_shutoff_valve(
+    reference: ProviderReference,
+) -> tuple[WaterSafetyRecommendationConfidence, tuple[str, ...], tuple[str, ...]] | None:
+    if reference.object_kind != _HA_ENTITY_KIND or _reference_domain(reference) != "valve":
+        return None
+    device_classes = {
+        value
+        for field in ("device_class", "original_device_class")
+        if (value := _evidence_string(reference, field)) is not None
+    }
+    supported_features = _evidence_integer(reference, "supported_features")
+    if "water" not in device_classes or supported_features is None:
+        return None
+    if supported_features & _HA_VALVE_CLOSE_FEATURE == 0:
+        return None
+    return (
+        WaterSafetyRecommendationConfidence.HIGH,
+        ("safety.water_shutoff.close",),
+        ("water_safety.candidate.water_valve_close",),
+    )
+
+
 def _candidate_sort_key(
     candidate: WaterSafetySetupCandidate,
     *,
@@ -697,6 +744,7 @@ def _default_water_safety_settings(
     preferred_area_name: str | None,
     notification_roles: tuple[str, ...],
     siren_roles: tuple[str, ...],
+    shutoff_valve_roles: tuple[str, ...],
     moisture_sensor_native_id: str | None,
     overrides: Mapping[str, object],
 ) -> dict[str, object]:
@@ -714,6 +762,7 @@ def _default_water_safety_settings(
         "fault_repeat_interval_seconds": None,
         "notification_target_roles": list(notification_roles),
         "siren_target_roles": list(siren_roles),
+        "shutoff_valve_target_roles": list(shutoff_valve_roles),
         "messages": {},
     }
     merged = {**defaults, **dict(overrides)}
@@ -727,3 +776,8 @@ def _reference_domain(reference: ProviderReference) -> str | None:
 def _evidence_string(reference: ProviderReference, key: str) -> str | None:
     value = reference.recovery_evidence.get(key)
     return value if isinstance(value, str) and value else None
+
+
+def _evidence_integer(reference: ProviderReference, key: str) -> int | None:
+    value = reference.recovery_evidence.get(key)
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
