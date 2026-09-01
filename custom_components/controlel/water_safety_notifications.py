@@ -27,7 +27,7 @@ from controlel.application.setup import (
     DraftRevision,
     SelectionOrigin,
 )
-from controlel.infrastructure.home_assistant import ACTIVE_REFERENCE_KEY
+from controlel.infrastructure.home_assistant import active_reference_for_module
 from controlel.infrastructure.home_assistant.setup_persistence import HomeAssistantSetupRepository
 from controlel.infrastructure.home_assistant.water_safety_discovery import async_snapshot_with_notify_services
 
@@ -293,8 +293,4 @@ def _canonical_targets(target_ids: Sequence[str]) -> tuple[str, ...]:
 
 
 def _water_active_reference(entry_data: Mapping[str, Any]) -> ActiveReference | None:
-    raw = entry_data.get(ACTIVE_REFERENCE_KEY)
-    if not isinstance(raw, Mapping):
-        return None
-    active = ActiveReference.model_validate(raw)
-    return active if active.module_key == WATER_SAFETY_MODULE_KEY else None
+    return active_reference_for_module(entry_data, WATER_SAFETY_MODULE_KEY)

@@ -17,7 +17,11 @@ import custom_components.controlel as component
 from controlel.application.configuration import ConfigurationEditabilityV3, canonical_field_registry_v3
 from controlel.application.setup import ActiveReference
 from controlel.domain.value_objects.temperature import Temperature
-from controlel.infrastructure.home_assistant import ACTIVE_REFERENCE_KEY
+from controlel.infrastructure.home_assistant import (
+    ACTIVE_REFERENCE_KEY,
+    ACTIVE_REFERENCES_KEY,
+    active_reference_for_module,
+)
 from custom_components.controlel import config_flow as cf
 from custom_components.controlel.const import DOMAIN
 from custom_components.controlel.setup_backend import async_get_setup_backend, async_get_setup_service
@@ -256,6 +260,21 @@ async def _prepare_activation(hass, saved):
     activate = await hass.config_entries.options.async_configure(canonicalize["flow_id"], {})
     assert activate["step_id"] == "activate"
     return activate
+
+
+async def _activate_new_heating(hass, entry, *, platform: str) -> ActiveReference:
+    sensor_id, source_id = _register_bindings(hass, platform=platform)
+    draft = await _through_groups(
+        hass,
+        await _start_greenfield_draft(hass, entry, sensor_id, source_id),
+    )
+    activate = await _prepare_activation(hass, await _save_draft(hass, draft))
+    completed = await hass.config_entries.options.async_configure(activate["flow_id"], {})
+    assert completed["type"] is data_entry_flow.FlowResultType.CREATE_ENTRY
+    await hass.async_block_till_done()
+    active = active_reference_for_module(entry.data, "heating")
+    assert active is not None
+    return active
 
 
 @pytest.mark.asyncio
@@ -687,6 +706,16 @@ async def _seed_configured_water(hass, entry):
         options={},
     )
     return draft, canonical, active
+
+
+async def _activate_new_water(hass, entry) -> ActiveReference:
+    await _seed_water_draft(hass, entry, complete=True)
+    completed = await _activate_water_draft(hass, await _open_water_menu(hass, entry))
+    assert completed["type"] is data_entry_flow.FlowResultType.CREATE_ENTRY
+    await hass.async_block_till_done()
+    active = active_reference_for_module(entry.data, "water_safety")
+    assert active is not None
+    return active
 
 
 @pytest.mark.asyncio
@@ -1421,7 +1450,9 @@ async def test_complete_native_water_lifecycle_activation_restart_edit_and_missi
     assert await _water_drafts(hass, entry) == ()
     assert entry.runtime_data.host is None
     assert entry.runtime_data.water_safety_host is not None
-    assert entry.runtime_data.loaded_configuration.canonical_revision_id == first_active.canonical_revision_id
+    assert (
+        entry.runtime_data.loaded_water_safety_configuration.canonical_revision_id == first_active.canonical_revision_id
+    )
 
     configured = await _open_water_menu(hass, entry)
     assert first_active.canonical_revision_id in configured["description_placeholders"]["water_safety_summary"]
@@ -1506,7 +1537,9 @@ async def test_failed_native_water_activation_retains_draft_and_prior_authority(
     entry = await _empty_entry(hass, title="Water activation failure")
     draft, _canonical, prior_active = await _seed_configured_water(hass, entry)
     await hass.async_block_till_done()
-    assert entry.runtime_data.loaded_configuration.canonical_revision_id == prior_active.canonical_revision_id
+    assert (
+        entry.runtime_data.loaded_water_safety_configuration.canonical_revision_id == prior_active.canonical_revision_id
+    )
 
     async def fail_candidate_start(*_args, **_kwargs):
         raise RuntimeError("candidate runtime did not reach readiness")
@@ -1525,10 +1558,125 @@ async def test_failed_native_water_activation_retains_draft_and_prior_authority(
     assert failed["step_id"] == "water_safety_activate"
     assert failed["errors"] == {"base": "water_safety_activation_failed"}
     assert ActiveReference.model_validate(entry.data[ACTIVE_REFERENCE_KEY]) == prior_active
-    assert entry.runtime_data.loaded_configuration.canonical_revision_id == prior_active.canonical_revision_id
+    assert (
+        entry.runtime_data.loaded_water_safety_configuration.canonical_revision_id == prior_active.canonical_revision_id
+    )
     assert (await _water_drafts(hass, entry))[0] == draft
     backend = await async_get_setup_backend(hass, entry)
     assert await backend.repository.list_non_terminal_attempts() == ()
+
+
+@pytest.mark.asyncio
+async def test_activate_and_reactivate_water_preserves_heating_and_restart_composes_both(hass) -> None:
+    entry = await _empty_entry(hass, title="Heating then Water")
+    heating = await _activate_new_heating(hass, entry, platform="heating-before-water")
+    water = await _activate_new_water(hass, entry)
+
+    assert set(entry.data) == {ACTIVE_REFERENCES_KEY}
+    assert active_reference_for_module(entry.data, "heating") == heating
+    assert active_reference_for_module(entry.data, "water_safety") == water
+    assert entry.runtime_data.loaded_configuration.canonical_revision_id == heating.canonical_revision_id
+    assert entry.runtime_data.loaded_water_safety_configuration.canonical_revision_id == water.canonical_revision_id
+    assert entry.runtime_data.host is not None
+    assert entry.runtime_data.water_safety_host is not None
+    backend = await async_get_setup_backend(hass, entry)
+    heating_drafts_before = await backend.configuration_v3.list_drafts()
+
+    siren, _other_siren, _incompatible = _register_siren_candidates(hass)
+    form = await _choose(hass, await _open_water_menu(hass, entry), "water_safety_sirens")
+    edited_menu = await hass.config_entries.options.async_configure(
+        form["flow_id"],
+        {cf.WATER_SIREN_TARGETS: [siren]},
+    )
+    assert active_reference_for_module(entry.data, "heating") == heating
+    assert active_reference_for_module(entry.data, "water_safety") == water
+    assert await backend.configuration_v3.list_drafts() == heating_drafts_before
+
+    completed = await _activate_water_draft(hass, edited_menu)
+    assert completed["type"] is data_entry_flow.FlowResultType.CREATE_ENTRY
+    await hass.async_block_till_done()
+    updated_water = active_reference_for_module(entry.data, "water_safety")
+    assert updated_water is not None
+    assert updated_water.generation == water.generation + 1
+    assert active_reference_for_module(entry.data, "heating") == heating
+
+    hass.data.pop("controlel_setup_backend", None)
+    hass.data.pop("controlel_setup_services", None)
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.runtime_data.loaded_configuration.canonical_revision_id == heating.canonical_revision_id
+    assert (
+        entry.runtime_data.loaded_water_safety_configuration.canonical_revision_id
+        == updated_water.canonical_revision_id
+    )
+    assert entry.runtime_data.host is not None
+    assert entry.runtime_data.water_safety_host is not None
+
+
+@pytest.mark.asyncio
+async def test_activate_and_reactivate_heating_preserves_water_authority(hass) -> None:
+    entry = await _empty_entry(hass, title="Water then Heating")
+    water = await _activate_new_water(hass, entry)
+    heating = await _activate_new_heating(hass, entry, platform="heating-after-water")
+
+    assert set(entry.data) == {ACTIVE_REFERENCES_KEY}
+    assert active_reference_for_module(entry.data, "water_safety") == water
+    assert active_reference_for_module(entry.data, "heating") == heating
+    assert entry.runtime_data.host is not None
+    assert entry.runtime_data.water_safety_host is not None
+
+    edit = await _choose(hass, await _open_heating_menu(hass, entry), "edit_active")
+    saved = await _save_draft(hass, await _through_groups(hass, edit, target=23.5))
+    assert active_reference_for_module(entry.data, "water_safety") == water
+    assert active_reference_for_module(entry.data, "heating") == heating
+    assert await _water_drafts(hass, entry) == ()
+
+    activate = await _prepare_activation(hass, saved)
+    completed = await hass.config_entries.options.async_configure(activate["flow_id"], {})
+    assert completed["type"] is data_entry_flow.FlowResultType.CREATE_ENTRY
+    await hass.async_block_till_done()
+    updated_heating = active_reference_for_module(entry.data, "heating")
+    assert updated_heating is not None
+    assert updated_heating.generation == heating.generation + 1
+    assert active_reference_for_module(entry.data, "water_safety") == water
+    assert entry.runtime_data.config.target_temperature == Temperature(23.5)
+    assert entry.runtime_data.water_safety_host is not None
+
+
+@pytest.mark.asyncio
+async def test_failed_water_activation_preserves_both_active_module_authorities(hass, monkeypatch) -> None:
+    from custom_components.controlel.water_safety_activation import WaterSafetyActivationService
+
+    entry = await _empty_entry(hass, title="Multimodule activation failure")
+    heating = await _activate_new_heating(hass, entry, platform="multimodule-failure")
+    water = await _activate_new_water(hass, entry)
+    siren, _other_siren, _incompatible = _register_siren_candidates(hass)
+    form = await _choose(hass, await _open_water_menu(hass, entry), "water_safety_sirens")
+    edited_menu = await hass.config_entries.options.async_configure(
+        form["flow_id"],
+        {cf.WATER_SIREN_TARGETS: [siren]},
+    )
+
+    async def fail_candidate_start(*_args, **_kwargs):
+        raise RuntimeError("candidate runtime did not reach readiness")
+
+    monkeypatch.setattr(
+        WaterSafetyActivationService,
+        "_async_build_and_start_host",
+        fail_candidate_start,
+    )
+    review = await _choose(hass, edited_menu, "water_safety_validation")
+    confirmation = await hass.config_entries.options.async_configure(review["flow_id"], {})
+    failed = await hass.config_entries.options.async_configure(confirmation["flow_id"], {})
+
+    assert failed["type"] is data_entry_flow.FlowResultType.FORM
+    assert failed["errors"] == {"base": "water_safety_activation_failed"}
+    assert active_reference_for_module(entry.data, "heating") == heating
+    assert active_reference_for_module(entry.data, "water_safety") == water
+    assert entry.runtime_data.loaded_configuration.canonical_revision_id == heating.canonical_revision_id
+    assert entry.runtime_data.loaded_water_safety_configuration.canonical_revision_id == water.canonical_revision_id
+    assert entry.runtime_data.host is not None
+    assert entry.runtime_data.water_safety_host is not None
 
 
 @pytest.mark.asyncio

@@ -28,6 +28,7 @@ from controlel.application.configuration.heating_setup_adapter import (
     REPORTED_SOURCE_STATE_ROLE,
     SOURCE_DISABLE_TARGET_ROLE,
     SOURCE_ENABLE_TARGET_ROLE,
+    HeatingSetupAdapter,
 )
 from controlel.application.setup import (
     ActiveReference,
@@ -40,9 +41,11 @@ from controlel.application.setup import (
 )
 from controlel.infrastructure.home_assistant import (
     ACTIVE_REFERENCE_KEY,
+    ACTIVE_REFERENCES_KEY,
     HomeAssistantDiscoveryAdapter,
     HomeAssistantReferenceResolver,
     HomeAssistantSetupRepository,
+    active_reference_for_module,
 )
 
 from .config import integration_config_from_entry
@@ -94,9 +97,9 @@ class HomeAssistantCanonicalConfigurationV3Service:
             if existing.lineage.get("authoring_origin") != "greenfield_v3":
                 raise SetupConflictError("canonical v3 draft ID already belongs to another authoring operation")
             return existing
-        if self._entry.data.get(ACTIVE_REFERENCE_KEY) is not None:
+        if active_reference_for_module(self._entry.data, HeatingSetupAdapter.module_key) is not None:
             raise SetupConflictError("greenfield authoring requires an installation without canonical authority")
-        if self._entry.data or self._entry.options:
+        if set(self._entry.data) - {ACTIVE_REFERENCE_KEY, ACTIVE_REFERENCES_KEY} or self._entry.options:
             raise SetupConflictError("legacy configuration must use the explicit legacy conversion operation")
         snapshot = await HomeAssistantDiscoveryAdapter.async_snapshot_from_hass(
             self._hass,
@@ -162,9 +165,9 @@ class HomeAssistantCanonicalConfigurationV3Service:
     ) -> CanonicalConfigurationConversionReviewV3:
         """Compose the existing legacy→v2 and v2→v3 adapters explicitly."""
 
-        if self._entry.data.get(ACTIVE_REFERENCE_KEY) is not None:
+        if active_reference_for_module(self._entry.data, HeatingSetupAdapter.module_key) is not None:
             raise SetupConflictError("legacy conversion cannot mix with canonical authority")
-        if not self._entry.data and not self._entry.options:
+        if not (set(self._entry.data) - {ACTIVE_REFERENCE_KEY, ACTIVE_REFERENCES_KEY}) and not self._entry.options:
             raise SetupConflictError("config entry has no legacy configuration to convert")
         configuration_id = conversion_configuration_id_v3(f"home_assistant:{self._entry.entry_id}:{v2_revision_id}")
         provider_instance_id = await self._provider_instance_id(snapshot_id, created_at)
@@ -491,15 +494,12 @@ class HomeAssistantCanonicalConfigurationV3Service:
         )
 
     def _canonical_active_reference(self) -> ActiveReference:
-        raw = self._entry.data.get(ACTIVE_REFERENCE_KEY)
-        if raw is None:
+        active = active_reference_for_module(self._entry.data, HeatingSetupAdapter.module_key)
+        if active is None:
             raise SetupConflictError("config entry has no active canonical configuration")
-        if set(self._entry.data) != {ACTIVE_REFERENCE_KEY} or self._entry.options:
+        if set(self._entry.data) - {ACTIVE_REFERENCE_KEY, ACTIVE_REFERENCES_KEY} or self._entry.options:
             raise SetupConflictError("canonical configuration cannot be mixed with legacy entry settings")
-        try:
-            return ActiveReference.model_validate(raw)
-        except (TypeError, ValueError) as error:
-            raise SetupConflictError("config entry active canonical reference is invalid") from error
+        return active
 
     async def _reference_health(
         self,

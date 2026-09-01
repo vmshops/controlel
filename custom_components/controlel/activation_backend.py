@@ -6,6 +6,7 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
+from controlel.application.configuration.heating_setup_adapter import HeatingSetupAdapter
 from controlel.application.setup import (
     ActivationAttempt,
     ActiveReference,
@@ -15,6 +16,8 @@ from controlel.application.setup import (
 )
 from controlel.infrastructure.home_assistant import (
     ACTIVE_REFERENCE_KEY,
+    ACTIVE_REFERENCES_KEY,
+    active_reference_for_module,
     is_explicit_legacy_v3_conversion,
 )
 
@@ -49,7 +52,7 @@ async def async_activate_canonical_revision(
         current = _entry_active_reference(entry)
         if (
             current is None
-            and (entry.data or entry.options)
+            and (set(entry.data) - {ACTIVE_REFERENCE_KEY, ACTIVE_REFERENCES_KEY} or entry.options)
             and not is_explicit_legacy_v3_conversion(candidate_revision)
         ):
             raise SetupConflictError(
@@ -259,10 +262,7 @@ async def _require_reload_success(hass: Any, entry_id: str) -> None:
 
 
 def _entry_active_reference(entry: Any) -> ActiveReference | None:
-    raw = entry.data.get(ACTIVE_REFERENCE_KEY)
-    if raw is None:
-        return None
-    return ActiveReference.model_validate(raw)
+    return active_reference_for_module(entry.data, HeatingSetupAdapter.module_key)
 
 
 def _require_expected_reference(

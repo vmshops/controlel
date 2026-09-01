@@ -26,6 +26,7 @@ from controlel.application.setup import (
 )
 from controlel.infrastructure.home_assistant import (
     ACTIVE_REFERENCE_KEY,
+    ACTIVE_REFERENCES_KEY,
     ConfigEntryActiveReferenceStore,
     HeatingBindingSelectionRequest,
     HeatingSetupHostService,
@@ -33,6 +34,7 @@ from controlel.infrastructure.home_assistant import (
     HomeAssistantSetupRepository,
     LegacyConfigurationStatusDTO,
     SetupValidationStatus,
+    active_reference_for_module,
 )
 
 NOW = datetime(2026, 8, 21, 12, 0, tzinfo=UTC)
@@ -548,6 +550,58 @@ def test_legacy_settings_must_be_converted_before_config_entry_can_select_canoni
     with pytest.raises(SetupConflictError, match="explicitly converted"):
         active_reference_store(entry).set(reference)
     assert entry.data == {"sensor_id": "legacy-sensor"}
+
+
+def test_single_active_reference_lazily_migrates_to_module_scoped_authority() -> None:
+    heating = ActiveReference(
+        environment_id="ha-installation-id",
+        module_key="heating",
+        module_instance_id="main-heating",
+        canonical_revision_id="heating-1",
+        semantic_configuration_fingerprint="a" * 64,
+        generation=1,
+        committing_operation_id="heating-attempt-1",
+    )
+    water = ActiveReference(
+        environment_id="ha-installation-id",
+        module_key="water_safety",
+        module_instance_id="main-water",
+        canonical_revision_id="water-1",
+        semantic_configuration_fingerprint="b" * 64,
+        generation=1,
+        committing_operation_id="water-attempt-1",
+    )
+    entry = FakeConfigEntry(data={ACTIVE_REFERENCE_KEY: heating.model_dump(mode="json")})
+    references = active_reference_store(entry)
+
+    assert references.get_for_module("heating") == heating
+    assert active_reference_for_module(entry.data, "water_safety") is None
+
+    references.set(water)
+
+    assert set(entry.data) == {ACTIVE_REFERENCES_KEY}
+    assert entry.data[ACTIVE_REFERENCES_KEY] == {
+        "heating": heating.model_dump(mode="json"),
+        "water_safety": water.model_dump(mode="json"),
+    }
+    assert references.get(heating.scope_key) == heating
+    assert references.get(water.scope_key) == water
+    with pytest.raises(SetupConflictError, match="explicit scope"):
+        references.get()
+
+    updated_heating = ActiveReference(
+        **{
+            **heating.model_dump(mode="python"),
+            "canonical_revision_id": "heating-2",
+            "semantic_configuration_fingerprint": "c" * 64,
+            "generation": 2,
+            "committing_operation_id": "heating-attempt-2",
+        }
+    )
+    references.set(updated_heating)
+
+    assert references.get_for_module("heating") == updated_heating
+    assert references.get_for_module("water_safety") == water
 
 
 @async_test
