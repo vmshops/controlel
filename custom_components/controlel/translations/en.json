@@ -71,10 +71,7 @@
           "water_safety_notifications": "Notifications",
           "water_safety_sirens": "Sirens",
           "water_safety_shutoff_valves": "Automatic water shutoff",
-          "water_safety_sensor_fault": "Sensor fault handling",
-          "water_safety_messages": "Messages",
-          "water_safety_validation": "Validation / Activation",
-          "open_water_wizard_experimental": "Experimental: Guided Setup",
+          "water_safety_validation": "Review & activate",
           "back_to_hub": "Back to Controlel Configure"
         }
       },
@@ -87,7 +84,7 @@
       },
       "water_safety_area_sensor": {
         "title": "Water Safety — Area & moisture sensor",
-        "description": "Area and moisture sensor are optional draft fields. Compatible candidates currently show {candidate_scope} ({candidate_count}). Saving updates only the inactive Water draft.",
+        "description": "Area and moisture sensor may be saved separately in an incomplete draft; both are required for activation. Compatible candidates currently show {candidate_scope} ({candidate_count}). Saving updates only the inactive Water draft. Configured selections not present in current discovery: {unavailable_area_sensor}.",
         "data": {
           "water_safety_area_id": "Area",
           "water_safety_moisture_entity_id": "Moisture / leak sensor",
@@ -96,7 +93,7 @@
       },
       "water_safety_notifications": {
         "title": "Water Safety — Notifications",
-        "description": "{notification_behavior} Saving updates only the inactive Water draft. {notification_test_result}",
+        "description": "{notification_behavior} Saving updates only the inactive Water draft. Configured targets not present in current discovery: {unavailable_notification_targets}. {notification_test_result}",
         "data": {
           "water_safety_notification_targets": "Wet incident & recovery notification targets",
           "water_safety_test_notification": "Test notification instead of saving"
@@ -116,26 +113,16 @@
           "water_safety_shutoff_valve_targets": "Water shutoff valves"
         }
       },
-      "water_safety_sensor_fault": {
-        "title": "Water Safety — Sensor fault handling",
-        "description": "{section_detail}",
-        "menu_options": {
-          "back_to_water_safety": "Back to Water Safety"
-        }
-      },
-      "water_safety_messages": {
-        "title": "Water Safety — Messages",
-        "description": "{section_detail}",
-        "menu_options": {
-          "back_to_water_safety": "Back to Water Safety"
-        }
-      },
       "water_safety_validation": {
-        "title": "Water Safety — Validation / Activation",
-        "description": "{section_detail}",
+        "title": "Water Safety — Review & activate",
+        "description": "{validation_summary}",
         "menu_options": {
           "back_to_water_safety": "Back to Water Safety"
         }
+      },
+      "water_safety_activate": {
+        "title": "Water Safety — Activate configuration",
+        "description": "Activate canonical Water Safety revision {revision_id}? This changes active authority and reloads Controlel. The saved draft is removed only after activation succeeds."
       },
       "notifications_hub": {
         "title": "Notifications",
@@ -212,6 +199,8 @@
       "invalid_water_notification_targets": "One or more notification targets are invalid or unavailable. Review the current Home Assistant notify services and try again.",
       "invalid_water_siren_targets": "One or more siren targets are incompatible or no longer registered. Select compatible Home Assistant siren entities and try again.",
       "invalid_water_shutoff_valve_targets": "One or more shutoff valve targets are incompatible or no longer registered. Select water-class Home Assistant valve entities that support closing and try again.",
+      "water_safety_validation_failed": "The Water Safety draft is not activation-ready. Complete the required sections and review it again.",
+      "water_safety_activation_failed": "Water Safety could not be activated safely. The saved draft and previous active configuration were retained.",
       "validation_failed": "The draft is not activation-ready. Correct the reported issues and validate again."
     },
     "abort": {

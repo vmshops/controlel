@@ -105,6 +105,35 @@ class UnconfiguredFrontendApiEvidenceSourceV1:
 
 
 @dataclass(frozen=True, slots=True)
+class WaterSafetyOnlyFrontendApiEvidenceSourceV1:
+    """Passive evidence for a loaded Water-only canonical authority."""
+
+    water_safety_host: object
+
+    def snapshot(self) -> FrontendApiEvidenceV1:
+        water_safety = _water_safety_snapshot_to_evidence(self.water_safety_host.frontend_api_water_safety_evidence)
+        degraded = water_safety.state in {"WET", "SENSOR_FAULT"}
+        evidence = FrontendApiEvidenceV1(
+            system=SystemEvidenceV1(
+                status="degraded" if degraded else "active",
+                operating_mode="WATER_SAFETY_ONLY",
+            ),
+            modules=(
+                ModuleEvidenceV1(
+                    module_id="heating",
+                    status="inactive",
+                    reason=_HEATING_NOT_CONFIGURED,
+                ),
+                _water_safety_module(water_safety),
+            ),
+            setup=SetupEvidenceV1(state="ready", reason_code=None),
+        )
+        if hasattr(evidence, "water_safety"):
+            return replace(evidence, water_safety=water_safety)
+        return evidence
+
+
+@dataclass(frozen=True, slots=True)
 class HomeAssistantFrontendApiHostBridge:
     """Expose heating and optional Water Safety evidence through one Frontend API host."""
 
@@ -222,6 +251,17 @@ def create_unconfigured_frontend_api_provider_v1() -> FrontendApiProviderV1:
 
     return FrontendApiProviderV1(
         source=UnconfiguredFrontendApiEvidenceSourceV1(),
+        clock=SystemClock(),
+    )
+
+
+def create_water_safety_frontend_api_provider_v1(
+    water_safety_host: object,
+) -> FrontendApiProviderV1:
+    """Compose passive observability for active Water Safety without Heating."""
+
+    return FrontendApiProviderV1(
+        source=WaterSafetyOnlyFrontendApiEvidenceSourceV1(water_safety_host),
         clock=SystemClock(),
     )
 

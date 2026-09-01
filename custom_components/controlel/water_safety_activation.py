@@ -6,15 +6,13 @@ import logging
 import uuid
 from dataclasses import replace
 from datetime import UTC, datetime
-from importlib import import_module
-from typing import Any, cast
+from typing import Any
 
 from controlel.application.configuration.water_safety_setup_adapter import (
     WATER_SAFETY_MODULE_KEY,
     WaterSafetySetupPayload,
 )
 from controlel.application.setup import (
-    ActivationCoordinator,
     CandidateRuntimeReady,
     EffectiveRuntimeConfiguration,
     LoadedRuntimeConfiguration,
@@ -22,15 +20,11 @@ from controlel.application.setup import (
 )
 from controlel.application.setup.json_data import canonical_json
 from controlel.domain.water_safety import WaterSafetySnapshot
-from controlel.infrastructure.home_assistant import (
-    SETUP_STORAGE_VERSION,
-    ConfigEntryActiveReferenceStore,
-    HomeAssistantSetupRepository,
-)
+from controlel.infrastructure.home_assistant import ConfigEntryActiveReferenceStore
 
-from .const import DOMAIN
 from .event_loop_bridge import HomeAssistantEventLoopBridge
 from .scheduler import HomeAssistantScheduler
+from .setup_backend import async_get_setup_backend
 from .water_safety_host import HomeAssistantWaterSafetyHost, build_water_safety_host
 from .water_safety_persistence import (
     create_water_safety_evidence_store,
@@ -52,37 +46,70 @@ class WaterSafetyActivationService:
         *,
         attempt_id: str | None = None,
     ) -> HomeAssistantWaterSafetyHost:
-        repository = await self._async_get_repository(hass, entry)
-        coordinator = ActivationCoordinator(repository, repository)
-        prepared = coordinator.prepare(
-            canonical_revision_id,
-            attempt_id=attempt_id or f"water-safety-{uuid.uuid4().hex}",
-            prepared_at=datetime.now(UTC),
-        )
-        coordinator.begin_applying(prepared.attempt_id, applying_at=datetime.now(UTC))
+        backend = await async_get_setup_backend(hass, entry)
+        repository = backend.repository
         revision = await repository.get_canonical_revision(canonical_revision_id)
         if revision.module_key != WATER_SAFETY_MODULE_KEY:
             raise ValueError("canonical revision is not a Water Safety configuration")
-        resolved = {binding.role: binding.reference for binding in revision.bindings}
-        effective = derive_real_runtime_configuration(revision, resolved)
-        host = await self._async_build_and_start_host(hass, entry, effective)
-        coordinator.record_candidate_runtime_ready(
-            prepared.attempt_id,
-            candidate_ready=CandidateRuntimeReady(
-                runtime=LoadedRuntimeConfiguration(
-                    canonical_revision_id=revision.revision_id,
-                    semantic_configuration_fingerprint=revision.semantic_configuration_fingerprint,
-                    environment_id=revision.environment_id,
-                    module_key=revision.module_key,
-                    module_instance_id=revision.module_instance_id,
-                ),
-                ready_at=datetime.now(UTC),
-                host_adapter=_HOST_ADAPTER,
-                readiness_evidence={"current_sensor_evaluated": True},
-            ),
-        )
-        coordinator.commit(prepared.attempt_id, committed_at=datetime.now(UTC))
-        return host
+        activation_attempt_id = attempt_id or f"water-safety-{uuid.uuid4().hex}"
+        host: HomeAssistantWaterSafetyHost | None = None
+        async with backend.activation_lock:
+            prepared = await backend.activation.prepare(
+                canonical_revision_id,
+                attempt_id=activation_attempt_id,
+                prepared_at=datetime.now(UTC),
+            )
+            await backend.activation.begin_applying(prepared.attempt_id, applying_at=datetime.now(UTC))
+            try:
+                resolved = {binding.role: binding.reference for binding in revision.bindings}
+                effective = derive_real_runtime_configuration(revision, resolved)
+                host = await self._async_build_and_start_host(hass, entry, effective)
+                await backend.activation.record_candidate_runtime_ready(
+                    prepared.attempt_id,
+                    candidate_ready=CandidateRuntimeReady(
+                        runtime=LoadedRuntimeConfiguration(
+                            canonical_revision_id=revision.revision_id,
+                            semantic_configuration_fingerprint=revision.semantic_configuration_fingerprint,
+                            environment_id=revision.environment_id,
+                            module_key=revision.module_key,
+                            module_instance_id=revision.module_instance_id,
+                        ),
+                        ready_at=datetime.now(UTC),
+                        host_adapter=_HOST_ADAPTER,
+                        readiness_evidence={"current_sensor_evaluated": True},
+                    ),
+                )
+                await backend.activation.commit(prepared.attempt_id, committed_at=datetime.now(UTC))
+                return host
+            except Exception:
+                active = await repository.get_active_reference(
+                    (revision.environment_id, revision.module_key, revision.module_instance_id)
+                )
+                if (
+                    active is not None
+                    and active.canonical_revision_id == revision.revision_id
+                    and active.semantic_configuration_fingerprint == revision.semantic_configuration_fingerprint
+                    and active.committing_operation_id == prepared.attempt_id
+                    and host is not None
+                ):
+                    await backend.activation.recover_interrupted(
+                        prepared.attempt_id,
+                        recovered_at=datetime.now(UTC),
+                        rollback_succeeded=False,
+                    )
+                    return host
+                if host is not None:
+                    await host.async_stop()
+                try:
+                    await backend.activation.record_failed_application(
+                        prepared.attempt_id,
+                        completed_at=datetime.now(UTC),
+                        failure_code="water_safety_activation_failed",
+                        rollback_succeeded=prepared.previous_revision_id is None,
+                    )
+                except Exception:
+                    LOGGER.exception("Failed to persist Water Safety activation failure evidence")
+                raise
 
     async def async_start_from_active_reference(
         self,
@@ -98,7 +125,7 @@ class WaterSafetyActivationService:
         active = active_reference_store.get()
         if active is None or active.module_key != WATER_SAFETY_MODULE_KEY:
             return None
-        repository = await self._async_get_repository(hass, entry)
+        repository = (await async_get_setup_backend(hass, entry)).repository
         revision = await repository.get_canonical_revision(active.canonical_revision_id)
         resolved = {binding.role: binding.reference for binding in revision.bindings}
         effective = derive_real_runtime_configuration(revision, resolved)
@@ -139,22 +166,12 @@ class WaterSafetyActivationService:
             restored_snapshot=restored_snapshot,
         )
         host_holder.append(host)
-        await host.async_initialize()
+        try:
+            await host.async_initialize()
+        except Exception:
+            await host.async_stop()
+            raise
         return host
-
-    async def _async_get_repository(self, hass: Any, entry: Any) -> HomeAssistantSetupRepository:
-        storage_module = import_module("homeassistant.helpers.storage")
-        store_type = getattr(storage_module, "Store")
-        store = cast(Any, store_type(hass, SETUP_STORAGE_VERSION, f"{DOMAIN}.setup.{entry.entry_id}"))
-        active_references = ConfigEntryActiveReferenceStore(
-            entry,
-            lambda data: hass.config_entries.async_update_entry(entry, data=dict(data)),
-        )
-        cache = hass.data.setdefault(f"{DOMAIN}_setup_backend", {})
-        existing = cache.get(entry.entry_id)
-        if existing is not None and hasattr(existing, "_repository"):
-            return existing._repository
-        return HomeAssistantSetupRepository(store, active_references)
 
 
 def _restored_snapshot_for_effective(
