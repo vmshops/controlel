@@ -166,10 +166,17 @@ class HomeAssistantActivationCoordinator:
     def __init__(self, hass: Any, repository: HomeAssistantSetupRepository) -> None:
         bridge = _SynchronousRepositoryBridge(hass.loop, repository)
         self._hass = hass
+        supported_module_schema_versions: dict[str, set[int]] = {"heating": {HEATING_SETUP_SCHEMA_VERSION, 3}}
+        if water_safety_core_available():
+            from controlel.application.configuration.water_safety_setup_adapter import (
+                WATER_SAFETY_SETUP_SCHEMA_VERSION,
+            )
+
+            supported_module_schema_versions[_WATER_SAFETY_MODULE_KEY] = {WATER_SAFETY_SETUP_SCHEMA_VERSION}
         self._coordinator = ActivationCoordinator(
             bridge,
             bridge,
-            supported_module_schema_versions={"heating": {HEATING_SETUP_SCHEMA_VERSION, 3}},
+            supported_module_schema_versions=supported_module_schema_versions,
         )
 
     async def _call(self, operation: Any, *args: Any, **kwargs: Any) -> Any:

@@ -6,6 +6,7 @@ import asyncio
 import logging
 from collections.abc import Callable, Coroutine
 from datetime import UTC, datetime
+from functools import partial
 from typing import Any, Protocol
 
 from controlel.application.configuration.water_safety_setup_adapter import (
@@ -115,9 +116,9 @@ class HomeAssistantWaterSafetyHost:
             snapshot = self._state_getter(self._mapper.entity_id)
             observation = self._require_observation(snapshot)
             started_at = datetime.now(UTC)
-            await self._async_submit_runtime(self._runtime.start, observation, started_at=started_at)
+            await self._async_submit_runtime(partial(self._runtime.start, observation, started_at=started_at))
             self._refresh_diagnostics()
-            self._reschedule_deadline()
+            await self._async_submit_runtime(self._reschedule_deadline)
 
             self._unsubscribe = self._state_subscriber(
                 self._hass,
@@ -137,9 +138,10 @@ class HomeAssistantWaterSafetyHost:
             self._unsubscribe = None
             if unsubscribe is not None:
                 unsubscribe()
-            self._cancel_deadline()
             try:
-                self._scheduler.cancel_all()
+                if not self._executor.closed:
+                    await self._async_submit_runtime(self._cancel_deadline)
+                    await self._async_submit_runtime(self._scheduler.cancel_all)
             except Exception:
                 self._logger.exception("Water Safety scheduler cleanup failed")
             callback_tasks = [task for task in self._callback_tasks if task is not asyncio.current_task()]
@@ -277,7 +279,7 @@ class HomeAssistantWaterSafetyHost:
     async def _process(self, operation: Callable[[], WaterSafetyProcessingResult]) -> WaterSafetyProcessingResult:
         result = await self._async_submit_runtime(operation)
         self._refresh_diagnostics()
-        self._reschedule_deadline()
+        await self._async_submit_runtime(self._reschedule_deadline)
         return result
 
     async def _async_submit_runtime(self, operation: Callable[..., Any], *args: object) -> Any:

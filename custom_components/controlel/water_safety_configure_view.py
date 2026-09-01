@@ -187,7 +187,7 @@ def _draft_detail(view: WaterSafetyConfigureView, section: WaterSafetySection) -
         issue_count = len(view.validation.issues) if view.validation is not None else 0
         return (
             f"Draft validation: {'ready for activation' if activation_ready else 'not ready'}. "
-            f"Issues reported: {issue_count}. Native activation is not available yet."
+            f"Issues reported: {issue_count}."
         )
     payload = view.payload
     if payload is None:
@@ -257,12 +257,12 @@ def _payload_detail(
         return "Default messages."
     if section == "validation":
         if lifecycle == "configured":
-            return "Active configuration. Native validation and activation editing is not available yet."
+            return "Active configuration. Editing any Water section creates an inactive draft for review."
         activation_ready = validation is not None and validation.activation_ready
         issue_count = len(validation.issues) if validation is not None else 0
         return (
             f"Draft validation: {'ready for activation' if activation_ready else 'not ready'}. "
-            f"Issues reported: {issue_count}. Native activation is not available yet."
+            f"Issues reported: {issue_count}."
         )
     return _not_configured_detail(section)
 

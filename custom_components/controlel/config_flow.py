@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from importlib import metadata
@@ -22,6 +23,7 @@ from controlel.application.configuration import (
     ConfigurationScopesV3,
     canonical_field_registry_v3,
 )
+from controlel.application.configuration.water_safety_setup_adapter import WATER_SAFETY_MODULE_KEY
 from controlel.application.setup import ActiveReference, SetupConflictError, SetupNotFoundError
 from controlel.infrastructure.home_assistant import (
     ACTIVE_REFERENCE_KEY,
@@ -31,8 +33,8 @@ from controlel.infrastructure.home_assistant.setup_discovery import HA_AREA_KIND
 
 from .activation_backend import async_activate_canonical_revision
 from .const import CONFIG_ENTRY_VERSION, DOMAIN, INTEGRATION_VERSION
-from .core_capabilities import water_safety_core_available
-from .setup_backend import async_get_setup_backend
+from .setup_backend import async_get_setup_backend, async_get_setup_service
+from .water_safety_activation import WaterSafetyActivationService
 from .water_safety_area_sensor import (
     WaterSafetyAreaSensorEditor,
     async_load_water_safety_area_sensor_editor,
@@ -61,8 +63,9 @@ from .water_safety_sirens import (
     async_save_water_safety_sirens_draft,
 )
 
+LOGGER = logging.getLogger(__name__)
+
 WIZARD_URL = f"/{DOMAIN}"
-WATER_WIZARD_URL = f"/{DOMAIN}_static/water-wizard.html"
 HUB_MENU_OPTIONS = ("heating", "water_safety", "notifications_hub", "general_hub", "diagnostics_advanced")
 WATER_SAFETY_MENU_OPTIONS = (
     "water_safety_status",
@@ -70,12 +73,9 @@ WATER_SAFETY_MENU_OPTIONS = (
     "water_safety_notifications",
     "water_safety_sirens",
     "water_safety_shutoff_valves",
-    "water_safety_sensor_fault",
-    "water_safety_messages",
     "water_safety_validation",
     "back_to_hub",
 )
-WATER_SAFETY_EXPERIMENTAL_WIZARD = "open_water_wizard_experimental"
 TOP_EXPLANATION = (
     "You can configure Controlel here manually or use the simpler guided Setup Wizard in the Controlel panel. "
     "Both edit the same configuration."
@@ -241,6 +241,8 @@ class ControlelOptionsFlow(OptionsFlow):
         self._water_area_sensor_show_all = False
         self._water_area_sensor_pending: dict[str, Any] | None = None
         self._water_notification_test_result = "No test request has been sent."
+        self._water_activation_candidate_id: str | None = None
+        self._water_activation_draft: tuple[str, int] | None = None
 
     async def _service(self) -> Any:
         return (await async_get_setup_backend(self.hass, self.config_entry)).configuration_v3
@@ -278,16 +280,13 @@ class ControlelOptionsFlow(OptionsFlow):
 
     async def async_step_water_safety(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         del user_input
-        menu = list(WATER_SAFETY_MENU_OPTIONS)
-        if water_safety_core_available():
-            menu.insert(-1, WATER_SAFETY_EXPERIMENTAL_WIZARD)
         view = await async_build_water_safety_configure_view(
             (await async_get_setup_backend(self.hass, self.config_entry)).repository,
             self.config_entry.data,
         )
         return self.async_show_menu(
             step_id="water_safety",
-            menu_options=menu,
+            menu_options=list(WATER_SAFETY_MENU_OPTIONS),
             description_placeholders={"water_safety_summary": water_safety_menu_summary(view)},
         )
 
@@ -374,6 +373,7 @@ class ControlelOptionsFlow(OptionsFlow):
             description_placeholders={
                 "candidate_scope": scope,
                 "candidate_count": str(len(candidates)),
+                "unavailable_area_sensor": (", ".join(editor.unavailable_selection_labels) or "None"),
             },
         )
 
@@ -458,6 +458,7 @@ class ControlelOptionsFlow(OptionsFlow):
                     "configured targets. Clearing all targets saves an incomplete draft."
                 ),
                 "notification_test_result": self._water_notification_test_result,
+                "unavailable_notification_targets": (", ".join(editor.unavailable_target_ids) or "None"),
             },
         )
 
@@ -578,20 +579,160 @@ class ControlelOptionsFlow(OptionsFlow):
             },
         )
 
-    async def async_step_water_safety_sensor_fault(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        return await self._async_step_water_safety_section("water_safety_sensor_fault", "sensor_fault", user_input)
-
-    async def async_step_water_safety_messages(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        return await self._async_step_water_safety_section("water_safety_messages", "messages", user_input)
-
     async def async_step_water_safety_validation(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        return await self._async_step_water_safety_section("water_safety_validation", "validation", user_input)
+        backend = await async_get_setup_backend(self.hass, self.config_entry)
+        view = await async_build_water_safety_configure_view(backend.repository, self.config_entry.data)
+        if view.draft is None:
+            return self.async_show_menu(
+                step_id="water_safety_validation",
+                menu_options=["back_to_water_safety"],
+                description_placeholders={
+                    "validation_summary": "No Water Safety draft exists. Configure the required sections first."
+                },
+            )
 
-    async def async_step_open_water_wizard_experimental(
-        self, user_input: dict[str, Any] | None = None
+        draft = view.draft
+        snapshot_id = str(
+            draft.lineage.get("created_from_discovery_snapshot_id") or _id("ha-water-validation-snapshot")
+        )
+        service = await async_get_setup_service(
+            self.hass,
+            self.config_entry,
+            module_key=WATER_SAFETY_MODULE_KEY,
+        )
+        await service.validate_water_draft(
+            draft.draft_id,
+            snapshot_id=snapshot_id,
+            evaluated_at=_now(),
+            report_id=_id("ha-water-validation-report"),
+            notification_roles=tuple(draft.settings.get("notification_target_roles", ())),
+            siren_roles=tuple(draft.settings.get("siren_target_roles", ())),
+            preferred_area_id=_optional_input(draft.settings.get("area_id")),
+        )
+        validation = await backend.repository.get_latest_validation_report(draft.draft_id)
+        activation_ready = bool(validation is not None and validation.assesses(draft) and validation.activation_ready)
+        issue_codes = tuple(sorted({issue.code for issue in validation.issues})) if validation is not None else ()
+        summary = (
+            "Draft is ready for activation. Continue to create an immutable canonical revision; "
+            "the active configuration remains unchanged until the final confirmation."
+            if activation_ready
+            else "Draft is incomplete and cannot be activated. Complete the required area, moisture sensor, "
+            f"and notification settings. Current issues: {', '.join(issue_codes) or 'unknown'}."
+        )
+        if user_input is None or not activation_ready:
+            return self.async_show_form(
+                step_id="water_safety_validation",
+                data_schema=vol.Schema({}),
+                errors=({"base": "water_safety_validation_failed"} if user_input is not None else {}),
+                description_placeholders={"validation_summary": summary},
+            )
+
+        active_revision = view.active_revision
+        active_reference = (
+            view.active if view.active is not None and view.active.module_key == WATER_SAFETY_MODULE_KEY else None
+        )
+        revision_number = active_revision.revision + 1 if active_revision is not None else 1
+        configuration_id = (
+            active_revision.configuration_id if active_revision is not None else _id("ha-water-configuration")
+        )
+        canonicalized = await service.canonicalize_water_draft(
+            draft.draft_id,
+            snapshot_id=snapshot_id,
+            created_at=_now(),
+            validation_report_id=_id("ha-water-canonical-validation"),
+            configuration_id=configuration_id,
+            revision_id=_id("ha-water-canonical"),
+            revision=revision_number,
+            actor=f"home_assistant:{self.context.get('user_id') or 'admin'}",
+            source="home_assistant_native_configure",
+            change_kind="UPDATE" if active_reference is not None else "CREATE",
+            reason="native_home_assistant_water_safety_configure",
+            core_version=metadata.version("controlel"),
+            integration_version=INTEGRATION_VERSION,
+            parent_revision_id=(active_reference.canonical_revision_id if active_reference is not None else None),
+            notification_roles=tuple(draft.settings.get("notification_target_roles", ())),
+            siren_roles=tuple(draft.settings.get("siren_target_roles", ())),
+            preferred_area_id=_optional_input(draft.settings.get("area_id")),
+        )
+        if canonicalized.canonical_revision_id is None:
+            raise SetupConflictError("Water Safety canonicalization did not produce a revision")
+        self._water_activation_candidate_id = canonicalized.canonical_revision_id
+        self._water_activation_draft = (draft.draft_id, draft.revision)
+        return await self.async_step_water_safety_activate()
+
+    async def async_step_water_safety_activate(
+        self,
+        user_input: dict[str, Any] | None = None,
     ) -> ConfigFlowResult:
-        del user_input
-        return self.async_external_step(step_id="open_water_wizard_experimental", url=WATER_WIZARD_URL)
+        candidate_id = self._water_activation_candidate_id
+        draft_identity = self._water_activation_draft
+        if candidate_id is None or draft_identity is None:
+            raise SetupConflictError("Water Safety flow has no reviewed activation candidate")
+        if user_input is None:
+            return self.async_show_form(
+                step_id="water_safety_activate",
+                data_schema=vol.Schema({}),
+                description_placeholders={"revision_id": candidate_id},
+            )
+
+        runtime_data = getattr(self.config_entry, "runtime_data", None)
+        if runtime_data is not None:
+            runtime_data.reloading = True
+        candidate_host = None
+        try:
+            candidate_host = await WaterSafetyActivationService().activate_canonical_revision(
+                self.hass,
+                self.config_entry,
+                candidate_id,
+                attempt_id=_id("ha-water-activation"),
+            )
+        except Exception:
+            LOGGER.exception("Native Water Safety activation failed")
+            if candidate_host is not None:
+                await candidate_host.async_stop()
+            if runtime_data is not None:
+                runtime_data.reloading = False
+            return self.async_show_form(
+                step_id="water_safety_activate",
+                data_schema=vol.Schema({}),
+                errors={"base": "water_safety_activation_failed"},
+                description_placeholders={"revision_id": candidate_id},
+            )
+
+        try:
+            await candidate_host.async_stop()
+        except Exception:
+            LOGGER.exception(
+                "Activated Water Safety revision %s, but its proof runtime did not stop cleanly",
+                candidate_id,
+            )
+        backend = await async_get_setup_backend(self.hass, self.config_entry)
+        try:
+            await backend.repository.delete_draft(
+                draft_identity[0],
+                expected_revision=draft_identity[1],
+            )
+        except (SetupConflictError, SetupNotFoundError):
+            LOGGER.warning(
+                "Activated Water Safety revision %s but retained a concurrently changed draft",
+                candidate_id,
+            )
+        try:
+            reload_completed = await self.hass.config_entries.async_reload(self.config_entry.entry_id)
+        except Exception:
+            reload_completed = False
+            LOGGER.exception(
+                "Water Safety revision %s is active, but the immediate config-entry reload failed",
+                candidate_id,
+            )
+        if not reload_completed:
+            if runtime_data is not None:
+                runtime_data.reloading = False
+            LOGGER.error(
+                "Water Safety revision %s is active, but the immediate config-entry reload did not complete",
+                candidate_id,
+            )
+        return self.async_create_entry(title="", data={})
 
     async def _async_step_water_safety_section(
         self,

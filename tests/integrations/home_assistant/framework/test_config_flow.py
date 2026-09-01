@@ -556,6 +556,16 @@ async def _water_drafts(hass, entry):
     return await async_list_module_drafts(backend.repository, "water_safety")
 
 
+async def _activate_water_draft(hass, water_menu):
+    review = await _choose(hass, water_menu, "water_safety_validation")
+    assert review["type"] is data_entry_flow.FlowResultType.FORM
+    assert "ready for activation" in review["description_placeholders"]["validation_summary"]
+    confirmation = await hass.config_entries.options.async_configure(review["flow_id"], {})
+    assert confirmation["type"] is data_entry_flow.FlowResultType.FORM
+    assert confirmation["step_id"] == "water_safety_activate"
+    return await hass.config_entries.options.async_configure(confirmation["flow_id"], {})
+
+
 async def _seed_water_draft(hass, entry, *, complete: bool = False):
     from datetime import UTC, datetime
 
@@ -681,15 +691,12 @@ async def _seed_configured_water(hass, entry):
 
 @pytest.mark.asyncio
 async def test_water_safety_native_menu_structure(hass) -> None:
-    from custom_components.controlel.core_capabilities import water_safety_core_available
-
     entry = await _empty_entry(hass)
     water = await _open_water_menu(hass, entry)
-    expected = list(cf.WATER_SAFETY_MENU_OPTIONS)
-    if water_safety_core_available():
-        expected.insert(-1, cf.WATER_SAFETY_EXPERIMENTAL_WIZARD)
-    assert list(water["menu_options"]) == expected
-    assert "open_water_wizard" not in water["menu_options"]
+    assert list(water["menu_options"]) == list(cf.WATER_SAFETY_MENU_OPTIONS)
+    assert all("wizard" not in option for option in water["menu_options"])
+    assert "water_safety_sensor_fault" not in water["menu_options"]
+    assert "water_safety_messages" not in water["menu_options"]
     assert "not configured" in water["description_placeholders"]["water_safety_summary"].lower()
 
 
@@ -697,12 +704,7 @@ async def test_water_safety_native_menu_structure(hass) -> None:
 async def test_water_safety_submenu_navigation_returns_to_module_menu(hass) -> None:
     entry = await _empty_entry(hass)
     water = await _open_water_menu(hass, entry)
-    for step_id in (
-        "water_safety_status",
-        "water_safety_sensor_fault",
-        "water_safety_messages",
-        "water_safety_validation",
-    ):
+    for step_id in ("water_safety_status",):
         section = await _choose(hass, water, step_id)
         assert section["step_id"] == step_id
         assert section["menu_options"] == ["back_to_water_safety"]
@@ -1319,7 +1321,8 @@ async def test_draft_incomplete_water_safety_menu(hass) -> None:
     water = await _open_water_menu(hass, entry)
     assert "incomplete draft" in water["description_placeholders"]["water_safety_summary"]
     validation = await _choose(hass, water, "water_safety_validation")
-    assert "not ready" in validation["description_placeholders"]["section_detail"]
+    assert validation["type"] is data_entry_flow.FlowResultType.FORM
+    assert "incomplete" in validation["description_placeholders"]["validation_summary"]
 
 
 @pytest.mark.asyncio
@@ -1367,20 +1370,173 @@ async def test_water_active_configuration_is_unchanged_by_native_draft_edit(hass
 
 
 @pytest.mark.asyncio
-async def test_water_experimental_wizard_isolation(hass) -> None:
-    from custom_components.controlel.core_capabilities import water_safety_core_available
+async def test_complete_native_water_lifecycle_activation_restart_edit_and_missing_entities(hass) -> None:
+    utility, _garage, moisture, _outside, _unrelated = _register_water_candidates(hass)
+    (phone,) = _register_notify_targets(hass, "lifecycle_phone")
+    siren, _other_siren, _incompatible_sirens = _register_siren_candidates(hass)
+    valve, _backup_valve, _incompatible_valves = _register_shutoff_valve_candidates(hass)
+    hass.states.async_set(moisture, "off")
+    entry = await _empty_entry(hass, title="Water lifecycle")
 
-    if not water_safety_core_available():
-        pytest.skip("Water Safety core unavailable")
+    water = await _open_water_menu(hass, entry)
+    area = await _choose(hass, water, "water_safety_area_sensor")
+    water = await hass.config_entries.options.async_configure(
+        area["flow_id"],
+        {
+            cf.WATER_AREA: utility.id,
+            cf.WATER_MOISTURE_SENSOR: moisture,
+            cf.WATER_SHOW_ALL_COMPATIBLE: False,
+        },
+    )
+    notifications = await _choose(hass, water, "water_safety_notifications")
+    water = await hass.config_entries.options.async_configure(
+        notifications["flow_id"],
+        {cf.WATER_NOTIFICATION_TARGETS: [phone], cf.WATER_TEST_NOTIFICATION: False},
+    )
+    sirens = await _choose(hass, water, "water_safety_sirens")
+    water = await hass.config_entries.options.async_configure(
+        sirens["flow_id"],
+        {cf.WATER_SIREN_TARGETS: [siren]},
+    )
+    shutoff = await _choose(hass, water, "water_safety_shutoff_valves")
+    water = await hass.config_entries.options.async_configure(
+        shutoff["flow_id"],
+        {cf.WATER_SHUTOFF_VALVE_TARGETS: [valve]},
+    )
 
+    complete_draft = (await _water_drafts(hass, entry))[0]
+    assert {binding.reference.current_locator for binding in complete_draft.bindings} == {
+        moisture,
+        phone,
+        siren,
+        valve,
+    }
+    assert "Draft ready" in water["description_placeholders"]["water_safety_summary"]
+
+    activated = await _activate_water_draft(hass, water)
+    assert activated["type"] is data_entry_flow.FlowResultType.CREATE_ENTRY, activated
+    await hass.async_block_till_done()
+    first_active = ActiveReference.model_validate(entry.data[ACTIVE_REFERENCE_KEY])
+    assert first_active.module_key == "water_safety"
+    assert await _water_drafts(hass, entry) == ()
+    assert entry.runtime_data.host is None
+    assert entry.runtime_data.water_safety_host is not None
+    assert entry.runtime_data.loaded_configuration.canonical_revision_id == first_active.canonical_revision_id
+
+    configured = await _open_water_menu(hass, entry)
+    assert first_active.canonical_revision_id in configured["description_placeholders"]["water_safety_summary"]
+    area = await _choose(hass, configured, "water_safety_area_sensor")
+    assert _suggested(area, cf.WATER_AREA) == utility.id
+    assert _suggested(area, cf.WATER_MOISTURE_SENSOR) == moisture
+    hass.config_entries.options.async_abort(area["flow_id"])
+
+    hass.data.pop("controlel_setup_backend", None)
+    hass.data.pop("controlel_setup_services", None)
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    restarted = await _open_water_menu(hass, entry)
+    assert first_active.canonical_revision_id in restarted["description_placeholders"]["water_safety_summary"]
+
+    er.async_get(hass).async_remove(moisture)
+    hass.states.async_remove(moisture)
+    er.async_get(hass).async_remove(siren)
+    er.async_get(hass).async_remove(valve)
+    hass.services.async_remove("notify", "lifecycle_phone")
+
+    missing_area = await _choose(hass, restarted, "water_safety_area_sensor")
+    assert _suggested(missing_area, cf.WATER_MOISTURE_SENSOR) == moisture
+    assert moisture in missing_area["description_placeholders"]["unavailable_area_sensor"]
+    hass.config_entries.options.async_abort(missing_area["flow_id"])
+    missing_notifications = await _choose(
+        hass,
+        await _open_water_menu(hass, entry),
+        "water_safety_notifications",
+    )
+    assert _defaults(missing_notifications)[cf.WATER_NOTIFICATION_TARGETS] == [phone]
+    assert phone in missing_notifications["description_placeholders"]["unavailable_notification_targets"]
+    hass.config_entries.options.async_abort(missing_notifications["flow_id"])
+    missing_sirens = await _choose(hass, await _open_water_menu(hass, entry), "water_safety_sirens")
+    assert _defaults(missing_sirens)[cf.WATER_SIREN_TARGETS] == [siren]
+    assert siren in missing_sirens["description_placeholders"]["unavailable_sirens"]
+    hass.config_entries.options.async_abort(missing_sirens["flow_id"])
+    missing_valves = await _choose(
+        hass,
+        await _open_water_menu(hass, entry),
+        "water_safety_shutoff_valves",
+    )
+    assert _defaults(missing_valves)[cf.WATER_SHUTOFF_VALVE_TARGETS] == [valve]
+    assert valve in missing_valves["description_placeholders"]["unavailable_shutoff_valves"]
+    hass.config_entries.options.async_abort(missing_valves["flow_id"])
+    assert await _water_drafts(hass, entry) == ()
+
+    clear_siren = await _choose(hass, await _open_water_menu(hass, entry), "water_safety_sirens")
+    edited_menu = await hass.config_entries.options.async_configure(
+        clear_siren["flow_id"],
+        {cf.WATER_SIREN_TARGETS: []},
+    )
+    assert ActiveReference.model_validate(entry.data[ACTIVE_REFERENCE_KEY]) == first_active
+    edited_draft = (await _water_drafts(hass, entry))[0]
+    assert list(edited_draft.settings["siren_target_roles"]) == []
+    assert {binding.reference.current_locator for binding in edited_draft.bindings} == {
+        moisture,
+        phone,
+        valve,
+    }
+
+    reactivated = await _activate_water_draft(hass, edited_menu)
+    assert reactivated["type"] is data_entry_flow.FlowResultType.CREATE_ENTRY, reactivated
+    await hass.async_block_till_done()
+    second_active = ActiveReference.model_validate(entry.data[ACTIVE_REFERENCE_KEY])
+    assert second_active.canonical_revision_id != first_active.canonical_revision_id
+    assert second_active.generation == first_active.generation + 1
+    assert await _water_drafts(hass, entry) == ()
+    reopened_sirens = await _choose(
+        hass,
+        await _open_water_menu(hass, entry),
+        "water_safety_sirens",
+    )
+    assert _defaults(reopened_sirens)[cf.WATER_SIREN_TARGETS] == []
+    hass.config_entries.options.async_abort(reopened_sirens["flow_id"])
+
+
+@pytest.mark.asyncio
+async def test_failed_native_water_activation_retains_draft_and_prior_authority(hass, monkeypatch) -> None:
+    from custom_components.controlel.water_safety_activation import WaterSafetyActivationService
+
+    entry = await _empty_entry(hass, title="Water activation failure")
+    draft, _canonical, prior_active = await _seed_configured_water(hass, entry)
+    await hass.async_block_till_done()
+    assert entry.runtime_data.loaded_configuration.canonical_revision_id == prior_active.canonical_revision_id
+
+    async def fail_candidate_start(*_args, **_kwargs):
+        raise RuntimeError("candidate runtime did not reach readiness")
+
+    monkeypatch.setattr(
+        WaterSafetyActivationService,
+        "_async_build_and_start_host",
+        fail_candidate_start,
+    )
+
+    review = await _choose(hass, await _open_water_menu(hass, entry), "water_safety_validation")
+    confirmation = await hass.config_entries.options.async_configure(review["flow_id"], {})
+    failed = await hass.config_entries.options.async_configure(confirmation["flow_id"], {})
+
+    assert failed["type"] is data_entry_flow.FlowResultType.FORM
+    assert failed["step_id"] == "water_safety_activate"
+    assert failed["errors"] == {"base": "water_safety_activation_failed"}
+    assert ActiveReference.model_validate(entry.data[ACTIVE_REFERENCE_KEY]) == prior_active
+    assert entry.runtime_data.loaded_configuration.canonical_revision_id == prior_active.canonical_revision_id
+    assert (await _water_drafts(hass, entry))[0] == draft
+    backend = await async_get_setup_backend(hass, entry)
+    assert await backend.repository.list_non_terminal_attempts() == ()
+
+
+@pytest.mark.asyncio
+async def test_water_menu_has_no_route_to_frozen_wizard(hass) -> None:
     entry = await _empty_entry(hass)
     water = await _open_water_menu(hass, entry)
     assert water["menu_options"][0] == "water_safety_status"
-    assert water["menu_options"][-2] == cf.WATER_SAFETY_EXPERIMENTAL_WIZARD
-    wizard = await _choose(hass, water, cf.WATER_SAFETY_EXPERIMENTAL_WIZARD)
-    assert wizard["type"] is data_entry_flow.FlowResultType.EXTERNAL_STEP
-    assert wizard["url"] == cf.WATER_WIZARD_URL
-    assert wizard["step_id"] == "open_water_wizard_experimental"
+    assert all("wizard" not in option for option in water["menu_options"])
 
 
 @pytest.mark.asyncio

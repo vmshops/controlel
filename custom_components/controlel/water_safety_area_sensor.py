@@ -47,12 +47,27 @@ class WaterSafetyAreaSensorEditor:
     area_id: str | None
     moisture_entity_id: str | None
     compatible_candidates: tuple[WaterSafetySetupCandidate, ...]
+    available_area_ids: frozenset[str]
 
     def visible_entity_ids(self, *, show_all: bool) -> tuple[str, ...]:
         candidates = self.compatible_candidates
         if self.area_id is not None and not show_all:
             candidates = tuple(item for item in candidates if item.reference.area_id == self.area_id)
         return tuple(locator for item in candidates if (locator := item.reference.current_locator) is not None)
+
+    @property
+    def unavailable_selection_labels(self) -> tuple[str, ...]:
+        """Return persisted selections that current HA discovery cannot resolve."""
+
+        labels: list[str] = []
+        if self.area_id is not None and self.area_id not in self.available_area_ids:
+            labels.append(f"area {self.area_id}")
+        compatible_entity_ids = {
+            locator for item in self.compatible_candidates if (locator := item.reference.current_locator) is not None
+        }
+        if self.moisture_entity_id is not None and self.moisture_entity_id not in compatible_entity_ids:
+            labels.append(f"moisture sensor {self.moisture_entity_id}")
+        return tuple(labels)
 
 
 async def async_load_water_safety_area_sensor_editor(
@@ -116,6 +131,7 @@ async def async_load_water_safety_area_sensor_editor(
         area_id=area_id,
         moisture_entity_id=_binding_locator(source_bindings, WATER_SAFETY_SENSOR_ROLE),
         compatible_candidates=compatible,
+        available_area_ids=frozenset(area.id for area in ar.async_get(hass).async_list_areas()),
     )
 
 
