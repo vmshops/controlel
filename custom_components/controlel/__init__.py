@@ -30,7 +30,7 @@ from controlel.domain.repositories.sensor_repository import SensorRepository
 from controlel.domain.repositories.zone_repository import ZoneRepository
 from controlel.domain.sensors.sensor import Sensor
 from controlel.domain.source_control import SourceCapabilities, SourceOwnership
-from controlel.infrastructure.home_assistant import ACTIVE_REFERENCE_KEY
+from controlel.infrastructure.home_assistant import active_reference_for_module, active_references_from_data
 from controlel.infrastructure.time.system_clock import SystemClock
 
 from .canonical_runtime import async_select_runtime_configuration, staged_candidate_runtime
@@ -64,6 +64,7 @@ class ControlelEntryRuntime:
     config: HomeAssistantIntegrationConfig | None
     water_safety_host: object | None = None
     loaded_configuration: LoadedRuntimeConfiguration | None = None
+    loaded_water_safety_configuration: LoadedRuntimeConfiguration | None = None
     reloading: bool = False
     frontend_api_unregister: Callable[[], None] | None = None
     water_safety_action_unregister: Callable[[], None] | None = None
@@ -92,11 +93,10 @@ async def async_setup_entry(
     entry: ControlelConfigEntry,
 ) -> bool:
     """Set up one Controlel runtime from a config entry."""
-    raw_active = entry.data.get(ACTIVE_REFERENCE_KEY)
-    if raw_active is not None:
-        active = ActiveReference.model_validate(raw_active)
-        if active.module_key == "water_safety":
-            return await _async_setup_water_safety_only_entry(hass, entry, active)
+    heating_active = active_reference_for_module(entry.data, "heating")
+    water_active = active_reference_for_module(entry.data, "water_safety")
+    if heating_active is None and water_active is not None and staged_candidate_runtime(hass, entry.entry_id) is None:
+        return await _async_setup_water_safety_only_entry(hass, entry, water_active)
     if not entry.data and not entry.options and staged_candidate_runtime(hass, entry.entry_id) is None:
         from .frontend_api import create_unconfigured_frontend_api_provider_v1
         from .frontend_api_websocket import register_frontend_api_provider_v1
@@ -346,6 +346,9 @@ async def async_setup_entry(
         water_safety_host=water_safety_host,
         config=config,
         loaded_configuration=selection.loaded_configuration,
+        loaded_water_safety_configuration=(
+            _loaded_configuration_from_active(water_active) if water_safety_host is not None else None
+        ),
         frontend_api_unregister=frontend_api_unregister,
         water_safety_action_unregister=water_safety_action_unregister,
     )
@@ -426,13 +429,7 @@ async def _async_setup_water_safety_only_entry(
         host=None,
         config=None,
         water_safety_host=water_safety_host,
-        loaded_configuration=LoadedRuntimeConfiguration(
-            canonical_revision_id=active.canonical_revision_id,
-            semantic_configuration_fingerprint=active.semantic_configuration_fingerprint,
-            environment_id=active.environment_id,
-            module_key=active.module_key,
-            module_instance_id=active.module_instance_id,
-        ),
+        loaded_water_safety_configuration=_loaded_configuration_from_active(active),
         frontend_api_unregister=frontend_api_unregister,
         water_safety_action_unregister=water_safety_action_unregister,
     )
@@ -505,21 +502,21 @@ async def _async_update_listener(
     """Update the title and reload once after an atomic options change."""
 
     runtime_data = entry.runtime_data
-    raw_active = entry.data.get(ACTIVE_REFERENCE_KEY)
-    if raw_active is not None:
-        active = ActiveReference.model_validate(raw_active)
-        loaded = runtime_data.loaded_configuration
-        authority_matches = (
-            loaded is not None
-            and loaded.canonical_revision_id == active.canonical_revision_id
-            and loaded.semantic_configuration_fingerprint == active.semantic_configuration_fingerprint
-            and (loaded.environment_id, loaded.module_key, loaded.module_instance_id) == active.scope_key
-        )
-        if authority_matches:
-            if active.module_key == "water_safety" and runtime_data.water_safety_host is not None:
-                return
-            if runtime_data.config is not None and entry.title == runtime_data.config.zone_name:
-                return
+    active_references = active_references_from_data(entry.data)
+    if active_references:
+        heating_active = next((item for item in active_references if item.module_key == "heating"), None)
+        water_active = next((item for item in active_references if item.module_key == "water_safety"), None)
+        heating_matches = _loaded_configuration_matches(
+            heating_active,
+            runtime_data.loaded_configuration,
+        ) and ((heating_active is None) == (runtime_data.host is None))
+        water_matches = _loaded_configuration_matches(
+            water_active,
+            runtime_data.loaded_water_safety_configuration,
+        ) and ((water_active is None) == (runtime_data.water_safety_host is None))
+        title_matches = runtime_data.config is None or entry.title == runtime_data.config.zone_name
+        if heating_matches and water_matches and title_matches:
+            return
         if runtime_data.reloading:
             return
         runtime_data.reloading = True
@@ -544,3 +541,26 @@ async def _async_update_listener(
         )
     await hass.config_entries.async_reload(entry.entry_id)
     LOGGER.info("Controlel configuration reloaded entry_id=%s", entry.entry_id)
+
+
+def _loaded_configuration_from_active(active: ActiveReference) -> LoadedRuntimeConfiguration:
+    return LoadedRuntimeConfiguration(
+        canonical_revision_id=active.canonical_revision_id,
+        semantic_configuration_fingerprint=active.semantic_configuration_fingerprint,
+        environment_id=active.environment_id,
+        module_key=active.module_key,
+        module_instance_id=active.module_instance_id,
+    )
+
+
+def _loaded_configuration_matches(
+    active: ActiveReference | None,
+    loaded: LoadedRuntimeConfiguration | None,
+) -> bool:
+    if active is None or loaded is None:
+        return active is None and loaded is None
+    return bool(
+        loaded.canonical_revision_id == active.canonical_revision_id
+        and loaded.semantic_configuration_fingerprint == active.semantic_configuration_fingerprint
+        and (loaded.environment_id, loaded.module_key, loaded.module_instance_id) == active.scope_key
+    )

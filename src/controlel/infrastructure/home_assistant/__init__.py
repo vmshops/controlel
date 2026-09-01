@@ -15,10 +15,13 @@ from controlel.infrastructure.home_assistant.setup_host import (
 )
 from controlel.infrastructure.home_assistant.setup_persistence import (
     ACTIVE_REFERENCE_KEY,
+    ACTIVE_REFERENCES_KEY,
     SETUP_STORAGE_VERSION,
     ConfigEntryActiveReferenceStore,
     HomeAssistantSetupRepository,
     SetupStorageIntegrityError,
+    active_reference_for_module,
+    active_references_from_data,
     is_explicit_legacy_v3_conversion,
 )
 from controlel.infrastructure.home_assistant.water_safety_discovery import async_snapshot_with_notify_services
@@ -33,6 +36,7 @@ __all__ = [
     "HomeAssistantEphemeralEndpoint",
     "HomeAssistantReferenceResolver",
     "ACTIVE_REFERENCE_KEY",
+    "ACTIVE_REFERENCES_KEY",
     "SETUP_STORAGE_VERSION",
     "ConfigEntryActiveReferenceStore",
     "DiscoverySnapshotDTO",
@@ -43,6 +47,8 @@ __all__ = [
     "LegacyConfigurationStatusDTO",
     "SetupStorageIntegrityError",
     "SetupValidationStatus",
+    "active_reference_for_module",
+    "active_references_from_data",
     "is_explicit_legacy_v3_conversion",
     "WaterSafetyBindingSelectionRequest",
     "WaterSafetySetupHostService",

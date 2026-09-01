@@ -23,11 +23,14 @@ from controlel.application.configuration import (
     ConfigurationScopesV3,
     canonical_field_registry_v3,
 )
+from controlel.application.configuration.heating_setup_adapter import HeatingSetupAdapter
 from controlel.application.configuration.water_safety_setup_adapter import WATER_SAFETY_MODULE_KEY
-from controlel.application.setup import ActiveReference, SetupConflictError, SetupNotFoundError
+from controlel.application.setup import SetupConflictError, SetupNotFoundError
 from controlel.infrastructure.home_assistant import (
     ACTIVE_REFERENCE_KEY,
+    ACTIVE_REFERENCES_KEY,
     HomeAssistantDiscoveryAdapter,
+    active_reference_for_module,
 )
 from controlel.infrastructure.home_assistant.setup_discovery import HA_AREA_KIND, HA_FLOOR_KIND
 
@@ -764,13 +767,18 @@ class ControlelOptionsFlow(OptionsFlow):
         return self.async_show_menu(step_id="diagnostics_advanced", menu_options=["back_to_hub"])
 
     async def _authority_kind(self) -> str:
-        raw = self.config_entry.data.get(ACTIVE_REFERENCE_KEY)
-        legacy = bool(set(self.config_entry.data) - {ACTIVE_REFERENCE_KEY} or self.config_entry.options)
-        if raw is None:
-            return "legacy" if legacy else "empty"
-        if legacy or set(self.config_entry.data) != {ACTIVE_REFERENCE_KEY}:
+        legacy = bool(
+            set(self.config_entry.data) - {ACTIVE_REFERENCE_KEY, ACTIVE_REFERENCES_KEY} or self.config_entry.options
+        )
+        has_canonical_authority = bool(
+            self.config_entry.data.get(ACTIVE_REFERENCE_KEY) is not None
+            or self.config_entry.data.get(ACTIVE_REFERENCES_KEY) is not None
+        )
+        if legacy and has_canonical_authority:
             return "mixed"
-        active = ActiveReference.model_validate(raw)
+        active = active_reference_for_module(self.config_entry.data, HeatingSetupAdapter.module_key)
+        if active is None:
+            return "legacy" if legacy else "empty"
         backend = await async_get_setup_backend(self.hass, self.config_entry)
         revision = await backend.repository.get_canonical_revision(active.canonical_revision_id)
         return "v3" if isinstance(revision, CanonicalConfigurationRevisionV3) else "v2"
@@ -801,7 +809,9 @@ class ControlelOptionsFlow(OptionsFlow):
 
     async def async_step_edit_active(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         del user_input
-        active = ActiveReference.model_validate(self.config_entry.data[ACTIVE_REFERENCE_KEY])
+        active = active_reference_for_module(self.config_entry.data, HeatingSetupAdapter.module_key)
+        if active is None:
+            raise SetupConflictError("config entry has no active Heating configuration")
         self._draft = await (await self._service()).edit_from_active(
             draft_id=_id("ha-edit-draft"), created_at=_now(), expected_active_generation=active.generation
         )
@@ -811,7 +821,9 @@ class ControlelOptionsFlow(OptionsFlow):
     async def async_step_convert_v2(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         if user_input is None:
             return self.async_show_form(step_id="convert_v2", data_schema=vol.Schema({}))
-        active = ActiveReference.model_validate(self.config_entry.data[ACTIVE_REFERENCE_KEY])
+        active = active_reference_for_module(self.config_entry.data, HeatingSetupAdapter.module_key)
+        if active is None:
+            raise SetupConflictError("config entry has no active Heating configuration")
         now = _now()
         review = await (await self._service()).convert_v2(
             source_revision_id=active.canonical_revision_id,

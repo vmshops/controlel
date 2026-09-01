@@ -33,10 +33,10 @@ from controlel.domain.value_objects.sensor_id import SensorId
 from controlel.domain.value_objects.temperature import Temperature
 from controlel.domain.value_objects.zone_id import ZoneId
 from controlel.infrastructure.home_assistant import (
-    ACTIVE_REFERENCE_KEY,
     HomeAssistantDiscoveryAdapter,
     HomeAssistantEphemeralEndpoint,
     HomeAssistantReferenceResolver,
+    active_reference_for_module,
 )
 
 from .config import (
@@ -106,14 +106,12 @@ async def async_select_runtime_configuration(
     if staged is not None:
         return staged, backend
 
-    raw_reference = entry.data.get(ACTIVE_REFERENCE_KEY)
-    if raw_reference is None:
-        return RuntimeConfigurationSelection(integration_config_from_entry(entry.data, entry.options), None), backend
-
     try:
-        active = ActiveReference.model_validate(raw_reference)
+        active = active_reference_for_module(entry.data, HeatingSetupAdapter.module_key)
     except (TypeError, ValueError) as error:
         raise HomeAssistantConfigurationError("canonical active reference is invalid") from error
+    if active is None:
+        return RuntimeConfigurationSelection(integration_config_from_entry(entry.data, entry.options), None), backend
     revision = await backend.repository.get_canonical_revision(active.canonical_revision_id)
     _require_active_revision(active, revision)
     return await async_compile_canonical_runtime(hass, revision), backend

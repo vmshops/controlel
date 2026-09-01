@@ -19,7 +19,7 @@ from controlel.application.configuration.water_safety_setup_adapter import (
 from controlel.application.setup import ActiveReference, CanonicalConfigurationRevision, DraftRevision
 from controlel.application.setup.json_data import canonical_json
 from controlel.application.setup.model import ValidationReport
-from controlel.infrastructure.home_assistant import ACTIVE_REFERENCE_KEY, HomeAssistantSetupRepository
+from controlel.infrastructure.home_assistant import HomeAssistantSetupRepository, active_reference_for_module
 
 WaterSafetyLifecycle = Literal["not_configured", "draft_incomplete", "draft_ready", "configured"]
 WaterSafetySection = Literal[
@@ -144,10 +144,7 @@ def water_safety_section_detail(view: WaterSafetyConfigureView, section: WaterSa
 
 
 def _active_reference(data: Mapping[str, Any]) -> ActiveReference | None:
-    raw = data.get(ACTIVE_REFERENCE_KEY)
-    if not isinstance(raw, Mapping):
-        return None
-    return ActiveReference.model_validate(raw)
+    return active_reference_for_module(data, WATER_SAFETY_MODULE_KEY)
 
 
 def _water_safety_payload_from_draft(draft: DraftRevision) -> WaterSafetySetupPayload | None:

@@ -30,6 +30,7 @@ from controlel.application.setup import (
 from controlel.application.setup.repository import ScopeKey
 from controlel.infrastructure.home_assistant import (
     ACTIVE_REFERENCE_KEY,
+    ACTIVE_REFERENCES_KEY,
     SETUP_STORAGE_VERSION,
     ConfigEntryActiveReferenceStore,
     HeatingSetupHostService,
@@ -56,7 +57,7 @@ from .core_capabilities import water_safety_core_available
 
 _SETUP_CACHE_KEY = f"{DOMAIN}_setup_backend"
 _SETUP_SERVICES_CACHE_KEY = f"{DOMAIN}_setup_services"
-_LIFECYCLE_DATA_KEYS = frozenset({ACTIVE_REFERENCE_KEY})
+_LIFECYCLE_DATA_KEYS = frozenset({ACTIVE_REFERENCE_KEY, ACTIVE_REFERENCES_KEY})
 _HEATING_MODULE_KEY = "heating"
 _WATER_SAFETY_MODULE_KEY = "water_safety"
 

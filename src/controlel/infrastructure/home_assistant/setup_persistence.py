@@ -26,6 +26,7 @@ from controlel.application.setup.repository import ScopeKey
 
 SETUP_STORAGE_VERSION = 1
 ACTIVE_REFERENCE_KEY = "setup_active_reference"
+ACTIVE_REFERENCES_KEY = "setup_active_references"
 type StoredCanonicalRevision = CanonicalConfigurationRevision | CanonicalConfigurationRevisionV3
 
 
@@ -45,7 +46,7 @@ class ConfigEntryPort(Protocol):
 
 
 class ConfigEntryActiveReferenceStore:
-    """Persist only the active authority pointer in a Home Assistant config entry."""
+    """Persist independent module authority pointers in a Home Assistant config entry."""
 
     def __init__(
         self,
@@ -55,22 +56,77 @@ class ConfigEntryActiveReferenceStore:
         self._entry = entry
         self._update_data = update_data
 
-    def get(self) -> ActiveReference | None:
-        value = self._entry.data.get(ACTIVE_REFERENCE_KEY)
-        if value is None:
-            return None
-        if not isinstance(value, Mapping):
-            raise SetupStorageIntegrityError("config-entry active reference is malformed")
-        return ActiveReference.model_validate(value)
+    def all(self) -> tuple[ActiveReference, ...]:
+        return active_references_from_data(self._entry.data)
+
+    def get(self, scope: ScopeKey | None = None) -> ActiveReference | None:
+        references = self.all()
+        if scope is not None:
+            return next((item for item in references if item.scope_key == scope), None)
+        if len(references) > 1:
+            raise SetupConflictError("multiple module active references require an explicit scope")
+        return references[0] if references else None
+
+    def get_for_module(self, module_key: str) -> ActiveReference | None:
+        return next((item for item in self.all() if item.module_key == module_key), None)
 
     def set(self, reference: ActiveReference, *, allow_legacy_replacement: bool = False) -> None:
-        non_lifecycle_keys = set(self._entry.data) - {ACTIVE_REFERENCE_KEY}
+        non_lifecycle_keys = set(self._entry.data) - {ACTIVE_REFERENCE_KEY, ACTIVE_REFERENCES_KEY}
         if non_lifecycle_keys and not allow_legacy_replacement:
             raise SetupConflictError(
                 "legacy config-entry settings must be explicitly converted before canonical activation"
             )
-        data = {ACTIVE_REFERENCE_KEY: reference.model_dump(mode="json")}
+        references = {} if non_lifecycle_keys else {item.module_key: item for item in self.all()}
+        current = references.get(reference.module_key)
+        if current is not None and current.scope_key != reference.scope_key:
+            raise SetupConflictError("config entry already has active authority for another module scope")
+        references[reference.module_key] = reference
+        if len(references) == 1:
+            data = {ACTIVE_REFERENCE_KEY: reference.model_dump(mode="json")}
+        else:
+            data = {
+                ACTIVE_REFERENCES_KEY: {
+                    module_key: references[module_key].model_dump(mode="json") for module_key in sorted(references)
+                }
+            }
         self._update_data(data)
+
+
+def active_references_from_data(data: Mapping[str, object]) -> tuple[ActiveReference, ...]:
+    """Read legacy single or module-scoped active authority without mutating storage."""
+
+    legacy = data.get(ACTIVE_REFERENCE_KEY)
+    module_scoped = data.get(ACTIVE_REFERENCES_KEY)
+    if legacy is not None and module_scoped is not None:
+        raise SetupStorageIntegrityError("config entry contains both single and module-scoped active references")
+    if module_scoped is None:
+        if legacy is None:
+            return ()
+        if not isinstance(legacy, Mapping):
+            raise SetupStorageIntegrityError("config-entry active reference is malformed")
+        return (ActiveReference.model_validate(legacy),)
+    if not isinstance(module_scoped, Mapping):
+        raise SetupStorageIntegrityError("config-entry module active references are malformed")
+    references: list[ActiveReference] = []
+    for module_key, raw_reference in module_scoped.items():
+        if not isinstance(module_key, str) or not isinstance(raw_reference, Mapping):
+            raise SetupStorageIntegrityError("config-entry module active reference is malformed")
+        reference = ActiveReference.model_validate(raw_reference)
+        if reference.module_key != module_key:
+            raise SetupStorageIntegrityError("config-entry active reference module key does not match its scope")
+        references.append(reference)
+    if len({item.scope_key for item in references}) != len(references):
+        raise SetupStorageIntegrityError("config-entry module active reference scopes are not unique")
+    return tuple(sorted(references, key=lambda item: item.module_key))
+
+
+def active_reference_for_module(
+    data: Mapping[str, object],
+    module_key: str,
+) -> ActiveReference | None:
+    """Return one module authority from either persisted representation."""
+
+    return next((item for item in active_references_from_data(data) if item.module_key == module_key), None)
 
 
 class SetupStorageIntegrityError(RuntimeError):
@@ -272,10 +328,7 @@ class HomeAssistantSetupRepository:
 
     async def get_active_reference(self, scope: ScopeKey) -> ActiveReference | None:
         async with self._lock:
-            current = self._active_references.get()
-            if current is None or current.scope_key != scope:
-                return None
-            return current
+            return self._active_references.get(scope)
 
     async def compare_and_swap_active_reference(
         self,
@@ -287,9 +340,10 @@ class HomeAssistantSetupRepository:
     ) -> None:
         async with self._lock:
             document = await self._load()
-            current = self._active_references.get()
-            if current is not None and current.scope_key != scope:
-                raise SetupConflictError("config entry active reference belongs to another scope")
+            current = self._active_references.get(scope)
+            module_current = self._active_references.get_for_module(replacement.module_key)
+            if module_current is not None and module_current.scope_key != scope:
+                raise SetupConflictError("config entry active reference belongs to another module scope")
             current_revision_id = None if current is None else current.canonical_revision_id
             current_generation = 0 if current is None else current.generation
             if current_revision_id != expected_revision_id or current_generation != expected_generation:

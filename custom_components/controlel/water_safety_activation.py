@@ -20,7 +20,7 @@ from controlel.application.setup import (
 )
 from controlel.application.setup.json_data import canonical_json
 from controlel.domain.water_safety import WaterSafetySnapshot
-from controlel.infrastructure.home_assistant import ConfigEntryActiveReferenceStore
+from controlel.infrastructure.home_assistant import active_reference_for_module
 
 from .event_loop_bridge import HomeAssistantEventLoopBridge
 from .scheduler import HomeAssistantScheduler
@@ -118,12 +118,8 @@ class WaterSafetyActivationService:
         *,
         bridge: HomeAssistantEventLoopBridge,
     ) -> HomeAssistantWaterSafetyHost | None:
-        active_reference_store = ConfigEntryActiveReferenceStore(
-            entry,
-            lambda data: hass.config_entries.async_update_entry(entry, data=dict(data)),
-        )
-        active = active_reference_store.get()
-        if active is None or active.module_key != WATER_SAFETY_MODULE_KEY:
+        active = active_reference_for_module(entry.data, WATER_SAFETY_MODULE_KEY)
+        if active is None:
             return None
         repository = (await async_get_setup_backend(hass, entry)).repository
         revision = await repository.get_canonical_revision(active.canonical_revision_id)
