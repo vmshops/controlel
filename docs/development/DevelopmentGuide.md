@@ -10,12 +10,12 @@ dependency. Use these separate suites:
 python -m pytest tests/domain tests/application tests/infrastructure \
   tests/architecture tests/packaging
 
-# B. Home Assistant adapter tests with installed public Core 0.16.0
+# B. Home Assistant adapter tests with an installed wheel from this checkout
 python -m pytest tests/integrations/home_assistant \
   --ignore=tests/integrations/home_assistant/framework
 
-# C. Real Home Assistant framework tests with installed public Core 0.16.0
-CONTROLEL_FRAMEWORK_COMPOSITION=public \
+# C. Real Home Assistant framework tests with the same installed checkout wheel
+CONTROLEL_FRAMEWORK_COMPOSITION=checked-out-wheel \
   python -m pytest tests/integrations/home_assistant/framework
 
 # D. Real loader smoke for an explicit Core 0.17.0 development composition
@@ -38,21 +38,28 @@ python3.14 -m venv .venv-ha
 ./.venv-ha/bin/python -m pip install --upgrade pip
 ./.venv-ha/bin/python -m pip install --require-hashes \
   -r requirements/ha-test.txt
-./.venv-ha/bin/python -m pip install --no-cache-dir controlel==0.16.0
-CONTROLEL_FRAMEWORK_COMPOSITION=public \
+./.venv-ha/bin/python -m pip install -r requirements/package-test.txt
+./.venv-ha/bin/python -m build --wheel --outdir dist/ha-core
+./.venv-ha/bin/python -m pip install --no-cache-dir --no-deps \
+  dist/ha-core/controlel-*.whl
+./.venv-ha/bin/python scripts/ci/verify_public_core.py \
+  --development-wheel dist/ha-core/controlel-*.whl
+CONTROLEL_FRAMEWORK_COMPOSITION=checked-out-wheel \
   ./.venv-ha/bin/python -m pytest \
   tests/integrations/home_assistant/framework
 ```
 
 This environment loads `custom_components/controlel` from the checkout through
-the normal Home Assistant custom-component test mechanism, but imports exact
-public Core 0.16.0 from `site-packages`. It must not add `src` to `PYTHONPATH`.
+the normal Home Assistant custom-component test mechanism, but imports the Core
+wheel built from the same checkout from `site-packages`. It must not use an
+editable Core install or add `src` to `PYTHONPATH`.
 
-Core `0.16.0` is published and immutable. The repository prepares integration
-candidate `0.14.0`; both HA suites install Core from PyPI as a normal
-non-editable site-packages distribution and verify it matches the manifest's
-exact `controlel==0.16.0` pin and published artifact identities. Suite A
-remains the independent repository-Core boundary.
+The normal PR jobs `home-assistant-public` and
+`home-assistant-framework-public` retain their stable required-check names, but
+both build and install a wheel from the checked-out commit. The separate
+`Home Assistant published Core compatibility` workflow is release/manual only;
+it installs the exact manifest requirement from PyPI and verifies the published
+artifact before running both HA suites.
 
 The non-publishable development composition described in
 `HomeAssistantDevelopmentComposition.md` remains available for offline HAOS

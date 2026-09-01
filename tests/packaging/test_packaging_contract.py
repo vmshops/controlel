@@ -437,7 +437,7 @@ def test_packaging_ci_builds_and_validates_without_publishing() -> None:
     assert "token" not in workflow.casefold()
 
 
-def test_ci_validates_ha_public_core_from_pypi() -> None:
+def test_pr_ci_validates_ha_against_a_wheel_built_from_the_checked_out_commit() -> None:
     workflow = (ROOT / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8")
 
     assert "tests/domain" in workflow
@@ -450,13 +450,34 @@ def test_ci_validates_ha_public_core_from_pypi() -> None:
     assert "home-assistant-public:" in workflow
     assert "home-assistant-framework-public:" in workflow
     assert "home-assistant-candidate:" not in workflow
-    assert "CONTROLEL_FRAMEWORK_COMPOSITION: public" in workflow
+    assert "CONTROLEL_FRAMEWORK_COMPOSITION: checked-out-wheel" in workflow
     assert workflow.count("python -m pip install -e .") == 1
-    assert workflow.count("python -m pip install --no-cache-dir controlel==0.17.0") == 2
-    assert workflow.count("python scripts/ci/verify_public_core.py") == 2
+    assert workflow.count("python -m build --wheel --outdir dist/ha-core") == 2
+    assert workflow.count("python -m pip install --no-cache-dir --no-deps dist/ha-core/controlel-*.whl") == 2
+    assert (
+        workflow.count("python scripts/ci/verify_public_core.py --development-wheel dist/ha-core/controlel-*.whl") == 2
+    )
+    assert "python -m pip install --no-cache-dir controlel==0.17.0" not in workflow
     assert workflow.count("python scripts/ci/verify_ha_candidate_core.py") == 0
     assert workflow.count("--asyncio-mode=auto") == 1
     assert "controlel==0.10.0" not in workflow
+
+
+def test_published_core_compatibility_is_release_only_or_manual() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "home-assistant-published-core.yml").read_text(encoding="utf-8")
+
+    assert "release:" in workflow
+    assert "workflow_dispatch:" in workflow
+    assert "pull_request:" not in workflow
+    assert "push:" not in workflow
+    assert "custom_components/controlel/manifest.json" in workflow
+    assert workflow.count('python -m pip install --no-cache-dir "${core_requirement}"') == 2
+    assert workflow.count("python scripts/ci/verify_public_core.py") == 2
+    assert "home-assistant-published-core:" in workflow
+    assert "home-assistant-framework-published-core:" in workflow
+    assert "tests/integrations/home_assistant \\" in workflow
+    assert "--ignore=tests/integrations/home_assistant/framework" in workflow
+    assert "python -m pytest tests/integrations/home_assistant/framework" in workflow
 
 
 def test_core_and_integration_tag_namespaces_are_explicit() -> None:
