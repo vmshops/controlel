@@ -68,7 +68,7 @@ from .water_safety_sirens import (
 
 LOGGER = logging.getLogger(__name__)
 
-HUB_MENU_OPTIONS = ("heating", "water_safety", "notifications_hub", "general_hub", "diagnostics_advanced")
+HUB_MENU_OPTIONS = ("general_hub", "heating", "water_safety")
 GENERAL_MENU_OPTIONS = ("back_to_hub",)
 HEATING_SECTION_MENU_OPTIONS = (
     "heating_status",
@@ -795,10 +795,6 @@ class ControlelOptionsFlow(OptionsFlow):
             description_placeholders={"section_detail": water_safety_section_detail(view, section)},
         )
 
-    async def async_step_notifications_hub(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        del user_input
-        return self.async_show_menu(step_id="notifications_hub", menu_options=["back_to_hub"])
-
     async def async_step_general_hub(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         del user_input
         return self.async_show_menu(
@@ -808,10 +804,6 @@ class ControlelOptionsFlow(OptionsFlow):
                 "general_summary": _general_summary(self.config_entry.data),
             },
         )
-
-    async def async_step_diagnostics_advanced(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        del user_input
-        return self.async_show_menu(step_id="diagnostics_advanced", menu_options=["back_to_hub"])
 
     async def _authority_kind(self) -> str:
         legacy = bool(

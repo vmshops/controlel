@@ -551,7 +551,8 @@ async def test_configure_opens_hub_with_module_menu(hass) -> None:
     entry = await _empty_entry(hass)
     hub = await _open_hub(hass, entry)
     assert hub["description_placeholders"]["hub_explanation"] == cf.HUB_EXPLANATION
-    assert list(hub["menu_options"]) == list(cf.HUB_MENU_OPTIONS)
+    assert list(hub["menu_options"]) == ["general_hub", "heating", "water_safety"]
+    assert all("wizard" not in option for option in hub["menu_options"])
 
 
 @pytest.mark.asyncio
@@ -1844,18 +1845,6 @@ async def test_water_menu_has_no_route_to_frozen_wizard(hass) -> None:
 
 
 @pytest.mark.asyncio
-async def test_hub_back_navigation_from_remaining_placeholders(hass) -> None:
-    entry = await _empty_entry(hass)
-    for step_id in ("notifications_hub", "diagnostics_advanced"):
-        hub = await _open_hub(hass, entry)
-        submenu = await _choose(hass, hub, step_id)
-        assert submenu["step_id"] == step_id
-        assert submenu["menu_options"] == ["back_to_hub"]
-        hub_again = await _choose(hass, submenu, "back_to_hub")
-        assert hub_again["step_id"] == "init"
-
-
-@pytest.mark.asyncio
 async def test_general_reopens_after_reload_without_changing_heating_or_water(hass) -> None:
     entry = await _empty_entry(hass, title="General independence")
     water = await _activate_new_water(hass, entry)
@@ -1881,6 +1870,118 @@ async def test_general_reopens_after_reload_without_changing_heating_or_water(ha
     assert entry.options == before_options
     assert entry.runtime_data.host is not None
     assert entry.runtime_data.water_safety_host is not None
+
+
+@pytest.mark.asyncio
+async def test_complete_native_configure_baseline_from_fresh_entry_to_independent_dual_module_restart(hass) -> None:
+    entry = await _empty_entry(hass, title="Native Configure baseline")
+    assert entry.data == {}
+    assert entry.options == {}
+    assert entry.runtime_data.host is None
+    assert entry.runtime_data.water_safety_host is None
+
+    hub = await _open_hub(hass, entry)
+    assert list(hub["menu_options"]) == ["general_hub", "heating", "water_safety"]
+    general = await _choose(hass, hub, "general_hub")
+    assert "Heating is not active" in general["description_placeholders"]["general_summary"]
+    assert "Water Safety is not active" in general["description_placeholders"]["general_summary"]
+    hub = await _choose(hass, general, "back_to_hub")
+    hass.config_entries.options.async_abort(hub["flow_id"])
+
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    assert entry.runtime_data.host is None
+    assert entry.runtime_data.water_safety_host is None
+    assert list((await _open_hub(hass, entry))["menu_options"]) == list(cf.HUB_MENU_OPTIONS)
+
+    sensor_id, source_id = _register_bindings(hass, platform="native-baseline")
+    heating_menu = await _start_greenfield_draft(hass, entry, sensor_id, source_id)
+    backend = await async_get_setup_backend(hass, entry)
+    heating_drafts = await backend.configuration_v3.list_drafts()
+    assert len(heating_drafts) == 1
+    assert heating_drafts[0].revision == 1
+    assert active_reference_for_module(entry.data, "heating") is None
+    assert active_reference_for_module(entry.data, "water_safety") is None
+
+    heating_activation = await _prepare_activation(hass, heating_menu)
+    completed = await hass.config_entries.options.async_configure(heating_activation["flow_id"], {})
+    assert completed["type"] is data_entry_flow.FlowResultType.CREATE_ENTRY
+    await hass.async_block_till_done()
+    heating = active_reference_for_module(entry.data, "heating")
+    assert heating is not None
+    assert active_reference_for_module(entry.data, "water_safety") is None
+
+    hass.data.pop(f"{DOMAIN}_setup_backend", None)
+    hass.data.pop(f"{DOMAIN}_setup_services", None)
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    assert entry.runtime_data.loaded_configuration.canonical_revision_id == heating.canonical_revision_id
+    assert entry.runtime_data.host is not None
+    assert entry.runtime_data.water_safety_host is None
+
+    utility, _garage, moisture, _outside, _unrelated = _register_water_candidates(hass)
+    (phone,) = _register_notify_targets(hass, "native_baseline_phone")
+    hass.states.async_set(moisture, "off")
+    water_menu = await _open_water_menu(hass, entry)
+    area = await _choose(hass, water_menu, "water_safety_area_sensor")
+    water_menu = await hass.config_entries.options.async_configure(
+        area["flow_id"],
+        {
+            cf.WATER_AREA: utility.id,
+            cf.WATER_MOISTURE_SENSOR: moisture,
+            cf.WATER_SHOW_ALL_COMPATIBLE: False,
+        },
+    )
+    notifications = await _choose(hass, water_menu, "water_safety_notifications")
+    water_menu = await hass.config_entries.options.async_configure(
+        notifications["flow_id"],
+        {
+            cf.WATER_NOTIFICATION_TARGETS: [phone],
+            cf.WATER_TEST_NOTIFICATION: False,
+        },
+    )
+    assert len(await _water_drafts(hass, entry)) == 1
+    assert active_reference_for_module(entry.data, "heating") == heating
+    assert active_reference_for_module(entry.data, "water_safety") is None
+
+    completed = await _activate_water_draft(hass, water_menu)
+    assert completed["type"] is data_entry_flow.FlowResultType.CREATE_ENTRY
+    await hass.async_block_till_done()
+    water = active_reference_for_module(entry.data, "water_safety")
+    assert water is not None
+    assert active_reference_for_module(entry.data, "heating") == heating
+    assert entry.runtime_data.host is not None
+    assert entry.runtime_data.water_safety_host is not None
+
+    edit = await _choose(hass, await _open_heating_menu(hass, entry), "edit_active")
+    zone = await _choose(hass, edit, "zone")
+    values = _defaults(zone)
+    values[cf.TARGET_TEMPERATURE] = 23.0
+    edited_menu = await hass.config_entries.options.async_configure(zone["flow_id"], values)
+    assert active_reference_for_module(entry.data, "heating") == heating
+    assert active_reference_for_module(entry.data, "water_safety") == water
+
+    heating_activation = await _prepare_activation(hass, edited_menu)
+    completed = await hass.config_entries.options.async_configure(heating_activation["flow_id"], {})
+    assert completed["type"] is data_entry_flow.FlowResultType.CREATE_ENTRY
+    await hass.async_block_till_done()
+    updated_heating = active_reference_for_module(entry.data, "heating")
+    assert updated_heating is not None
+    assert updated_heating.generation == heating.generation + 1
+    assert active_reference_for_module(entry.data, "water_safety") == water
+
+    hass.data.pop(f"{DOMAIN}_setup_backend", None)
+    hass.data.pop(f"{DOMAIN}_setup_services", None)
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.runtime_data.loaded_configuration.canonical_revision_id == updated_heating.canonical_revision_id
+    assert entry.runtime_data.loaded_water_safety_configuration.canonical_revision_id == water.canonical_revision_id
+    assert entry.runtime_data.config.target_temperature == Temperature(23.0)
+    assert entry.runtime_data.host is not None
+    assert entry.runtime_data.water_safety_host is not None
+
+    general = await _choose(hass, await _open_hub(hass, entry), "general_hub")
+    summary = general["description_placeholders"]["general_summary"]
+    assert updated_heating.canonical_revision_id in summary
+    assert water.canonical_revision_id in summary
 
 
 @pytest.mark.asyncio

@@ -41,11 +41,9 @@
         "title": "Configure Controlel",
         "description": "{hub_explanation}",
         "menu_options": {
-          "heating": "Heating",
-          "water_safety": "Water Safety",
-          "notifications_hub": "Notifications",
           "general_hub": "General",
-          "diagnostics_advanced": "Diagnostics / Advanced"
+          "heating": "Heating",
+          "water_safety": "Water Safety"
         }
       },
       "heating": {
@@ -140,23 +138,9 @@
         "title": "Water Safety — Activate configuration",
         "description": "Activate canonical Water Safety revision {revision_id}? This changes active authority and reloads Controlel. The saved draft is removed only after activation succeeds."
       },
-      "notifications_hub": {
-        "title": "Notifications",
-        "description": "Platform-wide notification delivery is not yet available in native Home Assistant Configure. Heating notification preferences are edited in the Heating module.",
-        "menu_options": {
-          "back_to_hub": "Back to Controlel Configure"
-        }
-      },
       "general_hub": {
         "title": "General — Shared settings",
         "description": "{general_summary} This page is intentionally small: there are no shared values to save, edit, or clear, and General is never required before configuring a module.",
-        "menu_options": {
-          "back_to_hub": "Back to Controlel Configure"
-        }
-      },
-      "diagnostics_advanced": {
-        "title": "Diagnostics / Advanced",
-        "description": "Platform-wide diagnostics and advanced settings are not yet available in native Home Assistant Configure. Heating diagnostic preferences are edited in the Heating module.",
         "menu_options": {
           "back_to_hub": "Back to Controlel Configure"
         }
