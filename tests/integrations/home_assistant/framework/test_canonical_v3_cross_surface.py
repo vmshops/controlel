@@ -42,6 +42,10 @@ NOW = __import__("datetime").datetime(2026, 8, 28, 12, 0, tzinfo=__import__("dat
 def _defaults(result) -> dict[str, object]:
     values: dict[str, object] = {}
     for marker in result["data_schema"].schema:
+        suggested = marker.description.get("suggested_value") if marker.description else None
+        if suggested is not None:
+            values[marker.schema] = suggested
+            continue
         if marker.default is None:
             continue
         try:
@@ -96,40 +100,17 @@ async def _open_heating_menu(hass, entry):
     return await _choose(hass, hub, "heating")
 
 
-async def _through_groups(hass, result, *, target: float | None = None, turn_on_diff: float | None = None):
-    assert result["step_id"] == "zone"
-    values = _defaults(result)
-    if target is not None:
-        values[cf.TARGET_TEMPERATURE] = target
-    if turn_on_diff is not None:
-        values[cf.TURN_ON_DIFFERENTIAL] = turn_on_diff
-    result = await hass.config_entries.options.async_configure(result["flow_id"], values)
-
-    assert result["step_id"] == "sensor"
-    result = await hass.config_entries.options.async_configure(result["flow_id"], _defaults(result))
-
-    for step_id in ("heat_source", "heat_delivery", "safety_timing", "diagnostics", "notifications"):
-        assert result["step_id"] == step_id
-        result = await hass.config_entries.options.async_configure(result["flow_id"], _defaults(result))
-    assert result["step_id"] == "save_draft"
+async def _save_draft(hass, result):
+    del hass
+    assert result["type"] is data_entry_flow.FlowResultType.MENU
+    assert result["step_id"] == "heating"
     return result
 
 
-async def _save_draft(hass, result):
-    saved = await hass.config_entries.options.async_configure(result["flow_id"], {})
-    assert saved["type"] is data_entry_flow.FlowResultType.MENU
-    assert saved["step_id"] == "draft_saved"
-    return saved
-
-
 async def _prepare_activation(hass, saved):
-    validate = await _choose(hass, saved, "validate")
-    assert validate["step_id"] == "validate"
-    validated = await hass.config_entries.options.async_configure(validate["flow_id"], {})
-    assert validated["step_id"] == "validation_result"
-    canonicalize = await hass.config_entries.options.async_configure(validated["flow_id"], {})
-    assert canonicalize["step_id"] == "canonicalize"
-    activate = await hass.config_entries.options.async_configure(canonicalize["flow_id"], {})
+    review = await _choose(hass, saved, "heating_review")
+    assert review["step_id"] == "heating_review"
+    activate = await hass.config_entries.options.async_configure(review["flow_id"], {})
     assert activate["step_id"] == "activate"
     return activate
 
@@ -286,12 +267,15 @@ async def _configure_edit_target(hass, entry, *, expected_target: float, new_tar
     initial = await _open_heating_menu(hass, entry)
     assert "edit_active" in initial["menu_options"]
     edit = await _choose(hass, initial, "edit_active")
-    assert edit["step_id"] == "zone"
-    zone_defaults = _defaults(edit)
+    assert edit["step_id"] == "heating"
+    zone = await _choose(hass, edit, "zone")
+    zone_defaults = _defaults(zone)
     assert zone_defaults[cf.ZONE_NAME] == "Living room"
     assert zone_defaults[cf.TARGET_TEMPERATURE] == expected_target
+    zone_defaults[cf.TARGET_TEMPERATURE] = new_target
+    edited = await hass.config_entries.options.async_configure(zone["flow_id"], zone_defaults)
 
-    saved = await _save_draft(hass, await _through_groups(hass, edit, target=new_target))
+    saved = await _save_draft(hass, edited)
     activate = await _prepare_activation(hass, saved)
     await _activate_configure_flow(hass, activate)
 
@@ -393,7 +377,7 @@ async def test_wizard_configure_heating_cross_surface_lifecycle_preserves_author
 
     configure_read = await _open_heating_menu(hass, entry)
     configure_edit = await _choose(hass, configure_read, "edit_active")
-    configure_zone = _defaults(configure_edit)
+    configure_zone = _defaults(await _choose(hass, configure_edit, "zone"))
     assert configure_zone[cf.TARGET_TEMPERATURE] == 22.0
     assert configure_zone[cf.TURN_ON_DIFFERENTIAL] == 0.5
     hass.config_entries.options.async_abort(configure_edit["flow_id"])
