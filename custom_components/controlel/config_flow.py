@@ -69,6 +69,7 @@ from .water_safety_sirens import (
 LOGGER = logging.getLogger(__name__)
 
 HUB_MENU_OPTIONS = ("heating", "water_safety", "notifications_hub", "general_hub", "diagnostics_advanced")
+GENERAL_MENU_OPTIONS = ("back_to_hub",)
 HEATING_SECTION_MENU_OPTIONS = (
     "heating_status",
     "zone",
@@ -96,6 +97,10 @@ HUB_EXPLANATION = (
     "You can leave any module without completing its configuration."
 )
 CREATE_EXPLANATION = "Create the Controlel integration, then configure modules through native Home Assistant Configure."
+GENERAL_EXPLANATION = (
+    "No shared General settings are currently required. Heating and Water Safety remain independently configurable. "
+    "Opening General never changes module configuration or active authority."
+)
 
 ZONE_NAME = "zone_display_name"
 ZONE_AREA = "zone_area"
@@ -796,7 +801,13 @@ class ControlelOptionsFlow(OptionsFlow):
 
     async def async_step_general_hub(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         del user_input
-        return self.async_show_menu(step_id="general_hub", menu_options=["back_to_hub"])
+        return self.async_show_menu(
+            step_id="general_hub",
+            menu_options=list(GENERAL_MENU_OPTIONS),
+            description_placeholders={
+                "general_summary": _general_summary(self.config_entry.data),
+            },
+        )
 
     async def async_step_diagnostics_advanced(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         del user_input
@@ -1255,6 +1266,18 @@ def _heating_menu_summary(
     if drafts:
         return f"Heating is not active. {len(drafts)} durable inactive draft(s) can be resumed or abandoned."
     return "Heating is not configured. Start a durable inactive Heating draft when you are ready."
+
+
+def _general_summary(entry_data: Mapping[str, Any]) -> str:
+    heating = active_reference_for_module(entry_data, HeatingSetupAdapter.module_key)
+    water = active_reference_for_module(entry_data, WATER_SAFETY_MODULE_KEY)
+
+    def module_status(active: Any | None) -> str:
+        if active is None:
+            return "not active"
+        return f"active revision {active.canonical_revision_id}"
+
+    return f"{GENERAL_EXPLANATION} Heating is {module_status(heating)}. Water Safety is {module_status(water)}."
 
 
 def _now() -> datetime:

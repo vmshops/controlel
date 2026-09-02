@@ -148,8 +148,8 @@
         }
       },
       "general_hub": {
-        "title": "General",
-        "description": "General Controlel settings are not yet available in native Home Assistant Configure.",
+        "title": "General — Shared settings",
+        "description": "{general_summary} This page is intentionally small: there are no shared values to save, edit, or clear, and General is never required before configuring a module.",
         "menu_options": {
           "back_to_hub": "Back to Controlel Configure"
         }
