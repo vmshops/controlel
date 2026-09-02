@@ -50,16 +50,32 @@
       },
       "heating": {
         "title": "Heating",
-        "description": "{configure_explanation} Choose Open Setup Wizard below to launch the guided Wizard.",
+        "description": "{heating_summary}",
         "menu_options": {
-          "open_wizard": "Open Setup Wizard",
-          "start_greenfield": "Start manual canonical v3 configuration",
-          "edit_active": "Edit active canonical v3 configuration",
+          "heating_status": "Status",
+          "start_greenfield": "Start Heating configuration",
+          "edit_active": "Edit active Heating configuration",
           "convert_v2": "Convert active canonical v2 configuration",
           "convert_legacy": "Convert legacy configuration to v3",
-          "resume_draft": "Resume a durable draft",
-          "abandon_draft": "Abandon a durable draft",
+          "resume_draft": "Resume Heating draft",
+          "abandon_draft": "Abandon Heating draft",
+          "zone": "Zone & demand",
+          "sensor": "Temperature sensor",
+          "heat_source": "Heat source commands",
+          "heat_delivery": "Heat delivery",
+          "safety_timing": "Safety & timing",
+          "notifications": "Notifications",
+          "diagnostics": "Diagnostics",
+          "heating_review": "Review & activate",
+          "abandon_current": "Abandon current draft",
           "back_to_hub": "Back to Controlel Configure"
+        }
+      },
+      "heating_status": {
+        "title": "Heating — Status",
+        "description": "{heating_status_summary}",
+        "menu_options": {
+          "back_to_heating": "Back to Heating"
         }
       },
       "water_safety": {
@@ -146,8 +162,8 @@
         }
       },
       "start_greenfield": {
-        "title": "Start canonical v3 configuration",
-        "description": "Choose the required Home Assistant bindings. This creates a durable inactive draft; it does not activate heating control.",
+        "title": "Start Heating configuration",
+        "description": "Choose the minimum zone, temperature-sensor and heat-source command bindings needed to create a durable inactive Heating draft. Optional Heating sections can be configured later. Nothing is activated here.",
         "data": {
           "zone_display_name": "Zone name",
           "zone_area": "Area",
@@ -171,13 +187,14 @@
       "resume_draft": {"title": "Resume durable draft", "data": {"draft_id": "Draft"}},
       "abandon_draft": {"title": "Abandon durable draft", "description": "This deletes only editable draft state.", "data": {"draft_id": "Draft"}},
       "abandon_current": {"title": "Abandon this draft", "description": "Delete this durable draft without changing canonical or active authority?"},
-      "zone": {"title": "Zone", "data": {"zone_display_name": "Zone name", "zone_area": "Area", "zone_floor": "Floor", "target_temperature_celsius": "Target temperature", "heating_turn_on_differential_celsius": "Heating turn-on differential", "heating_turn_off_differential_celsius": "Heating turn-off differential", "heat_demand_confirmation_seconds": "Heat-demand confirmation time"}},
-      "sensor": {"title": "Sensor", "data": {"primary_sensor_display_name": "Sensor name", "primary_temperature_entity_id": "Temperature sensor", "primary_measurement_max_age_seconds": "Maximum measurement age"}},
-      "heat_source": {"title": "Heat Source", "description": "Commands are requests for heat-source permission; they do not prove physical burner operation.", "data": {"heat_source_display_name": "Heat source name", "heat_source_entity_id": "Heat source entity", "heat_source_command_mode": "Command mode", "enable_service_domain": "Enable service domain", "enable_service_name": "Enable service name", "enable_target_entity_id": "Enable target entity", "disable_service_domain": "Disable service domain", "disable_service_name": "Disable service name", "disable_target_entity_id": "Disable target entity", "reported_source_state_entity_id": "Reported actuator-state entity"}},
-      "heat_delivery": {"title": "Heat Delivery", "data": {"heat_delivery_mode": "Delivery mode", "heat_delivery_actuator_entity_id": "Actuator climate entity", "heat_delivery_ownership": "Actuator ownership", "heat_delivery_assist_policy": "Assist policy", "heat_delivery_assist_target_celsius": "Assist target temperature"}},
-      "safety_timing": {"title": "Safety / Timing", "data": {"maximum_future_skew_seconds": "Future clock tolerance", "indeterminate_grace_period_seconds": "Sensor failure grace period", "indeterminate_timeout_action": "Timeout action", "minimum_heating_on_seconds": "Minimum heating-on time", "minimum_heating_off_seconds": "Minimum heating-off time"}},
-      "diagnostics": {"title": "Diagnostics", "data": {"diagnostic_steady_profile": "Steady diagnostic profile", "debug_configured_duration_seconds": "Debug duration"}},
-      "notifications": {"title": "Notifications", "description": "Recipient IDs remain stable and are managed by Controlel; edit only delivery preferences here.", "data": {"notifications_enabled": "Enable notifications", "notification_recipients": "Recipients", "notification_maximum_per_window": "Maximum per window", "notification_rate_window_seconds": "Rate window", "critical_notification_maximum_per_window": "Critical maximum per window", "critical_notification_rate_window_seconds": "Critical rate window", "notification_history_capacity": "History capacity"}},
+      "zone": {"title": "Heating — Zone & demand", "description": "Saving updates only this section of the inactive Heating draft and returns to Heating. Area and floor are optional.", "data": {"zone_display_name": "Zone name", "zone_area": "Area (optional)", "zone_floor": "Floor (optional)", "target_temperature_celsius": "Target temperature (°C)", "heating_turn_on_differential_celsius": "Heating turn-on differential (°C)", "heating_turn_off_differential_celsius": "Heating turn-off differential (°C)", "heat_demand_confirmation_seconds": "Heat-demand confirmation time (seconds)"}},
+      "sensor": {"title": "Heating — Temperature sensor", "description": "Saving updates only this section of the inactive Heating draft. A previously configured entity remains shown if it is currently missing or unavailable; it is never silently removed.", "data": {"primary_sensor_display_name": "Sensor name", "primary_temperature_entity_id": "Temperature sensor", "primary_measurement_max_age_seconds": "Maximum measurement age (seconds)"}},
+      "heat_source": {"title": "Heating — Heat source commands", "description": "Commands request heat-source permission; they do not prove physical burner operation. Saving updates only this draft section. Previously configured missing or unavailable entities remain visible and are never silently removed.", "data": {"heat_source_display_name": "Heat source name", "heat_source_entity_id": "Heat source entity (optional)", "heat_source_command_mode": "Command mode", "enable_service_domain": "Enable service domain", "enable_service_name": "Enable service name", "enable_target_entity_id": "Enable target entity", "disable_service_domain": "Disable service domain", "disable_service_name": "Disable service name", "disable_target_entity_id": "Disable target entity", "reported_source_state_entity_id": "Reported actuator-state entity (optional)"}},
+      "heat_delivery": {"title": "Heating — Heat delivery", "description": "Heat delivery is optional. Keep Unmanaged when Controlel should not command a room actuator. Clearing the actuator does not change other Heating sections.", "data": {"heat_delivery_mode": "Delivery mode", "heat_delivery_actuator_entity_id": "Actuator climate entity (optional)", "heat_delivery_ownership": "Actuator ownership", "heat_delivery_assist_policy": "Assist policy", "heat_delivery_assist_target_celsius": "Assist target temperature (°C)"}},
+      "safety_timing": {"title": "Heating — Safety & timing", "description": "These values are seconds unless stated otherwise. Saving changes only the inactive Heating draft; active protection remains unchanged until activation.", "data": {"maximum_future_skew_seconds": "Future clock tolerance (seconds)", "indeterminate_grace_period_seconds": "Sensor failure grace period (seconds)", "indeterminate_timeout_action": "Timeout action", "minimum_heating_on_seconds": "Minimum heating-on time (seconds)", "minimum_heating_off_seconds": "Minimum heating-off time (seconds)"}},
+      "diagnostics": {"title": "Heating — Diagnostics", "description": "Heating diagnostic preferences are optional and saved independently in the inactive draft.", "data": {"diagnostic_steady_profile": "Steady diagnostic profile", "debug_configured_duration_seconds": "Debug duration (seconds)"}},
+      "notifications": {"title": "Heating — Notifications", "description": "Heating notifications are optional. Recipient IDs remain stable and are managed by Controlel; clearing recipients does not modify other Heating settings.", "data": {"notifications_enabled": "Enable notifications", "notification_recipients": "Recipients", "notification_maximum_per_window": "Maximum per window", "notification_rate_window_seconds": "Rate window (seconds)", "critical_notification_maximum_per_window": "Critical maximum per window", "critical_notification_rate_window_seconds": "Critical rate window (seconds)", "notification_history_capacity": "History capacity"}},
+      "heating_review": {"title": "Heating — Review & activate", "description": "{heating_review_summary} Continue only when activation-ready. Continuing creates an immutable candidate; activation remains a separate explicit confirmation."},
       "save_draft": {"title": "Save draft", "description": "Save these edits as a new durable draft revision? Saving does not validate, canonicalize, or activate."},
       "draft_saved": {
         "title": "Draft saved",
@@ -201,6 +218,7 @@
       "invalid_water_shutoff_valve_targets": "One or more shutoff valve targets are incompatible or no longer registered. Select water-class Home Assistant valve entities that support closing and try again.",
       "water_safety_validation_failed": "The Water Safety draft is not activation-ready. Complete the required sections and review it again.",
       "water_safety_activation_failed": "Water Safety could not be activated safely. The saved draft and previous active configuration were retained.",
+      "heating_activation_failed": "Heating could not be activated safely. The saved draft and all previous active module configurations were retained.",
       "validation_failed": "The draft is not activation-ready. Correct the reported issues and validate again."
     },
     "abort": {

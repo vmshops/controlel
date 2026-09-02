@@ -66,6 +66,10 @@ class CapturingHost(component.HomeAssistantControlelHost):
 def _defaults(result) -> dict[str, object]:
     values: dict[str, object] = {}
     for marker in result["data_schema"].schema:
+        suggested = marker.description.get("suggested_value") if marker.description else None
+        if suggested is not None:
+            values[marker.schema] = suggested
+            continue
         if marker.default is None:
             continue
         try:
@@ -108,16 +112,10 @@ async def _open_heating_menu(hass, entry):
 
 
 async def _save_and_prepare_activation(hass, result):
-    steps = ("zone", "sensor", "heat_source", "heat_delivery", "safety_timing", "diagnostics", "notifications")
-    for step_id in steps[steps.index(result["step_id"]) :]:
-        assert result["step_id"] == step_id
-        result = await hass.config_entries.options.async_configure(result["flow_id"], _defaults(result))
-    assert result["step_id"] == "save_draft"
-    saved = await hass.config_entries.options.async_configure(result["flow_id"], {})
-    validate = await _choose(hass, saved, "validate")
-    validated = await hass.config_entries.options.async_configure(validate["flow_id"], {})
-    canonicalize = await hass.config_entries.options.async_configure(validated["flow_id"], {})
-    return await hass.config_entries.options.async_configure(canonicalize["flow_id"], {})
+    assert result["step_id"] == "heating"
+    review = await _choose(hass, result, "heating_review")
+    assert review["step_id"] == "heating_review"
+    return await hass.config_entries.options.async_configure(review["flow_id"], {})
 
 
 @pytest.mark.asyncio
@@ -226,9 +224,11 @@ async def test_explicit_canonical_activations_reload_once_and_leave_one_runtime(
 
         initial = await _open_heating_menu(hass, entry)
         edit = await _choose(hass, initial, "edit_active")
-        zone = _defaults(edit)
+        assert edit["step_id"] == "heating"
+        zone_form = await _choose(hass, edit, "zone")
+        zone = _defaults(zone_form)
         zone[cf.TARGET_TEMPERATURE] = 21.5
-        edit = await hass.config_entries.options.async_configure(edit["flow_id"], zone)
+        edit = await hass.config_entries.options.async_configure(zone_form["flow_id"], zone)
         activate = await _save_and_prepare_activation(hass, edit)
         await hass.config_entries.options.async_configure(activate["flow_id"], {})
         await wait_until(lambda: len(ReloadRuntime.instances) == 3)
@@ -286,10 +286,11 @@ async def test_invalid_canonical_draft_edit_does_not_reload_runtime(
         initial = await _open_heating_menu(hass, entry)
         convert = await _choose(hass, initial, "convert_legacy")
         result = await hass.config_entries.options.async_configure(convert["flow_id"], {})
-        result = await hass.config_entries.options.async_configure(result["flow_id"], _defaults(result))
-        sensor = _defaults(result)
+        assert result["step_id"] == "heating"
+        sensor_form = await _choose(hass, result, "sensor")
+        sensor = _defaults(sensor_form)
         sensor[cf.TEMPERATURE_ENTITY] = "sensor.not_temperature"
-        result = await hass.config_entries.options.async_configure(result["flow_id"], sensor)
+        result = await hass.config_entries.options.async_configure(sensor_form["flow_id"], sensor)
 
         assert result["step_id"] == "sensor"
         assert result["errors"] == {"base": "invalid_configuration"}

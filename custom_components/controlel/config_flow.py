@@ -68,8 +68,20 @@ from .water_safety_sirens import (
 
 LOGGER = logging.getLogger(__name__)
 
-WIZARD_URL = f"/{DOMAIN}"
 HUB_MENU_OPTIONS = ("heating", "water_safety", "notifications_hub", "general_hub", "diagnostics_advanced")
+HEATING_SECTION_MENU_OPTIONS = (
+    "heating_status",
+    "zone",
+    "sensor",
+    "heat_source",
+    "heat_delivery",
+    "safety_timing",
+    "notifications",
+    "diagnostics",
+    "heating_review",
+    "abandon_current",
+    "back_to_hub",
+)
 WATER_SAFETY_MENU_OPTIONS = (
     "water_safety_status",
     "water_safety_area_sensor",
@@ -79,14 +91,11 @@ WATER_SAFETY_MENU_OPTIONS = (
     "water_safety_validation",
     "back_to_hub",
 )
-TOP_EXPLANATION = (
-    "You can configure Controlel here manually or use the simpler guided Setup Wizard in the Controlel panel. "
-    "Both edit the same configuration."
-)
 HUB_EXPLANATION = (
     "Controlel is a multi-module platform. Choose a module below. "
     "You can leave any module without completing its configuration."
 )
+CREATE_EXPLANATION = "Create the Controlel integration, then configure modules through native Home Assistant Configure."
 
 ZONE_NAME = "zone_display_name"
 ZONE_AREA = "zone_area"
@@ -223,7 +232,7 @@ class ControlelConfigFlow(ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema({}),
-            description_placeholders={"configure_explanation": TOP_EXPLANATION},
+            description_placeholders={"configure_explanation": CREATE_EXPLANATION},
         )
 
     async def async_on_create_entry(self, result: ConfigFlowResult) -> ConfigFlowResult:
@@ -268,17 +277,44 @@ class ControlelOptionsFlow(OptionsFlow):
         del user_input
         drafts = await (await self._service()).list_drafts()
         authority = await self._authority_kind()
-        menu = ["open_wizard"]
-        menu.append(
-            {"v3": "edit_active", "v2": "convert_v2", "legacy": "convert_legacy"}.get(authority, "start_greenfield")
-        )
-        if drafts:
-            menu.extend(("resume_draft", "abandon_draft"))
-        menu.append("back_to_hub")
+        if self._draft is not None:
+            menu = list(HEATING_SECTION_MENU_OPTIONS)
+        else:
+            menu = ["heating_status"]
+            menu.append(
+                {"v3": "edit_active", "v2": "convert_v2", "legacy": "convert_legacy"}.get(authority, "start_greenfield")
+            )
+            if drafts:
+                menu.extend(("resume_draft", "abandon_draft"))
+            menu.append("back_to_hub")
         return self.async_show_menu(
             step_id="heating",
             menu_options=menu,
-            description_placeholders={"configure_explanation": TOP_EXPLANATION},
+            description_placeholders={
+                "heating_summary": _heating_menu_summary(
+                    active=active_reference_for_module(self.config_entry.data, HeatingSetupAdapter.module_key),
+                    drafts=drafts,
+                    current=self._draft,
+                )
+            },
+        )
+
+    async def async_step_back_to_heating(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        return await self.async_step_heating(user_input)
+
+    async def async_step_heating_status(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        del user_input
+        drafts = await (await self._service()).list_drafts()
+        return self.async_show_menu(
+            step_id="heating_status",
+            menu_options=["back_to_heating"],
+            description_placeholders={
+                "heating_status_summary": _heating_menu_summary(
+                    active=active_reference_for_module(self.config_entry.data, HeatingSetupAdapter.module_key),
+                    drafts=drafts,
+                    current=self._draft,
+                )
+            },
         )
 
     async def async_step_water_safety(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
@@ -783,10 +819,6 @@ class ControlelOptionsFlow(OptionsFlow):
         revision = await backend.repository.get_canonical_revision(active.canonical_revision_id)
         return "v3" if isinstance(revision, CanonicalConfigurationRevisionV3) else "v2"
 
-    async def async_step_open_wizard(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        del user_input
-        return self.async_external_step(step_id="open_wizard", url=WIZARD_URL)
-
     async def async_step_start_greenfield(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         errors: dict[str, str] = {}
         if user_input is not None:
@@ -800,7 +832,7 @@ class ControlelOptionsFlow(OptionsFlow):
                     bindings=_greenfield_bindings(snapshot, user_input),
                 )
                 self._load_document()
-                return await self.async_step_zone()
+                return await self.async_step_heating()
             except (KeyError, SetupConflictError, SetupNotFoundError, TypeError, ValueError, ValidationError):
                 errors["base"] = "invalid_configuration"
         return self.async_show_form(
@@ -816,7 +848,7 @@ class ControlelOptionsFlow(OptionsFlow):
             draft_id=_id("ha-edit-draft"), created_at=_now(), expected_active_generation=active.generation
         )
         self._load_document()
-        return await self.async_step_zone()
+        return await self.async_step_heating()
 
     async def async_step_convert_v2(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         if user_input is None:
@@ -856,7 +888,7 @@ class ControlelOptionsFlow(OptionsFlow):
             return self.async_abort(reason="conversion_not_ready")
         self._draft = review.draft
         self._load_document()
-        return await self.async_step_zone()
+        return await self.async_step_heating()
 
     async def async_step_resume_draft(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         service = await self._service()
@@ -864,7 +896,7 @@ class ControlelOptionsFlow(OptionsFlow):
         if user_input is not None:
             self._draft = await service.reopen_draft(str(user_input["draft_id"]))
             self._load_document()
-            return await self.async_step_zone()
+            return await self.async_step_heating()
         return self.async_show_form(step_id="resume_draft", data_schema=_draft_schema(drafts))
 
     async def async_step_abandon_draft(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
@@ -913,7 +945,8 @@ class ControlelOptionsFlow(OptionsFlow):
                 policy["heating_turn_off_differential_celsius"] = user_input[TURN_OFF_DIFFERENTIAL]
                 policy["heat_demand_confirmation_seconds"] = user_input[DEMAND_CONFIRMATION]
                 ConfigurationScopesV3.model_validate(document)
-                return await self.async_step_sensor()
+                await self._persist_heating_document()
+                return await self.async_step_heating()
             except (KeyError, TypeError, ValueError, ValidationError):
                 return self.async_show_form(
                     step_id="zone", data_schema=_zone_schema(zone), errors={"base": "invalid_configuration"}
@@ -931,7 +964,8 @@ class ControlelOptionsFlow(OptionsFlow):
                 sensor_data["provider_reference"] = _reference_json(snapshot, user_input[TEMPERATURE_ENTITY])
                 demand["primary_measurement_max_age_seconds"] = user_input[MEASUREMENT_MAX_AGE]
                 ConfigurationScopesV3.model_validate(document)
-                return await self.async_step_heat_source()
+                await self._persist_heating_document()
+                return await self.async_step_heating()
             except (KeyError, TypeError, ValueError, ValidationError):
                 return self.async_show_form(
                     step_id="sensor",
@@ -953,7 +987,8 @@ class ControlelOptionsFlow(OptionsFlow):
                     snapshot, user_input.get(REPORTED_SOURCE_STATE)
                 )
                 ConfigurationScopesV3.model_validate(document)
-                return await self.async_step_heat_delivery()
+                await self._persist_heating_document()
+                return await self.async_step_heating()
             except (KeyError, TypeError, ValueError, ValidationError):
                 return self.async_show_form(
                     step_id="heat_source",
@@ -974,7 +1009,8 @@ class ControlelOptionsFlow(OptionsFlow):
                 delivery["assist_policy"] = user_input[DELIVERY_ASSIST_POLICY]
                 delivery["assist_target_celsius"] = user_input[DELIVERY_ASSIST_TARGET]
                 ConfigurationScopesV3.model_validate(document)
-                return await self.async_step_safety_timing()
+                await self._persist_heating_document()
+                return await self.async_step_heating()
             except (KeyError, TypeError, ValueError, ValidationError):
                 return self.async_show_form(
                     step_id="heat_delivery",
@@ -995,7 +1031,8 @@ class ControlelOptionsFlow(OptionsFlow):
                 protection["minimum_heating_on_seconds"] = user_input[MINIMUM_ON]
                 protection["minimum_heating_off_seconds"] = user_input[MINIMUM_OFF]
                 ConfigurationScopesV3.model_validate(document)
-                return await self.async_step_diagnostics()
+                await self._persist_heating_document()
+                return await self.async_step_heating()
             except (KeyError, TypeError, ValueError, ValidationError):
                 return self.async_show_form(
                     step_id="safety_timing",
@@ -1012,7 +1049,8 @@ class ControlelOptionsFlow(OptionsFlow):
                 diagnostics["steady_profile"] = user_input[DIAGNOSTIC_PROFILE]
                 diagnostics["debug_policy"]["configured_duration_seconds"] = user_input[DEBUG_DURATION]
                 ConfigurationScopesV3.model_validate(document)
-                return await self.async_step_notifications()
+                await self._persist_heating_document()
+                return await self.async_step_heating()
             except (KeyError, TypeError, ValueError, ValidationError):
                 return self.async_show_form(
                     step_id="diagnostics",
@@ -1036,7 +1074,8 @@ class ControlelOptionsFlow(OptionsFlow):
                 notifications["critical_rate_window_seconds"] = user_input[CRITICAL_NOTIFICATION_WINDOW]
                 notifications["history_capacity"] = int(user_input[NOTIFICATION_HISTORY])
                 ConfigurationScopesV3.model_validate(document)
-                return await self.async_step_save_draft()
+                await self._persist_heating_document()
+                return await self.async_step_heating()
             except (KeyError, TypeError, ValueError, ValidationError):
                 return self.async_show_form(
                     step_id="notifications",
@@ -1068,7 +1107,41 @@ class ControlelOptionsFlow(OptionsFlow):
 
     async def async_step_continue_editing(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         del user_input
-        return await self.async_step_zone()
+        return await self.async_step_heating()
+
+    async def _persist_heating_document(self) -> None:
+        draft = self._require_draft()
+        self._draft = await (await self._service()).update_draft(
+            draft.draft_id,
+            expected_revision=draft.revision,
+            updated_at=_now(),
+            configuration_scopes=ConfigurationScopesV3.model_validate(self._require_document()),
+        )
+        self._load_document()
+
+    async def async_step_heating_review(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        draft = self._require_draft()
+        self._validation = await (await self._service()).validate_draft(
+            draft.draft_id,
+            report_id=_id("ha-heating-validation"),
+            snapshot_id=_id("ha-heating-validation-snapshot"),
+            evaluated_at=_now(),
+        )
+        issues = ", ".join(self._validation.issue_codes) or "None"
+        if user_input is not None and self._validation.activation_ready:
+            return await self.async_step_canonicalize({})
+        return self.async_show_form(
+            step_id="heating_review",
+            data_schema=vol.Schema({}),
+            errors={} if self._validation.activation_ready else {"base": "validation_failed"},
+            description_placeholders={
+                "heating_review_summary": (
+                    f"Draft {draft.draft_id} revision {draft.revision}. "
+                    f"Activation ready: {'yes' if self._validation.activation_ready else 'no'}. "
+                    f"Validation issues: {issues}."
+                )
+            },
+        )
 
     async def async_step_validate(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         if user_input is None:
@@ -1135,16 +1208,53 @@ class ControlelOptionsFlow(OptionsFlow):
                 description_placeholders={"revision_id": self._candidate.revision_id},
             )
         draft = self._require_draft()
-        await async_activate_canonical_revision(
-            self.hass,
-            self.config_entry,
-            revision_id=self._candidate.revision_id,
-            semantic_configuration_fingerprint=self._candidate.semantic_configuration_fingerprint,
-            expected_active_revision_id=draft.base_active_revision_id,
-            expected_active_generation=draft.base_active_generation,
-            attempt_id=_id("ha-activation"),
-        )
+        try:
+            await async_activate_canonical_revision(
+                self.hass,
+                self.config_entry,
+                revision_id=self._candidate.revision_id,
+                semantic_configuration_fingerprint=self._candidate.semantic_configuration_fingerprint,
+                expected_active_revision_id=draft.base_active_revision_id,
+                expected_active_generation=draft.base_active_generation,
+                attempt_id=_id("ha-activation"),
+            )
+        except Exception:
+            LOGGER.exception("Heating canonical activation failed")
+            return self.async_show_form(
+                step_id="activate",
+                data_schema=vol.Schema({}),
+                errors={"base": "heating_activation_failed"},
+                description_placeholders={"revision_id": self._candidate.revision_id},
+            )
         return self.async_create_entry(title="", data={})
+
+
+def _heating_menu_summary(
+    *,
+    active: Any | None,
+    drafts: tuple[CanonicalConfigurationDraftV3, ...],
+    current: CanonicalConfigurationDraftV3 | None,
+) -> str:
+    if current is not None:
+        active_summary = (
+            "No active Heating configuration will be changed until explicit activation."
+            if active is None
+            else f"Active Heating revision {active.canonical_revision_id} remains unchanged until activation."
+        )
+        return (
+            f"Editing durable Heating draft {current.draft_id}, revision {current.revision}. "
+            f"Each section saves independently. {active_summary}"
+        )
+    if active is not None:
+        draft_summary = (
+            "No inactive Heating draft."
+            if not drafts
+            else f"{len(drafts)} inactive Heating draft(s) can be resumed or abandoned."
+        )
+        return f"Active Heating revision {active.canonical_revision_id}. {draft_summary}"
+    if drafts:
+        return f"Heating is not active. {len(drafts)} durable inactive draft(s) can be resumed or abandoned."
+    return "Heating is not configured. Start a durable inactive Heating draft when you are ready."
 
 
 def _now() -> datetime:
@@ -1186,7 +1296,9 @@ def _locator(reference: Mapping[str, Any] | None) -> str | None:
 
 
 def _optional_marker(name: str, value: str | None) -> vol.Marker:
-    return vol.Optional(name, default=value) if value else vol.Optional(name)
+    if value is None:
+        return vol.Optional(name)
+    return vol.Optional(name, description={"suggested_value": value})
 
 
 def _suggested_optional_marker(name: str, value: str | None) -> vol.Marker:
