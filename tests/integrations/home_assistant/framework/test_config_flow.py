@@ -555,6 +555,32 @@ async def test_configure_opens_hub_with_module_menu(hass) -> None:
 
 
 @pytest.mark.asyncio
+async def test_general_is_an_intentional_empty_state_that_never_writes_configuration(hass) -> None:
+    entry = await _empty_entry(hass)
+    before_data = dict(entry.data)
+    before_options = dict(entry.options)
+
+    general = await _choose(hass, await _open_hub(hass, entry), "general_hub")
+
+    assert general["type"] is data_entry_flow.FlowResultType.MENU
+    assert general["step_id"] == "general_hub"
+    assert list(general["menu_options"]) == list(cf.GENERAL_MENU_OPTIONS)
+    assert all(action not in general["menu_options"] for action in ("save", "edit", "clear", "open_wizard"))
+    summary = general["description_placeholders"]["general_summary"]
+    assert summary.startswith(cf.GENERAL_EXPLANATION)
+    assert "Heating is not active" in summary
+    assert "Water Safety is not active" in summary
+    assert entry.data == before_data
+    assert entry.options == before_options
+
+    hub = await _choose(hass, general, "back_to_hub")
+    reopened = await _choose(hass, hub, "general_hub")
+    assert reopened["description_placeholders"] == general["description_placeholders"]
+    assert entry.data == before_data
+    assert entry.options == before_options
+
+
+@pytest.mark.asyncio
 async def test_heating_route_reaches_existing_configuration_menu(hass) -> None:
     entry = await _empty_entry(hass)
     heating = await _open_heating_menu(hass, entry)
@@ -1818,15 +1844,43 @@ async def test_water_menu_has_no_route_to_frozen_wizard(hass) -> None:
 
 
 @pytest.mark.asyncio
-async def test_hub_back_navigation_from_placeholders(hass) -> None:
+async def test_hub_back_navigation_from_remaining_placeholders(hass) -> None:
     entry = await _empty_entry(hass)
-    for step_id in ("notifications_hub", "general_hub", "diagnostics_advanced"):
+    for step_id in ("notifications_hub", "diagnostics_advanced"):
         hub = await _open_hub(hass, entry)
         submenu = await _choose(hass, hub, step_id)
         assert submenu["step_id"] == step_id
         assert submenu["menu_options"] == ["back_to_hub"]
         hub_again = await _choose(hass, submenu, "back_to_hub")
         assert hub_again["step_id"] == "init"
+
+
+@pytest.mark.asyncio
+async def test_general_reopens_after_reload_without_changing_heating_or_water(hass) -> None:
+    entry = await _empty_entry(hass, title="General independence")
+    water = await _activate_new_water(hass, entry)
+    heating = await _activate_new_heating(hass, entry, platform="general-independence")
+    before_data = dict(entry.data)
+    before_options = dict(entry.options)
+
+    general = await _choose(hass, await _open_hub(hass, entry), "general_hub")
+    summary = general["description_placeholders"]["general_summary"]
+    assert f"Heating is active revision {heating.canonical_revision_id}" in summary
+    assert f"Water Safety is active revision {water.canonical_revision_id}" in summary
+    assert entry.data == before_data
+    assert entry.options == before_options
+
+    hass.config_entries.options.async_abort(general["flow_id"])
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    reopened = await _choose(hass, await _open_hub(hass, entry), "general_hub")
+
+    assert reopened["description_placeholders"]["general_summary"] == summary
+    assert active_reference_for_module(entry.data, "heating") == heating
+    assert active_reference_for_module(entry.data, "water_safety") == water
+    assert entry.data == before_data
+    assert entry.options == before_options
+    assert entry.runtime_data.host is not None
+    assert entry.runtime_data.water_safety_host is not None
 
 
 @pytest.mark.asyncio
