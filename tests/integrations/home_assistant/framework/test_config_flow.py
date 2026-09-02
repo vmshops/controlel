@@ -228,7 +228,7 @@ async def _through_groups(hass, result, *, target: float | None = None, measurem
 
 async def _start_greenfield_draft(hass, entry, sensor_id: str, source_id: str):
     heating = await _open_heating_menu(hass, entry)
-    assert heating["menu_options"][0] == "heating_status"
+    assert heating["menu_options"][0] == "start_greenfield"
     assert all("wizard" not in option for option in heating["menu_options"])
     start = await _choose(hass, heating, "start_greenfield")
     assert start["step_id"] == "start_greenfield"
@@ -362,7 +362,15 @@ async def test_active_v3_edit_changes_one_field_only_and_requires_explicit_activ
     )
 
     initial = await _open_heating_menu(hass, entry)
+    active_summary = initial["description_placeholders"]["heating_summary"]
+    assert "Heating: ACTIVE" in active_summary
+    assert "Draft: NO SAVED DRAFT" in active_summary
+    assert before.revision_id not in active_summary
     edit = await _choose(hass, initial, "edit_active")
+    edit_summary = edit["description_placeholders"]["heating_summary"]
+    assert "Heating: ACTIVE" in edit_summary
+    assert "SAVED DRAFT OPEN" in edit_summary
+    assert "currently active Heating configuration" in edit_summary
     saved = await _save_draft(hass, await _through_groups(hass, edit, target=23.5))
 
     assert entry.data[ACTIVE_REFERENCE_KEY] == before_reference
@@ -383,6 +391,7 @@ async def test_active_v3_edit_changes_one_field_only_and_requires_explicit_activ
     assert entry.runtime_data is not before_runtime
     assert entry.runtime_data.config.target_temperature == Temperature(23.5)
     assert set(entry.data) == {ACTIVE_REFERENCE_KEY}
+    assert await backend.configuration_v3.list_drafts() == ()
     assert service_calls == []
 
 
@@ -586,9 +595,95 @@ async def test_heating_route_reaches_existing_configuration_menu(hass) -> None:
     entry = await _empty_entry(hass)
     heating = await _open_heating_menu(hass, entry)
     assert "start_greenfield" in heating["menu_options"]
-    assert "heating_status" in heating["menu_options"]
+    assert "heating_status" not in heating["menu_options"]
     assert all("wizard" not in option for option in heating["menu_options"])
     assert "back_to_hub" in heating["menu_options"]
+    summary = heating["description_placeholders"]["heating_summary"]
+    assert "Heating: NOT ACTIVE" in summary
+    assert "Draft: NO SAVED DRAFT" in summary
+    assert "NOT READY" in summary
+    assert "REQUIRED / BASIC: Zone & demand; Temperature sensor; Heat source commands" in summary
+    assert "OPTIONAL: Heat delivery; Notifications" in summary
+    assert "ADVANCED: Safety & timing; Diagnostics" in summary
+
+
+@pytest.mark.asyncio
+async def test_minimum_basic_setup_is_ready_without_opening_optional_or_advanced_sections(hass) -> None:
+    sensor_id, source_id = _register_bindings(hass, platform="heating-minimum-ready")
+    entry = await _empty_entry(hass)
+
+    heating = await _start_greenfield_draft(hass, entry, sensor_id, source_id)
+
+    assert cf.HEATING_REQUIRED_BASIC_SECTIONS == ("zone", "sensor", "heat_source")
+    assert cf.HEATING_OPTIONAL_SECTIONS == ("heat_delivery", "notifications")
+    assert cf.HEATING_ADVANCED_SECTIONS == ("safety_timing", "diagnostics")
+    assert list(heating["menu_options"]) == list(cf.HEATING_SECTION_MENU_OPTIONS)
+    assert heating["menu_options"][0] == "heating_review"
+    assert "READY TO ACTIVATE" in heating["description_placeholders"]["heating_summary"]
+    backend = await async_get_setup_backend(hass, entry)
+    (draft,) = await backend.configuration_v3.list_drafts()
+    assert draft.revision == 1
+    assert draft.heating.heat_delivery[0].mode == "unmanaged"
+    assert draft.heating.heat_delivery[0].actuator_reference is None
+    assert draft.notifications.enabled is False
+    assert draft.notifications.recipients == ()
+    assert draft.diagnostics.steady_profile == "basic"
+
+    review = await _choose(hass, heating, "heating_review")
+    assert review["errors"] == {}
+    review_summary = review["description_placeholders"]["heating_review_summary"]
+    assert "READY TO ACTIVATE" in review_summary
+    assert "Optional and advanced sections may keep their safe defaults" in review_summary
+    assert draft.draft_id not in review_summary
+    assert str(draft.revision) not in review_summary
+
+    confirmation = await hass.config_entries.options.async_configure(review["flow_id"], {})
+    assert confirmation["step_id"] == "activate"
+    activation_summary = confirmation["description_placeholders"]["activation_summary"]
+    assert "READY TO ACTIVATE" in activation_summary
+    assert "Water Safety is unchanged" in activation_summary
+    assert draft.draft_id not in activation_summary
+
+
+@pytest.mark.asyncio
+async def test_missing_required_entities_name_actionable_sections_and_keep_draft_inactive(hass) -> None:
+    sensor_id, source_id = _register_bindings(hass, platform="heating-readiness-missing")
+    entry = await _empty_entry(hass)
+    heating = await _start_greenfield_draft(hass, entry, sensor_id, source_id)
+    backend = await async_get_setup_backend(hass, entry)
+    (draft,) = await backend.configuration_v3.list_drafts()
+    hass.config_entries.options.async_abort(heating["flow_id"])
+
+    registry = er.async_get(hass)
+    registry.async_remove(sensor_id)
+    registry.async_remove(source_id)
+    hass.states.async_remove(sensor_id)
+    hass.states.async_remove(source_id)
+
+    reopened = await _open_heating_menu(hass, entry)
+    summary = reopened["description_placeholders"]["heating_summary"]
+    assert "SAVED INACTIVE DRAFT" in summary
+    assert "NOT READY" in summary
+    assert "Temperature sensor: the saved entity no longer exists" in summary
+    assert "Heat source commands: the saved entity no longer exists" in summary
+    assert draft.draft_id not in summary
+    assert active_reference_for_module(entry.data, "heating") is None
+
+    resume = await _choose(hass, reopened, "resume_draft")
+    options = _field(resume, "draft_id").config["options"]
+    assert options[0]["value"] == draft.draft_id
+    assert draft.draft_id not in options[0]["label"]
+    assert "revision" not in options[0]["label"].lower()
+    resumed = await hass.config_entries.options.async_configure(resume["flow_id"], {"draft_id": draft.draft_id})
+    review = await _choose(hass, resumed, "heating_review")
+    assert review["errors"] == {"base": "heating_not_ready"}
+    review_summary = review["description_placeholders"]["heating_review_summary"]
+    assert "NOT READY TO ACTIVATE" in review_summary
+    assert "Temperature sensor" in review_summary
+    assert "Heat source commands" in review_summary
+    assert "Return to Heating" in review_summary
+    assert active_reference_for_module(entry.data, "heating") is None
+    assert (await backend.configuration_v3.list_drafts())[0] == draft
 
 
 @pytest.mark.asyncio
@@ -598,15 +693,12 @@ async def test_heating_section_router_saves_partial_draft_and_reopens_current_va
 
     heating = await _start_greenfield_draft(hass, entry, sensor_id, source_id)
     assert list(heating["menu_options"]) == list(cf.HEATING_SECTION_MENU_OPTIONS)
-    assert "inactive Heating draft" not in heating["description_placeholders"]["heating_summary"]
+    assert heating["menu_options"][0] == "heating_review"
+    assert "READY TO ACTIVATE" in heating["description_placeholders"]["heating_summary"]
     backend = await async_get_setup_backend(hass, entry)
     draft = (await backend.configuration_v3.list_drafts())[0]
     assert draft.revision == 1
     assert active_reference_for_module(entry.data, "heating") is None
-
-    status = await _choose(hass, heating, "heating_status")
-    assert status["menu_options"] == ["back_to_heating"]
-    heating = await _choose(hass, status, "back_to_heating")
 
     zone = await _choose(hass, heating, "zone")
     zone_values = _defaults(zone)
@@ -1792,12 +1884,18 @@ async def test_failed_native_heating_activation_preserves_heating_and_water_auth
     assert failed["type"] is data_entry_flow.FlowResultType.FORM
     assert failed["step_id"] == "activate"
     assert failed["errors"] == {"base": "heating_activation_failed"}
+    failure_summary = failed["description_placeholders"]["activation_summary"]
+    assert "ACTIVATION DID NOT COMPLETE" in failure_summary
+    assert "could not start the candidate Heating runtime during reload" in failure_summary
+    assert "saved draft and every previously active module configuration were retained" in failure_summary
     assert active_reference_for_module(entry.data, "heating") == heating
     assert active_reference_for_module(entry.data, "water_safety") == water
     assert entry.runtime_data is runtime_before
     assert entry.runtime_data.config.target_temperature == Temperature(21.0)
     assert entry.runtime_data.host is not None
     assert entry.runtime_data.water_safety_host is not None
+    backend = await async_get_setup_backend(hass, entry)
+    assert len(await backend.configuration_v3.list_drafts()) == 1
 
 
 @pytest.mark.asyncio
