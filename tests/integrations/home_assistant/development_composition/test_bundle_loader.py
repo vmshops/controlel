@@ -6,7 +6,7 @@ from homeassistant.loader import async_get_integration
 
 import controlel
 
-CORE_VERSION = "0.17.0"
+CORE_VERSION = "0.18.0"
 INTEGRATION_VERSION = "0.14.0"
 
 

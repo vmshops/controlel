@@ -38,7 +38,7 @@ def test_project_metadata_and_runtime_dependencies_match_release_contract() -> N
     project = load_pyproject()["project"]
 
     assert project["name"] == "controlel"
-    assert project["version"] == "0.17.0"
+    assert project["version"] == "0.18.0"
     assert project["readme"] == "README.md"
     assert project["requires-python"] == ">=3.13"
     assert project["license"] == "MIT"
@@ -86,7 +86,7 @@ def test_project_version_is_the_only_release_version_source() -> None:
         path for path in (ROOT / "src" / "controlel").rglob("*.py") if "__version__" in path.read_text(encoding="utf-8")
     ]
 
-    assert project_version == "0.17.0"
+    assert project_version == "0.18.0"
     assert controlel.__version__ == project_version
     assert importlib.metadata.version("controlel") == project_version
     assert version_files == [ROOT / "src" / "controlel" / "__init__.py"]
@@ -99,8 +99,8 @@ def test_core_public_pin_matches_repository_core_version() -> None:
     manifest = json.loads((ROOT / "custom_components" / "controlel" / "manifest.json").read_text(encoding="utf-8"))
     core_version = load_pyproject()["project"]["version"]
 
-    assert core_version == "0.17.0"
-    assert manifest["requirements"] == ["controlel==0.17.0"]
+    assert core_version == "0.18.0"
+    assert manifest["requirements"] == ["controlel==0.18.0"]
     assert manifest["version"] == "0.14.0"
     assert manifest["version"] != core_version
     assert manifest["issue_tracker"] == "https://github.com/vmshops/controlel/issues"
@@ -367,13 +367,13 @@ def test_release_metadata_records_published_core_and_unpublished_ha_boundary() -
     assert 'commit_sha: "992b291902318f4f0406c4b368282ff3a7ed4dbf"' in metadata
     assert "d8fd95c1534affd4f1c967e6765a8682587e05dc54528b86721332e950aaf78b" in metadata
     assert "6e59c5fae5098a35069458f5c09b2eed8e837cd9a95b7bd7156865a1acdde6a6" in metadata
-    assert 'required_core: "0.17.0"' in metadata
+    assert 'required_core: "0.18.0"' in metadata
     assert 'required_core: "0.14.0"' in metadata
     assert "Status: published" in normalized_candidate_note
     assert "Water Safety V1" in normalized_candidate_note
     assert "canonical configuration v3 behavior remain unchanged" in normalized_candidate_note
     assert "does not confirm the physical output state" in normalized_candidate_note
-    assert "Home Assistant integration 0.14.0 pins exactly" in normalized_candidate_note
+    assert "Home Assistant integration 0.14.0 now requires" in normalized_candidate_note
     assert "HeatingDiagnosticPolicy" in core_note
     assert "HeatingNotificationPolicy" in core_note
     assert "schema-v1 revisions" in core_note
@@ -387,7 +387,7 @@ def test_release_metadata_records_published_core_and_unpublished_ha_boundary() -
     assert "Status: published" in core_note_016
     assert "canonical configuration v3" in core_note_016.casefold()
     previous_candidate_note = (ROOT / "docs" / "releases" / "core-0.15.0.md").read_text(encoding="utf-8")
-    assert "unreleased development candidate" in previous_candidate_note
+    assert "Status: published on PyPI" in previous_candidate_note
     assert "Published Core 0.14.0 artifacts" in previous_candidate_note
 
 
@@ -395,8 +395,8 @@ def test_development_composition_matches_the_public_release_boundary() -> None:
     builder = (ROOT / "scripts" / "packaging" / "build_development_composition.py").read_text(encoding="utf-8")
     manifest = json.loads((ROOT / "custom_components" / "controlel" / "manifest.json").read_text(encoding="utf-8"))
 
-    assert manifest["requirements"] == ["controlel==0.17.0"]
-    assert 'DEVELOPMENT_CORE_VERSION = "0.17.0"' in builder
+    assert manifest["requirements"] == ["controlel==0.18.0"]
+    assert 'DEVELOPMENT_CORE_VERSION = "0.18.0"' in builder
     assert '"publishable": False' in builder
     assert '"integration/controlel.zip"' in builder
     assert "development integration manifest has the wrong Core pin" in builder
@@ -447,8 +447,8 @@ def test_pr_ci_validates_ha_against_a_wheel_built_from_the_checked_out_commit() 
     assert "tests/architecture" in workflow
     assert "tests/packaging" in workflow
     assert "python -m pytest --ignore=tests/integrations/home_assistant/framework" not in workflow
-    assert "home-assistant-public:" in workflow
-    assert "home-assistant-framework-public:" in workflow
+    assert "home-assistant-checked-out-wheel:" in workflow
+    assert "home-assistant-framework-checked-out-wheel:" in workflow
     assert "home-assistant-candidate:" not in workflow
     assert "CONTROLEL_FRAMEWORK_COMPOSITION: checked-out-wheel" in workflow
     assert workflow.count("python -m pip install -e .") == 1
@@ -463,15 +463,18 @@ def test_pr_ci_validates_ha_against_a_wheel_built_from_the_checked_out_commit() 
     assert "controlel==0.10.0" not in workflow
 
 
-def test_published_core_compatibility_is_release_only_or_manual() -> None:
+def test_published_core_compatibility_is_required_before_release_validation() -> None:
     workflow = (ROOT / ".github" / "workflows" / "home-assistant-published-core.yml").read_text(encoding="utf-8")
 
     assert "release:" in workflow
     assert "workflow_dispatch:" in workflow
     assert "pull_request:" not in workflow
     assert "push:" not in workflow
-    assert "custom_components/controlel/manifest.json" in workflow
-    assert workflow.count('python -m pip install --no-cache-dir "${core_requirement}"') == 2
+    assert "workflow_call:" in workflow
+    assert workflow.count("python scripts/ci/public_core_artifact.py --install") == 2
+    release = (ROOT / ".github/workflows/integration-release-validation.yml").read_text()
+    assert "uses: ./.github/workflows/home-assistant-published-core.yml" in release
+    assert "needs: published-core" in release
     assert workflow.count("python scripts/ci/verify_public_core.py") == 2
     assert "home-assistant-published-core:" in workflow
     assert "home-assistant-framework-published-core:" in workflow
@@ -500,13 +503,10 @@ def test_public_core_provenance_records_history_and_current_composition_hash() -
     assert "equivalent to `core-v0.3.0`" in release_guide
     assert wheel_hash in release_guide
     assert sdist_hash in release_guide
-    assert "controlel-0.17.0-py3-none-any.whl" in checker
-    assert "PUBLIC_WHEEL_SIZE = 287_747" in checker
-    assert "d818dd403b2aada29061662464ce9c0e3d37a5eea5d9059a1e3780cf13ffd3b6" in checker
-    assert "controlel-0.17.0.tar.gz" in checker
-    assert "PUBLIC_SDIST_SIZE = 203_980" in checker
-    assert "9020487dd1325ff58ec3ac0e9e3541a78840eaaae803b05f9613f28525bd41bd" in checker
-    assert 'distribution.read_text("direct_url.json") is None' in checker
+    assert "download_public_wheel(CORE_VERSION" in checker
+    assert "verify_installed_wheel(public_wheel, CORE_VERSION)" in checker
+    assert "verify_ha_imports()" in checker
+    assert "CORE_VERSION = intended_version()" in checker
 
 
 def test_strict_final_core_release_interface_and_sequence_are_documented() -> None:

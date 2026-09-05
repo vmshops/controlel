@@ -1,18 +1,34 @@
 # Release guide
 
-## Prepared Core 0.17.0 candidate
+## Core 0.18.0 / HA 0.14.0 candidate boundary
 
-Core `0.17.0` is prepared from current mainline as the Water Safety V1 Core
-release candidate. It adds host-neutral Water Safety domain and application
-contracts, an event-driven runtime with explicit one-shot deadlines, Setup
-schema v1 contracts, diagnostics, Frontend API v1 projection, and optional Home
-Assistant infrastructure adapters. UNKNOWN and UNAVAILABLE are never dry
-evidence, and accepted output requests never claim physical output state.
+Core 0.17.0 is already public and immutable. Core 0.18.0 is the next candidate,
+adding module-scoped active-reference APIs and Water shutoff contracts plus
+Water evidence failure isolation. The repository has used minor increments
+for added public capabilities (0.13 Frontend API, 0.14 policy contracts, 0.16
+canonical v3, 0.17 Water V1). These additions therefore require 0.18.0, rather
+than republishing 0.17.0 or treating the entire delta as a patch-only fix.
+There is no separate stricter SemVer policy in this repository.
 
-The candidate preserves the current Heating runtime and canonical configuration
-v3 behavior. Home Assistant integration `0.14.0` pins exactly published
-`controlel==0.17.0`. Core publication and the later integration release remain
-separate explicit steps.
+HA 0.14.0 remains unpublished and keeps that version, with exact requirement
+`controlel==0.18.0`. Core 0.18.0 must be published and independently validated
+before the HA candidate can pass release validation. The reusable
+`home-assistant-published-core.yml` workflow downloads the manifest's exact
+PyPI wheel, verifies SHA-256/size, installs it, checks installed file bytes and
+all integration Core imports, and runs both HA suites. The HACS release-artifact
+job depends on this workflow. A missing public version is a blocking failure.
+
+Normal development CI uses an explicitly named checked-out-wheel composition.
+The canonical HA test bundle is an unpublished dirty-tree test composition;
+its generated test version and hashes are not public release identities.
+See the [Core candidate and validation boundary](../releases/core-0.18.0.md).
+
+## Published Core 0.17.0
+
+Core 0.17.0 is public under `core-v0.17.0`; its immutable wheel/sdist identities
+remain in `release-metadata/releases.yaml` and `docs/releases/core-0.17.0.md`.
+The real wheel lacks five imports required by the current HA checkpoint and
+cannot support the current 0.14.0 candidate.
 
 ## Published Core 0.16.0
 

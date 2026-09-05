@@ -20,7 +20,11 @@ permissions:
   contents: read
 
 jobs:
+  published-core:
+    uses: ./.github/workflows/home-assistant-published-core.yml
+
   release-artifact:
+    needs: published-core
     runs-on: ubuntu-latest
 
     steps:

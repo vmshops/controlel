@@ -46,7 +46,7 @@ jobs:
             tests/architecture \
             tests/packaging
 
-  home-assistant-public:
+  home-assistant-checked-out-wheel:
     runs-on: ubuntu-latest
 
     steps:
@@ -86,7 +86,7 @@ jobs:
             --asyncio-mode=auto \
             --ignore=tests/integrations/home_assistant/framework
 
-  home-assistant-framework-public:
+  home-assistant-framework-checked-out-wheel:
     runs-on: ubuntu-latest
     env:
       CONTROLEL_FRAMEWORK_COMPOSITION: checked-out-wheel

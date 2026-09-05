@@ -43,7 +43,7 @@ from scripts.packaging.ha_test_installer import (
 )
 
 ROOT = Path(__file__).parents[2]
-CORE_VERSION = "0.17.0"
+CORE_VERSION = "0.18.0"
 
 
 def _core_wheel(path: Path, *, version: str = CORE_VERSION) -> Path:

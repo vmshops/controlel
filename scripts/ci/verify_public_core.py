@@ -13,7 +13,8 @@ import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import unquote, urlparse
-from urllib.request import Request, urlopen
+
+from public_core_artifact import download_public_wheel, intended_version, verify_ha_imports, verify_installed_wheel
 
 import controlel
 from controlel.application.configuration import (
@@ -84,15 +85,8 @@ from controlel.infrastructure.home_assistant import (
 )
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-CORE_VERSION = "0.17.0"
+CORE_VERSION = intended_version()
 CORE_REQUIREMENT = f"controlel=={CORE_VERSION}"
-PUBLIC_WHEEL_FILENAME = "controlel-0.17.0-py3-none-any.whl"
-PUBLIC_WHEEL_SIZE = 287_747
-PUBLIC_WHEEL_SHA256 = "d818dd403b2aada29061662464ce9c0e3d37a5eea5d9059a1e3780cf13ffd3b6"
-PUBLIC_SDIST_FILENAME = "controlel-0.17.0.tar.gz"
-PUBLIC_SDIST_SIZE = 203_980
-PUBLIC_SDIST_SHA256 = "9020487dd1325ff58ec3ac0e9e3541a78840eaaae803b05f9613f28525bd41bd"
-PYPI_METADATA_URL = f"https://pypi.org/pypi/controlel/{CORE_VERSION}/json"
 
 
 def _contract_module_path(contract: object) -> Path:
@@ -102,32 +96,6 @@ def _contract_module_path(contract: object) -> Path:
     module_file = module.__file__
     assert module_file is not None
     return Path(module_file).resolve()
-
-
-def verify_public_artifact_metadata() -> None:
-    """Verify the immutable public wheel and sdist identities for this composition."""
-
-    request = Request(PYPI_METADATA_URL, headers={"User-Agent": "controlel-ci-provenance-check"})
-    with urlopen(request, timeout=30) as response:  # noqa: S310 - fixed HTTPS PyPI endpoint
-        metadata = json.load(response)
-    matching_files = [
-        file
-        for file in metadata["urls"]
-        if file["filename"] == PUBLIC_WHEEL_FILENAME and file["packagetype"] == "bdist_wheel"
-    ]
-    assert len(matching_files) == 1
-    wheel = matching_files[0]
-    assert wheel["size"] == PUBLIC_WHEEL_SIZE
-    assert wheel["digests"]["sha256"] == PUBLIC_WHEEL_SHA256
-    matching_sdists = [
-        file
-        for file in metadata["urls"]
-        if file["filename"] == PUBLIC_SDIST_FILENAME and file["packagetype"] == "sdist"
-    ]
-    assert len(matching_sdists) == 1
-    sdist = matching_sdists[0]
-    assert sdist["size"] == PUBLIC_SDIST_SIZE
-    assert sdist["digests"]["sha256"] == PUBLIC_SDIST_SHA256
 
 
 def _development_wheel_identity(wheel_path: Path) -> tuple[str, str]:
@@ -170,6 +138,7 @@ def _verify_development_wheel_install(
 
 
 def main(*, development_wheel: Path | None = None) -> int:
+    verify_ha_imports()
     package_path = Path(controlel.__file__).resolve()
     distribution = importlib.metadata.distribution("controlel")
     source_root = (REPOSITORY_ROOT / "src").resolve()
@@ -189,7 +158,8 @@ def main(*, development_wheel: Path | None = None) -> int:
     assert source_root not in {Path(entry or ".").resolve() for entry in sys.path}
     development_wheel_sha256 = None
     if development_wheel is None:
-        assert distribution.read_text("direct_url.json") is None
+        public_wheel = download_public_wheel(CORE_VERSION, REPOSITORY_ROOT / "dist/public-core")
+        verify_installed_wheel(public_wheel, CORE_VERSION)
     else:
         development_wheel_sha256 = _verify_development_wheel_install(
             distribution=distribution,
@@ -339,12 +309,7 @@ def main(*, development_wheel: Path | None = None) -> int:
     assert frontend_water_safety["sensor_condition"] == "UNKNOWN"
     assert frontend_water_safety["actions_available"] == ["disable", "test_notification"]
     if development_wheel is None:
-        verify_public_artifact_metadata()
-        print(
-            f"Verified public controlel {CORE_VERSION} at {package_path}; "
-            f"{PUBLIC_WHEEL_FILENAME} SHA-256 {PUBLIC_WHEEL_SHA256}; "
-            f"{PUBLIC_SDIST_FILENAME} SHA-256 {PUBLIC_SDIST_SHA256}"
-        )
+        print(f"Verified public controlel {CORE_VERSION} at {package_path}; exact downloaded public wheel bytes")
     else:
         print(
             f"Verified checked-out controlel {expected_version} wheel at {package_path}; "

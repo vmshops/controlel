@@ -7,6 +7,24 @@
 metadata_version: 1
 
 releases:
+  - release_id: controlel-core-0.18.0
+    component: core
+    title: "Controlel Core 0.18.0"
+    version: "0.18.0"
+    status: candidate
+    tag: null
+    commit_sha: null
+    summary: "Module-scoped active authority, Water shutoff contracts, and evidence failure isolation"
+    compatibility:
+      previous_public_core: "0.17.0"
+      home_assistant_integration_candidate: "0.14.0"
+      python: ">=3.13"
+      pydantic: ">=2.0"
+    notes:
+      - "Unpublished candidate; no public artifact hashes or tag identity assigned."
+      - "HA release validation must use the actual public 0.18.0 wheel after Core publication."
+      - "Local development wheels and HA test bundles are not public artifacts."
+
   - release_id: controlel-core-0.17.0
     component: core
     title: "Controlel Core 0.17.0"
@@ -48,7 +66,7 @@ releases:
       - "UNKNOWN and UNAVAILABLE moisture observations are never dry evidence."
       - "Accepted output requests are command outcomes and do not confirm physical siren or actuator state."
       - "Published PyPI bytes match the deterministic final artifacts bound to core-v0.17.0."
-      - "Home Assistant integration 0.14.0 candidate pins this package exactly."
+      - "Historical public Core; current HA 0.14.0 candidate requires Core 0.18.0."
 
   - release_id: controlel-home_assistant-0.14.0
     component: home_assistant
@@ -57,20 +75,20 @@ releases:
     status: candidate
     tag: null
     commit_sha: null
-    summary: "Canonical configuration v3 Configure, Setup Wizard, Heating settings, and Water Safety over public Core 0.17.0"
+    summary: "Canonical configuration v3 Configure, Setup Wizard, Heating settings, and Water Safety over candidate Core 0.18.0"
     highlights:
       - "Configure flow, Setup Wizard, and Heating settings consume canonical configuration v3 lifecycle contracts"
-      - "Water Safety setup, activation, diagnostics, and Frontend API v1 projection over public Core 0.17.0"
+      - "Water Safety setup, activation, diagnostics, and Frontend API v1 projection over candidate Core 0.18.0"
       - "Deterministic v2-to-v3 Heating migration with explicit conversion review and activation"
       - "Authenticated WebSocket commands for canonicalize, activate, and read-only Frontend API v1 surfaces"
       - "Deterministic HACS release artifact prepared for real HAOS installation testing"
     compatibility:
-      required_core: "0.17.0"
+      required_core: "0.18.0"
       config_entry_version: 1
       home_assistant: "2026.7.3"
     notes:
       - "Existing version-1 config entries retain their runtime/configuration path without automatic migration."
-      - "The integration pins exactly controlel==0.17.0 from public PyPI; HA adapter and framework CI install that package, not editable source."
+      - "The integration pins exactly controlel==0.18.0. Public-wheel release validation remains blocked until Core publication; development CI uses a checked-out wheel."
       - "The integration remains unpublished pending real HAOS installation testing and separate release approval."
 
   - release_id: controlel-core-0.16.0
@@ -111,15 +129,26 @@ releases:
     notes:
       - "No runtime control algorithm, activation behavior change, or automatic migration beyond explicit v2-to-v3 conversion is included."
       - "Published PyPI bytes match the deterministic final artifacts bound to core-v0.16.0."
-      - "Home Assistant integration 0.14.0 candidate pins this package exactly."
+      - "Historical public Core; current HA 0.14.0 candidate requires Core 0.18.0."
 
   - release_id: controlel-core-0.15.0
     component: core
     title: "Controlel Core 0.15.0"
     version: "0.15.0"
-    status: candidate
+    status: published
     tag: null
     commit_sha: null
+    artifacts:
+      wheel:
+        filename: "controlel-0.15.0-py3-none-any.whl"
+        size: 239714
+        sha256: "e76b984aa62c695bc65e694c42c9d8d817fabcad32e7bfedb9d85dda340b420e"
+        uploaded_at: "2026-08-26T18:03:58.417803Z"
+      sdist:
+        filename: "controlel-0.15.0.tar.gz"
+        size: 167206
+        sha256: "88d5e65fb42f639b8e6a838d5d639ff80ff0683689e36991e9121a64a6bc35cf"
+        uploaded_at: "2026-08-26T18:03:59.466671Z"
     summary: "Setup recommendation identity, compatibility, and relevance fixes"
     highlights:
       - "Heating setup candidate IDs remain valid across otherwise-identical discovery captures"
@@ -131,7 +160,7 @@ releases:
       python: ">=3.13"
       pydantic: ">=2.0"
     notes:
-      - "Unreleased development candidate; no tag, publication, or public artifact identity exists yet."
+      - "Publication verified from version-specific PyPI metadata; no public core-v0.15.0 tag found. Historical source-to-artifact provenance is unverified."
       - "No runtime algorithm, activation behavior, schema migration, or automatic migration change is included."
       - "Published Core 0.14.0 records and artifact identities remain unchanged."
 
