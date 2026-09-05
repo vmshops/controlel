@@ -96,7 +96,12 @@ async def async_setup_entry(
 ) -> bool:
     """Set up one Controlel runtime from a config entry."""
     try:
-        return await _async_setup_entry(hass, entry)
+        result = await _async_setup_entry(hass, entry)
+        if result and water_safety_core_available():
+            from .water_safety_activation import async_recover_water_activation
+
+            await async_recover_water_activation(hass, entry)
+        return result
     except Exception as error:
         record_lifecycle_failure(hass, entry, phase="setup", error=error)
         raise
@@ -109,6 +114,10 @@ async def _async_setup_entry(
     """Implement config-entry setup under lifecycle failure reporting."""
     heating_active = active_reference_for_module(entry.data, "heating")
     water_active = active_reference_for_module(entry.data, "water_safety")
+    if water_safety_core_available():
+        from .water_safety_activation import water_reference_for_runtime
+
+        water_active = water_reference_for_runtime(hass, entry)
     if heating_active is None and water_active is not None and staged_candidate_runtime(hass, entry.entry_id) is None:
         return await _async_setup_water_safety_only_entry(hass, entry, water_active)
     if not entry.data and not entry.options and staged_candidate_runtime(hass, entry.entry_id) is None:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import deque
 from collections.abc import Callable, Coroutine
 from datetime import UTC, datetime
 from functools import partial
@@ -25,7 +26,7 @@ from controlel.application.water_safety import (
     WaterSafetyProcessingResult,
     WaterSafetyRuntime,
 )
-from controlel.domain.water_safety import MoistureCondition, WaterSafetyState
+from controlel.domain.water_safety import MoistureCondition, MoistureObservation, WaterSafetyState
 
 from .runtime_executor import HomeAssistantRuntimeExecutor, RuntimeExecutorClosedError
 from .scheduler import HomeAssistantScheduler
@@ -92,6 +93,7 @@ class HomeAssistantWaterSafetyHost:
         self._callback_tasks: set[asyncio.Task[Any]] = set()
         self._accepting = True
         self._initialized = False
+        self._startup_observations: deque[MoistureObservation] | None = None
         self._stopping = False
         self._stopped = False
         self._diagnostics_snapshot: WaterSafetyDiagnosticsSnapshotV1 | None = None
@@ -113,19 +115,33 @@ class HomeAssistantWaterSafetyHost:
             if self._stopping or self._stopped:
                 raise RuntimeError("Water Safety host cannot initialize after shutdown")
 
-            snapshot = self._state_getter(self._mapper.entity_id)
-            observation = self._require_observation(snapshot)
-            started_at = datetime.now(UTC)
-            await self._async_submit_runtime(partial(self._runtime.start, observation, started_at=started_at))
-            self._refresh_diagnostics()
-            await self._async_submit_runtime(self._reschedule_deadline)
-
-            self._unsubscribe = self._state_subscriber(
-                self._hass,
-                self._mapper.entity_id,
-                self._on_state_change,
-            )
-            self._initialized = True
+            # Subscribe and capture the snapshot without yielding the HA event loop.
+            # Buffer observations until start and all startup events are serialized;
+            # a second snapshot alone would lose a transient WET -> DRY incident.
+            self._startup_observations = deque()
+            try:
+                self._unsubscribe = self._state_subscriber(
+                    self._hass,
+                    self._mapper.entity_id,
+                    self._on_state_change,
+                )
+                snapshot = self._state_getter(self._mapper.entity_id)
+                self._startup_observations.append(self._require_observation(snapshot))
+                observation = self._startup_observations.popleft()
+                await self._process(partial(self._runtime.start, observation, started_at=datetime.now(UTC)))
+                while self._startup_observations:
+                    observation = self._startup_observations.popleft()
+                    await self._process(partial(self._runtime.observe, observation))
+                # No await between draining the queue and enabling live dispatch.
+                self._startup_observations = None
+                self._initialized = True
+            except BaseException:
+                self._accepting = False
+                self._startup_observations = None
+                if self._unsubscribe is not None:
+                    self._unsubscribe()
+                    self._unsubscribe = None
+                raise
             self._logger.info("Water Safety runtime started")
 
     async def async_stop(self) -> None:
@@ -246,6 +262,11 @@ class HomeAssistantWaterSafetyHost:
         del previous_state
         if not self._accepting or self._stopping:
             return
+        if self._startup_observations is not None:
+            observation = self._observation_for_state(state)
+            if observation is not None:
+                self._startup_observations.append(observation)
+            return
         task = self._hass.async_create_task(
             self._async_process_state(state),
             "Controlel Water Safety state change",
@@ -254,18 +275,20 @@ class HomeAssistantWaterSafetyHost:
         task.add_done_callback(self._callback_tasks.discard)
 
     async def _async_process_state(self, state: StateLike | None) -> None:
+        observation = self._observation_for_state(state)
+        if observation is not None:
+            await self._process(partial(self._runtime.observe, observation))
+
+    def _observation_for_state(self, state: StateLike | None) -> MoistureObservation | None:
         mapping = self._mapper.map_state(state)
-        if mapping.observation is None:
-            if mapping.rejection_reason in {
-                MoistureMappingRejectionReason.MISSING_STATE,
-                MoistureMappingRejectionReason.MISSING_TIMESTAMP,
-                MoistureMappingRejectionReason.NAIVE_TIMESTAMP,
-            }:
-                return
-            observation = self._unknown_observation()
-        else:
-            observation = mapping.observation
-        await self._process(lambda: self._runtime.observe(observation))
+        if mapping.observation is not None:
+            return mapping.observation
+        if mapping.rejection_reason in {
+            MoistureMappingRejectionReason.MISSING_TIMESTAMP,
+            MoistureMappingRejectionReason.NAIVE_TIMESTAMP,
+        }:
+            return None
+        return self._unknown_observation()
 
     async def _async_run_scheduled_callback(self, callback: Callable[[], None]) -> None:
         if not self._accepting:

@@ -607,3 +607,65 @@ def test_stable_identity_survives_locator_changes_and_hooks_receive_state_and_ev
     assert diagnostics.canonical_revision_id == "water-revision"
     assert diagnostics.owned_outputs[0].owner.module_key == "water_safety"
     assert diagnostics.owned_outputs[0].last_requested_action is WaterOutputAction.REQUEST_SIREN_ON
+
+
+@pytest.mark.parametrize(
+    "failed_code",
+    [
+        None,
+        WaterSafetyEventCode.RUNTIME_STARTED,
+        WaterSafetyEventCode.OBSERVATION_ACCEPTED,
+        WaterSafetyEventCode.WET_INCIDENT_STARTED,
+        WaterSafetyEventCode.WET_INCIDENT_RECOVERED,
+        WaterSafetyEventCode.OUTPUT_REQUESTED,
+    ],
+)
+def test_evidence_failure_never_blocks_wet_outputs_or_later_incidents(failed_code, caplog) -> None:
+    class FailingEvidence(RecordingEvidence):
+        def record(self, event):
+            if failed_code is None or event.code is failed_code:
+                raise OSError("history disk unavailable")
+            super().record(event)
+
+    evidence = FailingEvidence()
+    output = RecordingOutput(failing={(VALVE_MAIN, WaterOutputAction.REQUEST_VALVE_CLOSE)})
+    state = RecordingState()
+    runtime = _runtime(output, effective=_effective(valve_roles=(VALVE_MAIN,)), state=state, evidence=evidence)
+    runtime.start(_observation(MoistureCondition.DRY, T0), started_at=T0)
+    wet = runtime.observe(_observation(MoistureCondition.WET, T0 + timedelta(seconds=1)))
+    assert wet.state is WaterSafetyState.WET
+    assert wet.snapshot.active_incident is not None
+    assert state.snapshots[-1] == wet.snapshot
+    assert _actions(output) == [
+        WaterOutputAction.REQUEST_VALVE_CLOSE,
+        WaterOutputAction.REQUEST_SIREN_ON,
+        WaterOutputAction.NOTIFY_WET,
+        WaterOutputAction.NOTIFY_WET,
+    ]
+    assert [result.outcome for result in wet.output_results] == [
+        WaterOutputOutcome.FAILED,
+        WaterOutputOutcome.ACCEPTED,
+        WaterOutputOutcome.ACCEPTED,
+        WaterOutputOutcome.ACCEPTED,
+    ]
+    incident = wet.snapshot.active_incident.incident_id
+    runtime.observe(_observation(MoistureCondition.WET, T0 + timedelta(seconds=2)))
+    assert runtime.snapshot.active_incident.incident_id == incident
+    assert len(output.commands) == 4
+    runtime.observe(_observation(MoistureCondition.DRY, T0 + timedelta(seconds=3)))
+    assert runtime.snapshot.active_incident is None
+    later = runtime.observe(_observation(MoistureCondition.WET, T0 + timedelta(seconds=4)))
+    assert later.snapshot.active_incident.incident_id != incident
+    assert len(later.output_results) == 4
+    assert all(
+        command.action is WaterOutputAction.REQUEST_VALVE_CLOSE
+        for command in output.commands
+        if command.output_kind is WaterOutputKind.SHUTOFF_VALVE
+    )
+    assert "Water Safety evidence persistence failed" in caplog.text
+    assert "history disk unavailable" in caplog.text
+    assert "event_id=utility-water:event:" in caplog.text
+    if failed_code is None:
+        assert evidence.events == []
+    else:
+        assert all(event.code is not failed_code for event in evidence.events)

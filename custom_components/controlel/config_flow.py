@@ -788,12 +788,8 @@ class ControlelOptionsFlow(OptionsFlow):
                 data_schema=vol.Schema({}),
             )
 
-        runtime_data = getattr(self.config_entry, "runtime_data", None)
-        if runtime_data is not None:
-            runtime_data.reloading = True
-        candidate_host = None
         try:
-            candidate_host = await WaterSafetyActivationService().activate_canonical_revision(
+            await WaterSafetyActivationService().activate_canonical_revision(
                 self.hass,
                 self.config_entry,
                 candidate_id,
@@ -801,23 +797,12 @@ class ControlelOptionsFlow(OptionsFlow):
             )
         except Exception:
             LOGGER.exception("Native Water Safety activation failed")
-            if candidate_host is not None:
-                await candidate_host.async_stop()
-            if runtime_data is not None:
-                runtime_data.reloading = False
             return self.async_show_form(
                 step_id="water_safety_activate",
                 data_schema=vol.Schema({}),
                 errors={"base": "water_safety_activation_failed"},
             )
 
-        try:
-            await candidate_host.async_stop()
-        except Exception:
-            LOGGER.exception(
-                "Activated Water Safety revision %s, but its proof runtime did not stop cleanly",
-                candidate_id,
-            )
         backend = await async_get_setup_backend(self.hass, self.config_entry)
         try:
             await backend.repository.delete_draft(
@@ -827,21 +812,6 @@ class ControlelOptionsFlow(OptionsFlow):
         except (SetupConflictError, SetupNotFoundError):
             LOGGER.warning(
                 "Activated Water Safety revision %s but retained a concurrently changed draft",
-                candidate_id,
-            )
-        try:
-            reload_completed = await self.hass.config_entries.async_reload(self.config_entry.entry_id)
-        except Exception:
-            reload_completed = False
-            LOGGER.exception(
-                "Water Safety revision %s is active, but the immediate config-entry reload failed",
-                candidate_id,
-            )
-        if not reload_completed:
-            if runtime_data is not None:
-                runtime_data.reloading = False
-            LOGGER.error(
-                "Water Safety revision %s is active, but the immediate config-entry reload did not complete",
                 candidate_id,
             )
         return self.async_create_entry(title="", data={})

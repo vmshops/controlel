@@ -902,46 +902,53 @@ async def _seed_water_draft(hass, entry, *, complete: bool = False):
     from controlel.application.setup import (
         BindingSelection,
         DraftRevision,
-        IdentityQuality,
-        ProviderReference,
         SelectionOrigin,
     )
+    from controlel.infrastructure.home_assistant.water_safety_discovery import async_snapshot_with_notify_services
 
+    if complete:
+        registry = er.async_get(hass)
+        if registry.async_get("binary_sensor.utility_moisture") is None:
+            registry.async_get_or_create(
+                "binary_sensor",
+                "water-configure-test",
+                "utility_moisture",
+                suggested_object_id="utility_moisture",
+                original_device_class="moisture",
+            )
+        if not hass.services.has_service("notify", "mobile_app_phone"):
+            hass.services.async_register("notify", "mobile_app_phone", lambda call: None)
+    snapshot = await async_snapshot_with_notify_services(
+        hass,
+        snapshot_id="water-fixture",
+        captured_at=datetime.now(UTC),
+    )
+    references = {reference.current_locator: reference for reference in snapshot.objects}
     backend = await async_get_setup_backend(hass, entry)
     repository = backend.repository
     now = datetime.now(UTC)
     bindings = (
-        BindingSelection(
-            role=WATER_SAFETY_SENSOR_ROLE,
-            reference=ProviderReference(
-                provider="home_assistant",
-                provider_instance_id="home",
-                object_kind="home_assistant.entity",
-                native_id="binary_sensor.utility_moisture",
-                identity_quality=IdentityQuality.STABLE,
-                current_locator="binary_sensor.utility_moisture",
+        (
+            BindingSelection(
+                role=WATER_SAFETY_SENSOR_ROLE,
+                reference=references["binary_sensor.utility_moisture"],
+                selection_origin=SelectionOrigin.MANUAL,
+                user_confirmed=complete,
             ),
-            selection_origin=SelectionOrigin.MANUAL,
-            user_confirmed=complete,
-        ),
-        BindingSelection(
-            role=DEFAULT_NOTIFICATION_ROLE,
-            reference=ProviderReference(
-                provider="home_assistant",
-                provider_instance_id="home",
-                object_kind="home_assistant.endpoint",
-                native_id="notify.mobile_app_phone",
-                identity_quality=IdentityQuality.STABLE,
-                current_locator="notify.mobile_app_phone",
+            BindingSelection(
+                role=DEFAULT_NOTIFICATION_ROLE,
+                reference=references["notify.mobile_app_phone"],
+                selection_origin=SelectionOrigin.MANUAL,
+                user_confirmed=complete,
             ),
-            selection_origin=SelectionOrigin.MANUAL,
-            user_confirmed=complete,
-        ),
+        )
+        if complete
+        else ()
     )
     draft = DraftRevision(
         draft_id="water-draft",
         revision=1,
-        environment_id="home",
+        environment_id=snapshot.provider_instance_id,
         module_key=WATER_SAFETY_MODULE_KEY,
         module_instance_id="utility-water",
         module_schema_version=1,
@@ -986,7 +993,7 @@ async def _seed_configured_water(hass, entry):
         revision_id="water-revision",
         revision=1,
         provider="home_assistant",
-        provider_instance_id="home",
+        provider_instance_id=draft.environment_id,
         created_at=now,
         actor="test",
         source="home_assistant_native_configure_test",
@@ -997,7 +1004,7 @@ async def _seed_configured_water(hass, entry):
     backend = await async_get_setup_backend(hass, entry)
     await backend.repository.add_canonical_revision(canonical)
     active = ActiveReference(
-        environment_id="home",
+        environment_id=draft.environment_id,
         module_key="water_safety",
         module_instance_id="utility-water",
         canonical_revision_id="water-revision",
@@ -1953,12 +1960,13 @@ async def test_complete_native_water_lifecycle_activation_restart_edit_and_missi
     }
 
     reactivated = await _activate_water_draft(hass, edited_menu)
-    assert reactivated["type"] is data_entry_flow.FlowResultType.CREATE_ENTRY, reactivated
+    # The required sensor and valve are still absent: a failed reload must not
+    # publish the edited candidate or delete the user's retryable draft.
+    assert reactivated["type"] is data_entry_flow.FlowResultType.FORM, reactivated
+    assert reactivated["errors"] == {"base": "water_safety_activation_failed"}
     await hass.async_block_till_done()
-    second_active = ActiveReference.model_validate(entry.data[ACTIVE_REFERENCE_KEY])
-    assert second_active.canonical_revision_id != first_active.canonical_revision_id
-    assert second_active.generation == first_active.generation + 1
-    assert await _water_drafts(hass, entry) == ()
+    assert ActiveReference.model_validate(entry.data[ACTIVE_REFERENCE_KEY]) == first_active
+    assert await _water_drafts(hass, entry) == (edited_draft,)
     reopened_sirens = await _choose(
         hass,
         await _open_water_menu(hass, entry),
@@ -1979,7 +1987,11 @@ async def test_failed_native_water_activation_retains_draft_and_prior_authority(
         entry.runtime_data.loaded_water_safety_configuration.canonical_revision_id == prior_active.canonical_revision_id
     )
 
-    async def fail_candidate_start(*_args, **_kwargs):
+    original_build = WaterSafetyActivationService._async_build_and_start_host
+
+    async def fail_candidate_start(self, hass, entry, effective, **kwargs):
+        if effective.canonical_revision_id == prior_active.canonical_revision_id:
+            return await original_build(self, hass, entry, effective, **kwargs)
         raise RuntimeError("candidate runtime did not reach readiness")
 
     monkeypatch.setattr(
@@ -2140,7 +2152,11 @@ async def test_failed_water_activation_preserves_both_active_module_authorities(
         {cf.WATER_SIREN_TARGETS: [siren]},
     )
 
-    async def fail_candidate_start(*_args, **_kwargs):
+    original_build = WaterSafetyActivationService._async_build_and_start_host
+
+    async def fail_candidate_start(self, hass, entry, effective, **kwargs):
+        if effective.canonical_revision_id == water.canonical_revision_id:
+            return await original_build(self, hass, entry, effective, **kwargs)
         raise RuntimeError("candidate runtime did not reach readiness")
 
     monkeypatch.setattr(
