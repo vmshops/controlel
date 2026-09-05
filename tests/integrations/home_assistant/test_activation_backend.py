@@ -186,6 +186,26 @@ class _ConfigEntries:
             )
         return success
 
+    def async_get_entry(self, entry_id: str) -> _Entry | None:
+        assert self.entry is not None
+        assert entry_id == self.entry.entry_id
+        return self.entry
+
+
+def test_reload_failure_preserves_home_assistant_setup_reason() -> None:
+    config_entries = _ConfigEntries([(False, None)])
+    config_entries.entry = SimpleNamespace(
+        entry_id="entry-1",
+        state=SimpleNamespace(value="setup_error"),
+        reason="Configured Heating service could not be loaded",
+    )
+    hass = SimpleNamespace(config_entries=config_entries)
+
+    with pytest.raises(RuntimeError, match="config-entry reload did not complete") as failure:
+        asyncio.run(activation_backend._require_reload_success(hass, "entry-1"))
+
+    assert failure.value.home_assistant_reason == "Configured Heating service could not be loaded"
+
 
 async def _activate(
     monkeypatch: pytest.MonkeyPatch,

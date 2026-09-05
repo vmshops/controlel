@@ -6,7 +6,7 @@ The ordinary development environment deliberately has no Home Assistant
 dependency. Use these separate suites:
 
 ```text
-# A. Repository Core 0.17.0 candidate tests
+# A. Repository Core 0.18.0 candidate tests
 python -m pytest tests/domain tests/application tests/infrastructure \
   tests/architecture tests/packaging
 
@@ -18,8 +18,8 @@ python -m pytest tests/integrations/home_assistant \
 CONTROLEL_FRAMEWORK_COMPOSITION=checked-out-wheel \
   python -m pytest tests/integrations/home_assistant/framework
 
-# D. Real loader smoke for an explicit Core 0.17.0 development composition
-CONTROLEL_DEVELOPMENT_COMPOSITION=/absolute/path/to/controlel-dev-0.17.0.zip \
+# D. Real loader smoke for an explicit Core 0.18.0 development composition
+CONTROLEL_DEVELOPMENT_COMPOSITION=/absolute/path/to/controlel-dev-0.18.0.zip \
   python -m pytest \
   tests/integrations/home_assistant/development_composition
 ```
@@ -63,8 +63,12 @@ artifact before running both HA suites.
 
 The non-publishable development composition described in
 `HomeAssistantDevelopmentComposition.md` remains available for offline HAOS
-testing when PyPI access is unavailable. It bundles the exact Core wheel with
-the integration ZIP without changing the source manifest.
+testing when PyPI access is unavailable. For ordinary manual HA OS testing, use
+the canonical bundle workflow in `HomeAssistantManualTestBundle.md`:
+
+```text
+python scripts/packaging/build_ha_test_bundle.py
+```
 
 Home Assistant 2026.7.3 imports POSIX-only `fcntl` and `resource` modules in
 its pytest bootstrap, so the standard framework command does not run in native
@@ -121,10 +125,20 @@ python3 -m script.hassfest --action validate \
   --integration-path /absolute/path/to/controlel/custom_components/controlel
 ```
 
-Framework compatibility is separate from HACS release validation. The candidate
-manifest pins exact public Core `controlel==0.16.0`; CI installs it from PyPI
-with `--no-cache-dir` and verifies its provenance and public API surface before
-integration tagging.
+The candidate manifest pins exactly `controlel==0.18.0`, which is not yet
+public. Development CI installs a checkout wheel. HACS release validation
+requires the reusable published-Core workflow: it downloads the exact PyPI
+artifact, verifies SHA-256/size and installed bytes, checks required APIs, and
+runs both HA suites. A missing public Core version blocks that gate.
+
+To run the public composition gate after Core publication in an isolated HA
+environment (with no checkout `src` on `PYTHONPATH`):
+
+```bash
+python scripts/ci/public_core_artifact.py --install
+python scripts/ci/verify_public_core.py
+python -m pytest tests/integrations/home_assistant --asyncio-mode=auto
+```
 
 ## HACS release candidate
 
@@ -150,9 +164,9 @@ rejection behavior. Generated files remain below ignored `dist/hacs/`.
 
 ## Configuration and options development
 
-Core `0.16.0` is published and immutable. The integration release metadata is
-candidate `0.14.0` and consumes canonical configuration v3, Setup, and read-only
-Frontend API v1 boundaries through exact public Core `controlel==0.16.0`.
+Core `0.17.0` is published and immutable. Integration candidate `0.14.0`
+requires Core candidate `0.18.0`, including the module-scoped active-reference
+and Water shutoff contracts missing from the public 0.17.0 wheel.
 
 Anomaly v1 extends the passive M31C development boundary with immutable,
 bounded observation state and transition-oriented operational events. New

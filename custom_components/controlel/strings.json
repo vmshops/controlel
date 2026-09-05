@@ -51,21 +51,21 @@
         "description": "{heating_summary}",
         "menu_options": {
           "heating_status": "Readiness details",
-          "start_greenfield": "Start required/basic Heating setup",
+          "start_greenfield": "Start Heating setup",
           "edit_active": "Edit active Heating configuration",
           "convert_v2": "Upgrade existing Heating configuration",
           "convert_legacy": "Upgrade existing Heating configuration",
           "resume_draft": "Continue saved Heating draft",
           "abandon_draft": "Discard a saved Heating draft",
-          "zone": "Required / basic — Zone & demand",
-          "sensor": "Required / basic — Temperature sensor",
-          "heat_source": "Required / basic — Heat source commands",
-          "heat_delivery": "Optional — Heat delivery",
-          "safety_timing": "Advanced — Safety & timing",
-          "notifications": "Optional — Notifications",
-          "diagnostics": "Advanced — Diagnostics",
+          "zone": "Zone & demand — Basic",
+          "sensor": "Temperature sensor — Required",
+          "heat_source": "Heat source commands — Required",
+          "heat_delivery": "Heat delivery — Optional",
+          "safety_timing": "Safety & timing — Advanced",
+          "notifications": "Notifications — Optional",
+          "diagnostics": "Diagnostics — Advanced",
           "heating_review": "Review & activate",
-          "abandon_current": "Discard this saved draft",
+          "abandon_current": "Abandon current draft",
           "back_to_hub": "Back to Controlel Configure"
         }
       },
@@ -80,12 +80,13 @@
         "title": "Water Safety",
         "description": "{water_safety_summary}",
         "menu_options": {
-          "water_safety_status": "Status",
-          "water_safety_area_sensor": "Area & moisture sensor",
-          "water_safety_notifications": "Notifications",
-          "water_safety_sirens": "Sirens",
-          "water_safety_shutoff_valves": "Automatic water shutoff",
           "water_safety_validation": "Review & activate",
+          "water_safety_abandon": "Abandon current draft",
+          "water_safety_status": "Status",
+          "water_safety_area_sensor": "Area & moisture sensor — Required",
+          "water_safety_notifications": "Notifications — Optional",
+          "water_safety_sirens": "Sirens — Optional",
+          "water_safety_shutoff_valves": "Shutoff valves — Optional",
           "back_to_hub": "Back to Controlel Configure"
         }
       },
@@ -98,10 +99,10 @@
       },
       "water_safety_area_sensor": {
         "title": "Water Safety — Area & moisture sensor",
-        "description": "Area and moisture sensor may be saved separately in an incomplete draft; both are required for activation. Compatible candidates currently show {candidate_scope} ({candidate_count}). Saving updates only the inactive Water draft. Configured selections not present in current discovery: {unavailable_area_sensor}.",
+        "description": "Required. Choose one Home Assistant area and one moisture / leak sensor for this Water Safety module. Both are required for activation. Compatible candidates currently show {candidate_scope} ({candidate_count}). Saving updates only the inactive Water draft. Configured selections not present in current discovery: {unavailable_area_sensor}.",
         "data": {
-          "water_safety_area_id": "Area",
-          "water_safety_moisture_entity_id": "Moisture / leak sensor",
+          "water_safety_area_id": "Area (required)",
+          "water_safety_moisture_entity_id": "Moisture / leak sensor (required)",
           "show_all_compatible_entities": "Show all compatible entities"
         }
       },
@@ -109,7 +110,7 @@
         "title": "Water Safety — Notifications",
         "description": "{notification_behavior} Saving updates only the inactive Water draft. Configured targets not present in current discovery: {unavailable_notification_targets}. {notification_test_result}",
         "data": {
-          "water_safety_notification_targets": "Wet incident & recovery notification targets",
+          "water_safety_notification_targets": "Notification targets for wet and cleared alerts (optional)",
           "water_safety_test_notification": "Test notification instead of saving"
         }
       },
@@ -117,14 +118,14 @@
         "title": "Water Safety — Sirens",
         "description": "{siren_behavior} Saving updates only the inactive Water draft. Configured targets not present in current compatible discovery: {unavailable_sirens}.",
         "data": {
-          "water_safety_siren_targets": "Alarm-output sirens"
+          "water_safety_siren_targets": "Sirens (optional)"
         }
       },
       "water_safety_shutoff_valves": {
-        "title": "Water Safety — Automatic water shutoff",
+        "title": "Water Safety — Shutoff valves",
         "description": "{shutoff_valve_behavior} Saving updates only the inactive Water draft. Configured targets not present in current compatible discovery: {unavailable_shutoff_valves}.",
         "data": {
-          "water_safety_shutoff_valve_targets": "Water shutoff valves"
+          "water_safety_shutoff_valve_targets": "Water shutoff valves (optional)"
         }
       },
       "water_safety_validation": {
@@ -134,9 +135,13 @@
           "back_to_water_safety": "Back to Water Safety"
         }
       },
+      "water_safety_abandon": {
+        "title": "Water Safety — Abandon current draft",
+        "description": "Delete this durable inactive Water Safety draft? The currently active Water Safety configuration and Heating remain unchanged."
+      },
       "water_safety_activate": {
         "title": "Water Safety — Activate configuration",
-        "description": "Activate canonical Water Safety revision {revision_id}? This changes active authority and reloads Controlel. The saved draft is removed only after activation succeeds."
+        "description": "Activate this Water Safety configuration? This replaces the currently active Water Safety configuration (if any) and reloads Controlel. The saved draft is removed only after activation succeeds."
       },
       "general_hub": {
         "title": "General — Shared settings",
@@ -146,8 +151,8 @@
         }
       },
       "start_greenfield": {
-        "title": "Heating — Required/basic setup",
-        "description": "Required: a zone name, temperature sensor, heat-source name, command mode, and enable/disable command targets. Area, floor, heat-source entity and reported actuator-state entity are optional. Saving creates a durable inactive draft with valid Core defaults for optional and advanced settings; it does not activate Heating.",
+        "title": "Heating — Basic setup",
+        "description": "Provide the temperature sensor and heat-source commands required for activation. The zone and demand policy already have valid Core defaults; area, floor, heat-source entity and reported actuator-state entity are optional. Saving creates a durable inactive draft with valid defaults for optional and advanced settings; it does not activate Heating.",
         "data": {
           "zone_display_name": "Zone name (required)",
           "zone_area": "Area (optional)",
@@ -171,12 +176,12 @@
       "resume_draft": {"title": "Continue saved Heating draft", "description": "Choose by zone name and last-saved time. Internal draft and revision identifiers are kept in diagnostics, not shown here.", "data": {"draft_id": "Saved draft"}},
       "abandon_draft": {"title": "Discard a saved Heating draft", "description": "This deletes only editable draft state. Active Heating and Water Safety stay unchanged.", "data": {"draft_id": "Saved draft"}},
       "abandon_current": {"title": "Discard this saved draft", "description": "Delete this durable inactive draft? The currently active Heating configuration and Water Safety remain unchanged."},
-      "zone": {"title": "Heating — Required/basic: Zone & demand", "description": "REQUIRED / BASIC. The zone name is required; demand values have valid Core defaults. Area and floor are optional. Saving updates only this section of the inactive draft.", "data": {"zone_display_name": "Zone name (required)", "zone_area": "Area (optional)", "zone_floor": "Floor (optional)", "target_temperature_celsius": "Target temperature (°C)", "heating_turn_on_differential_celsius": "Heating turn-on differential (°C)", "heating_turn_off_differential_celsius": "Heating turn-off differential (°C)", "heat_demand_confirmation_seconds": "Heat-demand confirmation time (seconds)"}},
+      "zone": {"title": "Heating — Basic: Zone & demand", "description": "BASIC. The draft already contains a valid zone and demand defaults. Area and floor are optional. Saving updates only this section of the inactive draft.", "data": {"zone_display_name": "Zone name", "zone_area": "Area (optional)", "zone_floor": "Floor (optional)", "target_temperature_celsius": "Target temperature (°C)", "heating_turn_on_differential_celsius": "Heating turn-on differential (°C)", "heating_turn_off_differential_celsius": "Heating turn-off differential (°C)", "heat_demand_confirmation_seconds": "Heat-demand confirmation time (seconds)"}},
       "sensor": {"title": "Heating — Required/basic: Temperature sensor", "description": "REQUIRED / BASIC. A stable Home Assistant temperature sensor is required for activation. Saving updates only this inactive draft section. A previously configured missing or unavailable entity stays visible until you explicitly replace it.", "data": {"primary_sensor_display_name": "Sensor name (required)", "primary_temperature_entity_id": "Temperature sensor (required)", "primary_measurement_max_age_seconds": "Maximum measurement age (seconds)"}},
       "heat_source": {"title": "Heating — Required/basic: Heat source commands", "description": "REQUIRED / BASIC. Enable and disable command targets are required. Commands request heat-source permission; they do not prove physical burner operation. Optional observation entities may stay empty. Missing configured entities remain visible until explicitly replaced.", "data": {"heat_source_display_name": "Heat source name (required)", "heat_source_entity_id": "Heat source entity (optional)", "heat_source_command_mode": "Command mode (required)", "enable_service_domain": "Enable service domain (required)", "enable_service_name": "Enable service name (required)", "enable_target_entity_id": "Enable target entity (required)", "disable_service_domain": "Disable service domain (required)", "disable_service_name": "Disable service name (required)", "disable_target_entity_id": "Disable target entity (required)", "reported_source_state_entity_id": "Reported actuator-state entity (optional)"}},
       "heat_delivery": {"title": "Heating — Optional: Heat delivery", "description": "OPTIONAL. The Core default is Unmanaged, so this section does not need to be opened for a normal activation. Configure it only when Controlel should command a compatible room actuator.", "data": {"heat_delivery_mode": "Delivery mode", "heat_delivery_actuator_entity_id": "Actuator climate entity (optional)", "heat_delivery_ownership": "Actuator ownership", "heat_delivery_assist_policy": "Assist policy", "heat_delivery_assist_target_celsius": "Assist target temperature (°C)"}},
       "safety_timing": {"title": "Heating — Advanced: Safety & timing", "description": "ADVANCED. Core supplies valid safety defaults; a normal installation does not need to open this section before activation. Values are seconds unless stated otherwise. Draft changes do not affect active protection until activation.", "data": {"maximum_future_skew_seconds": "Future clock tolerance (seconds)", "indeterminate_grace_period_seconds": "Sensor failure grace period (seconds)", "indeterminate_timeout_action": "Timeout action", "minimum_heating_on_seconds": "Minimum heating-on time (seconds)", "minimum_heating_off_seconds": "Minimum heating-off time (seconds)"}},
-      "diagnostics": {"title": "Heating — Advanced: Diagnostics", "description": "ADVANCED. Core supplies valid diagnostic defaults; this section is not required for activation. Changes are saved only in the inactive draft.", "data": {"diagnostic_steady_profile": "Steady diagnostic profile", "debug_configured_duration_seconds": "Debug duration (seconds)"}},
+      "diagnostics": {"title": "Heating — Advanced: Diagnostics", "description": "{diagnostics_summary}\n\nADVANCED. Core supplies valid diagnostic defaults; this section is not required for activation. Changes are saved only in the inactive draft.", "data": {"diagnostic_steady_profile": "Steady diagnostic profile", "debug_configured_duration_seconds": "Debug duration (seconds)"}},
       "notifications": {"title": "Heating — Optional: Notifications", "description": "OPTIONAL. Notifications default to disabled and are not required for activation. Clearing recipients changes only this inactive draft section.", "data": {"notifications_enabled": "Enable notifications", "notification_recipients": "Recipients", "notification_maximum_per_window": "Maximum per window", "notification_rate_window_seconds": "Rate window (seconds)", "critical_notification_maximum_per_window": "Critical maximum per window", "critical_notification_rate_window_seconds": "Critical rate window (seconds)", "notification_history_capacity": "History capacity"}},
       "heating_review": {"title": "Heating — Review & activate", "description": "{heating_review_summary}"},
       "save_draft": {"title": "Save draft", "description": "Save these edits as a new durable draft revision? Saving does not validate, canonicalize, or activate."},
@@ -192,7 +197,7 @@
       "validate": {"title": "Validate draft", "description": "Validate the saved draft against a fresh Home Assistant discovery snapshot? Validation does not activate."},
       "validation_result": {"title": "Validation result", "description": "Issues: {validation_issues}. Continue only when activation-ready."},
       "canonicalize": {"title": "Create canonical revision", "description": "Create an immutable canonical revision from this validated draft? This still does not activate it."},
-      "activate": {"title": "Heating — Confirm activation", "description": "{activation_summary}"}
+      "heating_activate": {"title": "Heating — Confirm activation", "description": "{activation_summary}"}
     },
     "error": {
       "invalid_configuration": "The configuration is invalid.",
@@ -200,9 +205,9 @@
       "invalid_water_notification_targets": "One or more notification targets are invalid or unavailable. Review the current Home Assistant notify services and try again.",
       "invalid_water_siren_targets": "One or more siren targets are incompatible or no longer registered. Select compatible Home Assistant siren entities and try again.",
       "invalid_water_shutoff_valve_targets": "One or more shutoff valve targets are incompatible or no longer registered. Select water-class Home Assistant valve entities that support closing and try again.",
-      "water_safety_validation_failed": "The Water Safety draft is not activation-ready. Complete the required sections and review it again.",
+      "water_safety_validation_failed": "The Water Safety draft is not activation-ready. Complete the required area and moisture sensor settings and review it again.",
       "water_safety_activation_failed": "Water Safety could not be activated safely. The saved draft and previous active configuration were retained.",
-      "heating_activation_failed": "Heating was not activated. See the reason above; the saved draft and all previous active module configurations were retained.",
+      "heating_activation_failed": "Heating was not activated. The specific reason and next action are shown above; the saved draft and all previous active module configurations were retained.",
       "heating_not_ready": "Heating is not ready to activate. See the named section and reason above.",
       "heating_review_failed": "Heating could not be prepared for activation. See the reason above; active configurations were not changed.",
       "validation_failed": "The draft is not activation-ready. Correct the reported issues and validate again."

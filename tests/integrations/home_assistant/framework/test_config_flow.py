@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
 from copy import deepcopy
+from pathlib import Path
+from threading import get_ident
 
 import pytest
 from homeassistant import config_entries, data_entry_flow
@@ -24,6 +27,7 @@ from controlel.infrastructure.home_assistant import (
 )
 from custom_components.controlel import config_flow as cf
 from custom_components.controlel.const import DOMAIN
+from custom_components.controlel.diagnostics import async_get_config_entry_diagnostics
 from custom_components.controlel.setup_backend import async_get_setup_backend, async_get_setup_service
 
 
@@ -263,7 +267,7 @@ async def _prepare_activation(hass, saved):
     review = await _choose(hass, saved, "heating_review")
     assert review["step_id"] == "heating_review"
     activate = await hass.config_entries.options.async_configure(review["flow_id"], {})
-    assert activate["step_id"] == "activate"
+    assert activate["step_id"] == "heating_activate"
     return activate
 
 
@@ -313,7 +317,7 @@ async def test_greenfield_save_validate_and_activation_are_separate_and_restart_
     drafts = await backend.configuration_v3.list_drafts()
     assert len(drafts) == 1
     assert drafts[0].schema_version == 3
-    assert drafts[0].revision == 8
+    assert drafts[0].revision == 3
     assert drafts[0].heating.zones[0].demand_policy.target_temperature_celsius == 22.25
     assert drafts[0].heating.zones[0].demand_policy.primary_measurement_max_age_seconds == 91.25
     assert ACTIVE_REFERENCE_KEY not in entry.data
@@ -364,12 +368,12 @@ async def test_active_v3_edit_changes_one_field_only_and_requires_explicit_activ
     initial = await _open_heating_menu(hass, entry)
     active_summary = initial["description_placeholders"]["heating_summary"]
     assert "Heating: ACTIVE" in active_summary
-    assert "Draft: NO SAVED DRAFT" in active_summary
+    assert "Draft: NO DRAFT CHANGES" in active_summary
     assert before.revision_id not in active_summary
     edit = await _choose(hass, initial, "edit_active")
     edit_summary = edit["description_placeholders"]["heating_summary"]
     assert "Heating: ACTIVE" in edit_summary
-    assert "SAVED DRAFT OPEN" in edit_summary
+    assert "DRAFT CHANGES" in edit_summary
     assert "currently active Heating configuration" in edit_summary
     saved = await _save_draft(hass, await _through_groups(hass, edit, target=23.5))
 
@@ -600,9 +604,9 @@ async def test_heating_route_reaches_existing_configuration_menu(hass) -> None:
     assert "back_to_hub" in heating["menu_options"]
     summary = heating["description_placeholders"]["heating_summary"]
     assert "Heating: NOT ACTIVE" in summary
-    assert "Draft: NO SAVED DRAFT" in summary
-    assert "NOT READY" in summary
-    assert "REQUIRED / BASIC: Zone & demand; Temperature sensor; Heat source commands" in summary
+    assert "Draft: NO DRAFT CHANGES" in summary
+    assert "NEEDS ATTENTION" in summary
+    assert "BASIC: Zone & demand. REQUIRED: Temperature sensor; Heat source commands" in summary
     assert "OPTIONAL: Heat delivery; Notifications" in summary
     assert "ADVANCED: Safety & timing; Diagnostics" in summary
 
@@ -614,7 +618,8 @@ async def test_minimum_basic_setup_is_ready_without_opening_optional_or_advanced
 
     heating = await _start_greenfield_draft(hass, entry, sensor_id, source_id)
 
-    assert cf.HEATING_REQUIRED_BASIC_SECTIONS == ("zone", "sensor", "heat_source")
+    assert cf.HEATING_BASIC_SECTIONS == ("zone",)
+    assert cf.HEATING_REQUIRED_SECTIONS == ("sensor", "heat_source")
     assert cf.HEATING_OPTIONAL_SECTIONS == ("heat_delivery", "notifications")
     assert cf.HEATING_ADVANCED_SECTIONS == ("safety_timing", "diagnostics")
     assert list(heating["menu_options"]) == list(cf.HEATING_SECTION_MENU_OPTIONS)
@@ -638,11 +643,93 @@ async def test_minimum_basic_setup_is_ready_without_opening_optional_or_advanced
     assert str(draft.revision) not in review_summary
 
     confirmation = await hass.config_entries.options.async_configure(review["flow_id"], {})
-    assert confirmation["step_id"] == "activate"
+    assert confirmation["step_id"] == "heating_activate"
     activation_summary = confirmation["description_placeholders"]["activation_summary"]
     assert "READY TO ACTIVATE" in activation_summary
     assert "Water Safety is unchanged" in activation_summary
     assert draft.draft_id not in activation_summary
+    assert "revision" not in activation_summary.lower()
+    assert confirmation["description_placeholders"] == {"activation_summary": activation_summary}
+
+    completed = await hass.config_entries.options.async_configure(confirmation["flow_id"], {})
+    assert completed["type"] is data_entry_flow.FlowResultType.CREATE_ENTRY
+    await hass.async_block_till_done()
+    assert entry.state is config_entries.ConfigEntryState.LOADED
+    assert entry.state is not config_entries.ConfigEntryState.FAILED_UNLOAD
+    assert entry.runtime_data.host is not None
+    assert entry.runtime_data.forwarded_platforms == component.PLATFORMS
+
+
+@pytest.mark.asyncio
+async def test_heating_canonicalization_resolves_core_version_off_the_event_loop(hass, monkeypatch) -> None:
+    sensor_id, source_id = _register_bindings(hass, platform="canonicalization-thread")
+    entry = await _empty_entry(hass)
+    heating = await _start_greenfield_draft(hass, entry, sensor_id, source_id)
+    event_loop_thread = get_ident()
+    version_threads: list[int] = []
+
+    def version(package: str) -> str:
+        assert package == "controlel"
+        version_threads.append(get_ident())
+        return "0.17.0-test"
+
+    monkeypatch.setattr(cf.metadata, "version", version)
+    confirmation = await _prepare_activation(hass, heating)
+
+    assert confirmation["step_id"] == "heating_activate"
+    assert version_threads
+    assert all(thread != event_loop_thread for thread in version_threads)
+
+
+def test_heating_activation_translation_and_root_labels_are_user_facing() -> None:
+    expected_labels = {
+        "heating_review": "Review & activate",
+        "abandon_current": "Abandon current draft",
+        "zone": "Zone & demand — Basic",
+        "sensor": "Temperature sensor — Required",
+        "heat_source": "Heat source commands — Required",
+        "heat_delivery": "Heat delivery — Optional",
+        "notifications": "Notifications — Optional",
+        "safety_timing": "Safety & timing — Advanced",
+        "diagnostics": "Diagnostics — Advanced",
+        "back_to_hub": "Back to Controlel Configure",
+    }
+    integration_root = Path(__file__).parents[4] / "custom_components" / "controlel"
+    documents = (
+        json.loads((integration_root / "strings.json").read_text(encoding="utf-8")),
+        json.loads((integration_root / "translations" / "en.json").read_text(encoding="utf-8")),
+    )
+
+    for document in documents:
+        option_steps = document["options"]["step"]
+        assert "activate" not in option_steps
+        assert option_steps["heating_activate"]["description"] == "{activation_summary}"
+        assert "revision_id" not in option_steps["heating_activate"]["description"]
+        labels = option_steps["heating"]["menu_options"]
+        assert {key: labels[key] for key in expected_labels} == expected_labels
+        assert "heating_activation_blocked" not in document["options"]["error"]
+        assert "heating_activation_failed" in document["options"]["error"]
+
+
+@pytest.mark.asyncio
+async def test_entity_lost_after_review_names_the_affected_activation_field(hass) -> None:
+    sensor_id, source_id = _register_bindings(hass, platform="heating-activation-reference-lost")
+    entry = await _empty_entry(hass)
+    heating = await _start_greenfield_draft(hass, entry, sensor_id, source_id)
+    confirmation = await _prepare_activation(hass, heating)
+
+    registry = er.async_get(hass)
+    registry.async_remove(sensor_id)
+    hass.states.async_remove(sensor_id)
+    failed = await hass.config_entries.options.async_configure(confirmation["flow_id"], {})
+
+    assert failed["step_id"] == "heating_activate"
+    assert failed["errors"] == {"base": "heating_activation_failed"}
+    summary = failed["description_placeholders"]["activation_summary"]
+    assert "Temperature sensor — Temperature sensor" in summary
+    assert "saved entity no longer exists in Home Assistant" in summary
+    assert "Reopen the named section" in summary
+    assert active_reference_for_module(entry.data, "heating") is None
 
 
 @pytest.mark.asyncio
@@ -662,10 +749,11 @@ async def test_missing_required_entities_name_actionable_sections_and_keep_draft
 
     reopened = await _open_heating_menu(hass, entry)
     summary = reopened["description_placeholders"]["heating_summary"]
-    assert "SAVED INACTIVE DRAFT" in summary
-    assert "NOT READY" in summary
-    assert "Temperature sensor: the saved entity no longer exists" in summary
-    assert "Heat source commands: the saved entity no longer exists" in summary
+    assert "DRAFT CHANGES" in summary
+    assert "NEEDS ATTENTION" in summary
+    assert "Temperature sensor — Temperature sensor: the saved entity no longer exists" in summary
+    assert "Heat source commands — Enable target entity: the saved entity no longer exists" in summary
+    assert "Heat source commands — Disable target entity: the saved entity no longer exists" in summary
     assert draft.draft_id not in summary
     assert active_reference_for_module(entry.data, "heating") is None
 
@@ -794,7 +882,8 @@ async def _water_drafts(hass, entry):
 async def _activate_water_draft(hass, water_menu):
     review = await _choose(hass, water_menu, "water_safety_validation")
     assert review["type"] is data_entry_flow.FlowResultType.FORM
-    assert "ready for activation" in review["description_placeholders"]["validation_summary"]
+    summary = review["description_placeholders"]["validation_summary"].lower()
+    assert "ready to activate" in summary or "ready for activation" in summary
     confirmation = await hass.config_entries.options.async_configure(review["flow_id"], {})
     assert confirmation["type"] is data_entry_flow.FlowResultType.FORM
     assert confirmation["step_id"] == "water_safety_activate"
@@ -813,46 +902,53 @@ async def _seed_water_draft(hass, entry, *, complete: bool = False):
     from controlel.application.setup import (
         BindingSelection,
         DraftRevision,
-        IdentityQuality,
-        ProviderReference,
         SelectionOrigin,
     )
+    from controlel.infrastructure.home_assistant.water_safety_discovery import async_snapshot_with_notify_services
 
+    if complete:
+        registry = er.async_get(hass)
+        if registry.async_get("binary_sensor.utility_moisture") is None:
+            registry.async_get_or_create(
+                "binary_sensor",
+                "water-configure-test",
+                "utility_moisture",
+                suggested_object_id="utility_moisture",
+                original_device_class="moisture",
+            )
+        if not hass.services.has_service("notify", "mobile_app_phone"):
+            hass.services.async_register("notify", "mobile_app_phone", lambda call: None)
+    snapshot = await async_snapshot_with_notify_services(
+        hass,
+        snapshot_id="water-fixture",
+        captured_at=datetime.now(UTC),
+    )
+    references = {reference.current_locator: reference for reference in snapshot.objects}
     backend = await async_get_setup_backend(hass, entry)
     repository = backend.repository
     now = datetime.now(UTC)
     bindings = (
-        BindingSelection(
-            role=WATER_SAFETY_SENSOR_ROLE,
-            reference=ProviderReference(
-                provider="home_assistant",
-                provider_instance_id="home",
-                object_kind="home_assistant.entity",
-                native_id="binary_sensor.utility_moisture",
-                identity_quality=IdentityQuality.STABLE,
-                current_locator="binary_sensor.utility_moisture",
+        (
+            BindingSelection(
+                role=WATER_SAFETY_SENSOR_ROLE,
+                reference=references["binary_sensor.utility_moisture"],
+                selection_origin=SelectionOrigin.MANUAL,
+                user_confirmed=complete,
             ),
-            selection_origin=SelectionOrigin.MANUAL,
-            user_confirmed=complete,
-        ),
-        BindingSelection(
-            role=DEFAULT_NOTIFICATION_ROLE,
-            reference=ProviderReference(
-                provider="home_assistant",
-                provider_instance_id="home",
-                object_kind="home_assistant.endpoint",
-                native_id="notify.mobile_app_phone",
-                identity_quality=IdentityQuality.STABLE,
-                current_locator="notify.mobile_app_phone",
+            BindingSelection(
+                role=DEFAULT_NOTIFICATION_ROLE,
+                reference=references["notify.mobile_app_phone"],
+                selection_origin=SelectionOrigin.MANUAL,
+                user_confirmed=complete,
             ),
-            selection_origin=SelectionOrigin.MANUAL,
-            user_confirmed=complete,
-        ),
+        )
+        if complete
+        else ()
     )
     draft = DraftRevision(
         draft_id="water-draft",
         revision=1,
-        environment_id="home",
+        environment_id=snapshot.provider_instance_id,
         module_key=WATER_SAFETY_MODULE_KEY,
         module_instance_id="utility-water",
         module_schema_version=1,
@@ -897,7 +993,7 @@ async def _seed_configured_water(hass, entry):
         revision_id="water-revision",
         revision=1,
         provider="home_assistant",
-        provider_instance_id="home",
+        provider_instance_id=draft.environment_id,
         created_at=now,
         actor="test",
         source="home_assistant_native_configure_test",
@@ -908,7 +1004,7 @@ async def _seed_configured_water(hass, entry):
     backend = await async_get_setup_backend(hass, entry)
     await backend.repository.add_canonical_revision(canonical)
     active = ActiveReference(
-        environment_id="home",
+        environment_id=draft.environment_id,
         module_key="water_safety",
         module_instance_id="utility-water",
         canonical_revision_id="water-revision",
@@ -934,6 +1030,123 @@ async def _activate_new_water(hass, entry) -> ActiveReference:
     return active
 
 
+@pytest.mark.parametrize(
+    ("modules", "expected_platforms"),
+    (
+        ("fresh", ()),
+        ("heating", component.PLATFORMS),
+        ("water", ()),
+        ("heating_and_water", component.PLATFORMS),
+    ),
+)
+@pytest.mark.asyncio
+async def test_entry_unload_reload_tracks_only_platforms_forwarded_for_each_module_combination(
+    hass,
+    monkeypatch,
+    modules: str,
+    expected_platforms: tuple[str, ...],
+) -> None:
+    entry = await _empty_entry(hass, title=f"Lifecycle {modules}")
+    if modules in {"heating", "heating_and_water"}:
+        await _activate_new_heating(hass, entry, platform=f"lifecycle-{modules}")
+    if modules in {"water", "heating_and_water"}:
+        await _activate_new_water(hass, entry)
+
+    assert entry.state is config_entries.ConfigEntryState.LOADED
+    assert entry.runtime_data.forwarded_platforms == expected_platforms
+    unload_calls: list[tuple[str, ...]] = []
+    manager_type = type(hass.config_entries)
+    original_unload_platforms = manager_type.async_unload_platforms
+
+    async def tracked_unload_platforms(manager, target_entry, platforms):
+        unload_calls.append(tuple(platforms))
+        return await original_unload_platforms(manager, target_entry, platforms)
+
+    monkeypatch.setattr(manager_type, "async_unload_platforms", tracked_unload_platforms)
+
+    for _ in range(2):
+        assert await hass.config_entries.async_reload(entry.entry_id)
+        await hass.async_block_till_done()
+        assert entry.state is config_entries.ConfigEntryState.LOADED
+        assert entry.state is not config_entries.ConfigEntryState.FAILED_UNLOAD
+        assert entry.runtime_data.forwarded_platforms == expected_platforms
+
+    assert unload_calls == ([expected_platforms] * 2 if expected_platforms else [])
+    assert (entry.runtime_data.host is not None) is (modules in {"heating", "heating_and_water"})
+    assert (entry.runtime_data.water_safety_host is not None) is (modules in {"water", "heating_and_water"})
+
+
+@pytest.mark.asyncio
+async def test_injected_candidate_setup_failure_rolls_back_to_reloadable_fresh_entry_with_diagnostics(
+    hass,
+    monkeypatch,
+) -> None:
+    sensor_id, source_id = _register_bindings(hass, platform="activation-rollback")
+    entry = await _empty_entry(hass, title="Activation rollback")
+    heating = await _start_greenfield_draft(hass, entry, sensor_id, source_id)
+    confirmation = await _prepare_activation(hass, heating)
+    original_initialize = component.HomeAssistantControlelHost.async_initialize
+    initialize_attempts = 0
+
+    async def fail_once(host) -> None:
+        nonlocal initialize_attempts
+        initialize_attempts += 1
+        if initialize_attempts == 1:
+            raise RuntimeError("injected candidate setup failure")
+        await original_initialize(host)
+
+    monkeypatch.setattr(component.HomeAssistantControlelHost, "async_initialize", fail_once)
+    failed = await hass.config_entries.options.async_configure(confirmation["flow_id"], {})
+    await hass.async_block_till_done()
+
+    assert failed["type"] is data_entry_flow.FlowResultType.FORM
+    assert failed["step_id"] == "heating_activate"
+    assert failed["errors"] == {"base": "heating_activation_failed"}
+    assert "Settings → System → Logs" in failed["description_placeholders"]["activation_summary"]
+    assert entry.state is config_entries.ConfigEntryState.LOADED
+    assert entry.state is not config_entries.ConfigEntryState.FAILED_UNLOAD
+    assert entry.runtime_data.host is None
+    assert entry.runtime_data.forwarded_platforms == ()
+    assert active_reference_for_module(entry.data, "heating") is None
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+    readiness = diagnostics["configuration_readiness"]
+    assert readiness["config_entry_state"] == "loaded"
+    assert readiness["heating"] == {
+        "configured": False,
+        "runtime_loaded": False,
+        "runtime_ready": False,
+    }
+    assert readiness["heating_draft"]["saved_count"] == 1
+    assert readiness["heating_draft"]["latest_revision"] == 1
+    assert diagnostics["last_lifecycle_failure"]["setup"]["exception_chain"][0] == {
+        "exception_type": "RuntimeError",
+        "message": "injected candidate setup failure",
+    }
+    assert diagnostics["last_lifecycle_failure"]["activation"] is not None
+
+    backend = await async_get_setup_backend(hass, entry)
+    (draft,) = await backend.configuration_v3.list_drafts()
+    hass.config_entries.options.async_abort(failed["flow_id"])
+    resume = await _choose(hass, await _open_heating_menu(hass, entry), "resume_draft")
+    resumed = await hass.config_entries.options.async_configure(
+        resume["flow_id"],
+        {"draft_id": draft.draft_id},
+    )
+    diagnostics_form = await _choose(hass, resumed, "diagnostics")
+    diagnostics_summary = diagnostics_form["description_placeholders"]["diagnostics_summary"]
+    assert "Configuration readiness: READY TO ACTIVATE" in diagnostics_summary
+    assert "Last setup failure: RuntimeError at" in diagnostics_summary
+    assert "Last activation failure: SetupConflictError at" in diagnostics_summary
+    assert "Settings → System → Logs" in diagnostics_summary
+    hass.config_entries.options.async_abort(diagnostics_form["flow_id"])
+
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.state is config_entries.ConfigEntryState.LOADED
+    assert entry.runtime_data.host is None
+
+
 @pytest.mark.asyncio
 async def test_water_safety_native_menu_structure(hass) -> None:
     entry = await _empty_entry(hass)
@@ -942,20 +1155,16 @@ async def test_water_safety_native_menu_structure(hass) -> None:
     assert all("wizard" not in option for option in water["menu_options"])
     assert "water_safety_sensor_fault" not in water["menu_options"]
     assert "water_safety_messages" not in water["menu_options"]
-    assert "not configured" in water["description_placeholders"]["water_safety_summary"].lower()
+    assert "water_safety_abandon" not in water["menu_options"]
+    summary = water["description_placeholders"]["water_safety_summary"].lower()
+    assert "not active" in summary
+    assert "no draft changes" in summary
 
 
 @pytest.mark.asyncio
 async def test_water_safety_submenu_navigation_returns_to_module_menu(hass) -> None:
     entry = await _empty_entry(hass)
     water = await _open_water_menu(hass, entry)
-    for step_id in ("water_safety_status",):
-        section = await _choose(hass, water, step_id)
-        assert section["step_id"] == step_id
-        assert section["menu_options"] == ["back_to_water_safety"]
-        assert "section_detail" in section["description_placeholders"]
-        water = await _choose(hass, section, "back_to_water_safety")
-        assert water["step_id"] == "water_safety"
 
     notifications = await _choose(hass, water, "water_safety_notifications")
     assert notifications["type"] is data_entry_flow.FlowResultType.FORM
@@ -1005,13 +1214,14 @@ async def test_water_safety_back_to_hub_navigation(hass) -> None:
 async def test_fresh_water_safety_menu_reports_not_configured(hass) -> None:
     entry = await _empty_entry(hass)
     water = await _open_water_menu(hass, entry)
-    status = await _choose(hass, water, "water_safety_status")
-    assert status["description_placeholders"]["section_detail"] == "Not configured."
-    area = await _choose(hass, await _choose(hass, status, "back_to_water_safety"), "water_safety_area_sensor")
+    summary = water["description_placeholders"]["water_safety_summary"]
+    assert "NOT ACTIVE" in summary
+    assert "NO DRAFT CHANGES" in summary
+    assert "Disabled" not in summary
+    area = await _choose(hass, water, "water_safety_area_sensor")
     assert area["type"] is data_entry_flow.FlowResultType.FORM
     assert cf.WATER_AREA not in _defaults(area)
     assert cf.WATER_MOISTURE_SENSOR not in _defaults(area)
-    assert "Disabled" not in water["description_placeholders"]["water_safety_summary"]
 
 
 @pytest.mark.asyncio
@@ -1032,7 +1242,7 @@ async def test_water_area_only_save_is_partial_durable_and_reloadable(hass) -> N
     )
 
     assert saved_menu["step_id"] == "water_safety"
-    assert "Draft incomplete" in saved_menu["description_placeholders"]["water_safety_summary"]
+    assert "NEEDS ATTENTION" in saved_menu["description_placeholders"]["water_safety_summary"]
     draft = (await _water_drafts(hass, entry))[0]
     assert dict(draft.settings) == {
         "zone_id": utility.id,
@@ -1149,7 +1359,7 @@ async def test_water_existing_draft_can_change_and_clear_area_sensor_section(has
     assert cleared.revision == changed.revision + 1
     assert dict(cleared.settings) == {}
     assert cleared.bindings == ()
-    assert "Draft incomplete" in cleared_menu["description_placeholders"]["water_safety_summary"]
+    assert "NEEDS ATTENTION" in cleared_menu["description_placeholders"]["water_safety_summary"]
 
 
 @pytest.mark.asyncio
@@ -1177,7 +1387,7 @@ async def test_water_notification_defaults_save_empty_incomplete_draft(hass) -> 
     saved = await hass.config_entries.options.async_configure(form["flow_id"], _defaults(form))
 
     assert saved["step_id"] == "water_safety"
-    assert "Draft incomplete" in saved["description_placeholders"]["water_safety_summary"]
+    assert "NEEDS ATTENTION" in saved["description_placeholders"]["water_safety_summary"]
     draft = (await _water_drafts(hass, entry))[0]
     assert dict(draft.settings) == {"notification_target_roles": ()}
     assert draft.bindings == ()
@@ -1186,7 +1396,15 @@ async def test_water_notification_defaults_save_empty_incomplete_draft(hass) -> 
     assert report is not None
     assert report.activation_ready is False
     assert report.issues
+    assert all(issue.code != "water_safety.unsupported_binding_role" for issue in report.issues)
     assert ACTIVE_REFERENCE_KEY not in entry.data
+    review = await _choose(hass, saved, "water_safety_validation")
+    summary = review["description_placeholders"]["validation_summary"]
+    assert "notification" not in summary.lower() or "optional" in summary.lower()
+    assert "Moisture sensor is required" in summary
+    assert "unexpected binding" not in summary
+    assert "invalid setting" not in summary
+    assert "water_safety." not in summary
 
 
 @pytest.mark.asyncio
@@ -1250,7 +1468,7 @@ async def test_water_notification_multiple_targets_can_be_edited_and_cleared(has
     assert cleared.revision == edited.revision + 1
     assert list(cleared.settings["notification_target_roles"]) == []
     assert cleared.bindings == ()
-    assert "Draft incomplete" in cleared_menu["description_placeholders"]["water_safety_summary"]
+    assert "NEEDS ATTENTION" in cleared_menu["description_placeholders"]["water_safety_summary"]
 
 
 @pytest.mark.asyncio
@@ -1361,7 +1579,7 @@ async def test_water_siren_defaults_save_no_output_in_incomplete_draft(hass) -> 
     saved = await hass.config_entries.options.async_configure(form["flow_id"], _defaults(form))
 
     assert saved["step_id"] == "water_safety"
-    assert "Draft incomplete" in saved["description_placeholders"]["water_safety_summary"]
+    assert "NEEDS ATTENTION" in saved["description_placeholders"]["water_safety_summary"]
     draft = (await _water_drafts(hass, entry))[0]
     assert dict(draft.settings) == {"siren_target_roles": ()}
     assert draft.bindings == ()
@@ -1420,7 +1638,7 @@ async def test_water_multiple_sirens_are_durable_reloadable_editable_and_clearab
     assert cleared.revision == edited.revision + 1
     assert list(cleared.settings["siren_target_roles"]) == []
     assert cleared.bindings == ()
-    assert "Draft incomplete" in cleared_menu["description_placeholders"]["water_safety_summary"]
+    assert "NEEDS ATTENTION" in cleared_menu["description_placeholders"]["water_safety_summary"]
 
 
 @pytest.mark.asyncio
@@ -1564,10 +1782,10 @@ async def test_draft_incomplete_water_safety_menu(hass) -> None:
     entry = await _empty_entry(hass)
     await _seed_water_draft(hass, entry, complete=False)
     water = await _open_water_menu(hass, entry)
-    assert "incomplete draft" in water["description_placeholders"]["water_safety_summary"]
+    assert "NEEDS ATTENTION" in water["description_placeholders"]["water_safety_summary"]
     validation = await _choose(hass, water, "water_safety_validation")
     assert validation["type"] is data_entry_flow.FlowResultType.FORM
-    assert "incomplete" in validation["description_placeholders"]["validation_summary"]
+    assert "needs attention" in validation["description_placeholders"]["validation_summary"].lower()
 
 
 @pytest.mark.asyncio
@@ -1577,7 +1795,11 @@ async def test_configured_water_safety_menu(hass) -> None:
     assert await component.async_setup(hass, {})
     _draft, _canonical, active = await _seed_configured_water(hass, entry)
     water = await _open_water_menu(hass, entry)
-    assert active.canonical_revision_id in water["description_placeholders"]["water_safety_summary"]
+    summary = water["description_placeholders"]["water_safety_summary"]
+    assert "ACTIVE" in summary
+    assert "DRAFT CHANGES" in summary
+    assert "READY TO ACTIVATE" in summary
+    assert active.canonical_revision_id not in summary
     area = await _choose(hass, water, "water_safety_area_sensor")
     assert _suggested(area, cf.WATER_AREA) == "utility-room"
     assert _suggested(area, cf.WATER_MOISTURE_SENSOR) == "binary_sensor.utility_moisture"
@@ -1611,7 +1833,9 @@ async def test_water_active_configuration_is_unchanged_by_native_draft_edit(hass
     assert edited.settings["area_id"] == garage.id
     assert edited.base_active_revision_id == active.canonical_revision_id
     assert edited.environment_id == active.environment_id
-    assert active.canonical_revision_id in saved["description_placeholders"]["water_safety_summary"]
+    saved_summary = saved["description_placeholders"]["water_safety_summary"]
+    assert "NEEDS ATTENTION" in saved_summary
+    assert active.canonical_revision_id not in saved_summary
 
 
 @pytest.mark.asyncio
@@ -1656,7 +1880,8 @@ async def test_complete_native_water_lifecycle_activation_restart_edit_and_missi
         siren,
         valve,
     }
-    assert "Draft ready" in water["description_placeholders"]["water_safety_summary"]
+    assert "READY TO ACTIVATE" in water["description_placeholders"]["water_safety_summary"]
+    assert "DRAFT CHANGES" in water["description_placeholders"]["water_safety_summary"]
 
     activated = await _activate_water_draft(hass, water)
     assert activated["type"] is data_entry_flow.FlowResultType.CREATE_ENTRY, activated
@@ -1671,7 +1896,9 @@ async def test_complete_native_water_lifecycle_activation_restart_edit_and_missi
     )
 
     configured = await _open_water_menu(hass, entry)
-    assert first_active.canonical_revision_id in configured["description_placeholders"]["water_safety_summary"]
+    configured_summary = configured["description_placeholders"]["water_safety_summary"]
+    assert "active" in configured_summary.lower() and "no draft changes" in configured_summary.lower()
+    assert first_active.canonical_revision_id not in configured_summary
     area = await _choose(hass, configured, "water_safety_area_sensor")
     assert _suggested(area, cf.WATER_AREA) == utility.id
     assert _suggested(area, cf.WATER_MOISTURE_SENSOR) == moisture
@@ -1682,7 +1909,9 @@ async def test_complete_native_water_lifecycle_activation_restart_edit_and_missi
     assert await hass.config_entries.async_reload(entry.entry_id)
     await hass.async_block_till_done()
     restarted = await _open_water_menu(hass, entry)
-    assert first_active.canonical_revision_id in restarted["description_placeholders"]["water_safety_summary"]
+    restarted_summary = restarted["description_placeholders"]["water_safety_summary"]
+    assert "active" in restarted_summary.lower() and "no draft changes" in restarted_summary.lower()
+    assert first_active.canonical_revision_id not in restarted_summary
 
     er.async_get(hass).async_remove(moisture)
     hass.states.async_remove(moisture)
@@ -1731,12 +1960,13 @@ async def test_complete_native_water_lifecycle_activation_restart_edit_and_missi
     }
 
     reactivated = await _activate_water_draft(hass, edited_menu)
-    assert reactivated["type"] is data_entry_flow.FlowResultType.CREATE_ENTRY, reactivated
+    # The required sensor and valve are still absent: a failed reload must not
+    # publish the edited candidate or delete the user's retryable draft.
+    assert reactivated["type"] is data_entry_flow.FlowResultType.FORM, reactivated
+    assert reactivated["errors"] == {"base": "water_safety_activation_failed"}
     await hass.async_block_till_done()
-    second_active = ActiveReference.model_validate(entry.data[ACTIVE_REFERENCE_KEY])
-    assert second_active.canonical_revision_id != first_active.canonical_revision_id
-    assert second_active.generation == first_active.generation + 1
-    assert await _water_drafts(hass, entry) == ()
+    assert ActiveReference.model_validate(entry.data[ACTIVE_REFERENCE_KEY]) == first_active
+    assert await _water_drafts(hass, entry) == (edited_draft,)
     reopened_sirens = await _choose(
         hass,
         await _open_water_menu(hass, entry),
@@ -1757,7 +1987,11 @@ async def test_failed_native_water_activation_retains_draft_and_prior_authority(
         entry.runtime_data.loaded_water_safety_configuration.canonical_revision_id == prior_active.canonical_revision_id
     )
 
-    async def fail_candidate_start(*_args, **_kwargs):
+    original_build = WaterSafetyActivationService._async_build_and_start_host
+
+    async def fail_candidate_start(self, hass, entry, effective, **kwargs):
+        if effective.canonical_revision_id == prior_active.canonical_revision_id:
+            return await original_build(self, hass, entry, effective, **kwargs)
         raise RuntimeError("candidate runtime did not reach readiness")
 
     monkeypatch.setattr(
@@ -1876,17 +2110,23 @@ async def test_failed_native_heating_activation_preserves_heating_and_water_auth
     activate = await _prepare_activation(hass, edited)
 
     async def fail_activation_reload(*_args, **_kwargs):
-        raise RuntimeError("candidate runtime did not reach readiness")
+        raise activation_backend._ConfigEntryReloadError(
+            state="setup_error",
+            reason="Configured Heating service could not be loaded",
+        )
 
     monkeypatch.setattr(activation_backend, "_require_reload_success", fail_activation_reload)
     failed = await hass.config_entries.options.async_configure(activate["flow_id"], {})
 
     assert failed["type"] is data_entry_flow.FlowResultType.FORM
-    assert failed["step_id"] == "activate"
+    assert failed["step_id"] == "heating_activate"
     assert failed["errors"] == {"base": "heating_activation_failed"}
     failure_summary = failed["description_placeholders"]["activation_summary"]
     assert "ACTIVATION DID NOT COMPLETE" in failure_summary
-    assert "could not start the candidate Heating runtime during reload" in failure_summary
+    assert "did not complete the Controlel reload" in failure_summary
+    assert "Home Assistant reported: Configured Heating service could not be loaded" in failure_summary
+    assert "Settings → System → Logs" in failure_summary
+    assert "Review & activate again" in failure_summary
     assert "saved draft and every previously active module configuration were retained" in failure_summary
     assert active_reference_for_module(entry.data, "heating") == heating
     assert active_reference_for_module(entry.data, "water_safety") == water
@@ -1912,7 +2152,11 @@ async def test_failed_water_activation_preserves_both_active_module_authorities(
         {cf.WATER_SIREN_TARGETS: [siren]},
     )
 
-    async def fail_candidate_start(*_args, **_kwargs):
+    original_build = WaterSafetyActivationService._async_build_and_start_host
+
+    async def fail_candidate_start(self, hass, entry, effective, **kwargs):
+        if effective.canonical_revision_id == water.canonical_revision_id:
+            return await original_build(self, hass, entry, effective, **kwargs)
         raise RuntimeError("candidate runtime did not reach readiness")
 
     monkeypatch.setattr(
@@ -1938,7 +2182,7 @@ async def test_failed_water_activation_preserves_both_active_module_authorities(
 async def test_water_menu_has_no_route_to_frozen_wizard(hass) -> None:
     entry = await _empty_entry(hass)
     water = await _open_water_menu(hass, entry)
-    assert water["menu_options"][0] == "water_safety_status"
+    assert water["menu_options"][0] == "water_safety_validation"
     assert all("wizard" not in option for option in water["menu_options"])
 
 
@@ -1952,8 +2196,10 @@ async def test_general_reopens_after_reload_without_changing_heating_or_water(ha
 
     general = await _choose(hass, await _open_hub(hass, entry), "general_hub")
     summary = general["description_placeholders"]["general_summary"]
-    assert f"Heating is active revision {heating.canonical_revision_id}" in summary
-    assert f"Water Safety is active revision {water.canonical_revision_id}" in summary
+    assert "Heating is active." in summary
+    assert "Water Safety is active." in summary
+    assert heating.canonical_revision_id not in summary
+    assert water.canonical_revision_id not in summary
     assert entry.data == before_data
     assert entry.options == before_options
 
@@ -2078,8 +2324,10 @@ async def test_complete_native_configure_baseline_from_fresh_entry_to_independen
 
     general = await _choose(hass, await _open_hub(hass, entry), "general_hub")
     summary = general["description_placeholders"]["general_summary"]
-    assert updated_heating.canonical_revision_id in summary
-    assert water.canonical_revision_id in summary
+    assert "Heating is active." in summary
+    assert "Water Safety is active." in summary
+    assert updated_heating.canonical_revision_id not in summary
+    assert water.canonical_revision_id not in summary
 
 
 @pytest.mark.asyncio

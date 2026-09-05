@@ -16,7 +16,7 @@ from scripts.packaging.build_development_composition import (
 )
 
 ROOT = Path(__file__).parents[2]
-CORE_VERSION = "0.17.0"
+CORE_VERSION = "0.18.0"
 
 
 def _core_wheel(path: Path, *, version: str = CORE_VERSION) -> Path:
@@ -36,7 +36,7 @@ def test_development_bundle_contains_matching_frontend_and_core_without_mutating
     release_manifest_path = ROOT / "custom_components" / "controlel" / "manifest.json"
     release_manifest_before = release_manifest_path.read_bytes()
     wheel = _core_wheel(tmp_path)
-    output = tmp_path / "controlel-dev-0.17.0.zip"
+    output = tmp_path / "controlel-dev-0.18.0.zip"
 
     composition = build_development_composition(
         output,
@@ -47,8 +47,8 @@ def test_development_bundle_contains_matching_frontend_and_core_without_mutating
     assert release_manifest_path.read_bytes() == release_manifest_before
     assert composition["publishable"] is False
     assert composition["core"]["version"] == CORE_VERSION
-    assert composition["integration"]["release_source_requirement"] == "controlel==0.17.0"
-    assert composition["integration"]["development_requirement"] == "controlel==0.17.0"
+    assert composition["integration"]["release_source_requirement"] == "controlel==0.18.0"
+    assert composition["integration"]["development_requirement"] == "controlel==0.18.0"
     validated = validate_development_composition(output, expected_core_version=CORE_VERSION)
     assert validated == composition
 
@@ -61,7 +61,7 @@ def test_development_bundle_contains_matching_frontend_and_core_without_mutating
         ]
         with zipfile.ZipFile(io.BytesIO(bundle.read("integration/controlel.zip"))) as integration:
             manifest = json.loads(integration.read("manifest.json"))
-            assert manifest["requirements"] == ["controlel==0.17.0"]
+            assert manifest["requirements"] == ["controlel==0.18.0"]
             assert manifest["version"] == "0.14.0"
             assert not any(name.startswith("controlel/") for name in integration.namelist())
 
@@ -80,7 +80,7 @@ def test_development_bundle_is_deterministic_for_the_same_inputs(tmp_path: Path)
 def test_development_bundle_rejects_a_relabelled_or_mismatched_core(tmp_path: Path) -> None:
     wrong_wheel = _core_wheel(tmp_path, version="0.14.0")
 
-    with pytest.raises(DevelopmentCompositionError, match="expected controlel 0.17.0"):
+    with pytest.raises(DevelopmentCompositionError, match="expected controlel 0.18.0"):
         build_development_composition(
             tmp_path / "wrong.zip",
             source_ref="test-source-ref",

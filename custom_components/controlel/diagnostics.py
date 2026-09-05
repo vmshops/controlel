@@ -11,6 +11,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 
 from controlel.application.state.heating_diagnostics import heating_diagnostics_to_dict
+from controlel.infrastructure.home_assistant import active_reference_for_module
 
 from . import ControlelEntryRuntime
 from .config import HomeAssistantIntegrationConfig
@@ -49,7 +50,9 @@ from .const import (
     CONF_ZONE_NAME,
     CONTROL_MODE_CUSTOM,
 )
+from .lifecycle_diagnostics import lifecycle_failures_for_entry
 from .operational import snapshot_to_dict, trace_to_dict
+from .setup_backend import async_get_setup_backend
 
 _COMMON_MUTABLE_KEYS = (
     CONF_ZONE_NAME,
@@ -298,22 +301,60 @@ def _precedence_source(
     return "new_entry_default"
 
 
+def _config_entry_state(entry: ConfigEntry[ControlelEntryRuntime]) -> str:
+    state = getattr(entry, "state", "unknown")
+    return str(getattr(state, "value", state))
+
+
+async def _configuration_readiness(
+    hass: HomeAssistant,
+    entry: ConfigEntry[ControlelEntryRuntime],
+    runtime_data: ControlelEntryRuntime | None,
+) -> dict[str, object]:
+    heating_active = active_reference_for_module(entry.data, "heating")
+    water_active = active_reference_for_module(entry.data, "water_safety")
+    host = None if runtime_data is None else runtime_data.host
+    water_host = None if runtime_data is None else runtime_data.water_safety_host
+    backend = await async_get_setup_backend(hass, entry)
+    drafts = await backend.configuration_v3.list_drafts()
+    latest_draft = max(drafts, key=lambda item: item.updated_at) if drafts else None
+    return {
+        "config_entry_state": _config_entry_state(entry),
+        "config_entry_reason": (None if getattr(entry, "reason", None) is None else str(entry.reason)),
+        "heating": {
+            "configured": heating_active is not None,
+            "runtime_loaded": host is not None,
+            "runtime_ready": bool(host is not None and host.frontend_api_setup_ready),
+        },
+        "water_safety": {
+            "configured": water_active is not None,
+            "runtime_loaded": water_host is not None,
+        },
+        "heating_draft": {
+            "saved_count": len(drafts),
+            "latest_revision": None if latest_draft is None else latest_draft.revision,
+        },
+    }
+
+
 async def async_get_config_entry_diagnostics(
     hass: HomeAssistant,
     entry: ConfigEntry[ControlelEntryRuntime],
 ) -> dict[str, Any]:
-    runtime_data = entry.runtime_data
-    host = runtime_data.host
+    runtime_data = getattr(entry, "runtime_data", None)
+    host = None if runtime_data is None else runtime_data.host
+    config = None if runtime_data is None else runtime_data.config
+    result: dict[str, Any] = {
+        "configuration": None if config is None else _normalized_config(config),
+        "configuration_provenance": (
+            None if config is None else _configuration_provenance(entry.data, entry.options, config)
+        ),
+        "configuration_readiness": await _configuration_readiness(hass, entry, runtime_data),
+        "last_lifecycle_failure": lifecycle_failures_for_entry(hass, entry.entry_id),
+        "runtime": {"status": "unloaded" if host is None else "active"},
+    }
     if host is None:
-        return {
-            "configuration": _normalized_config(runtime_data.config),
-            "configuration_provenance": _configuration_provenance(
-                entry.data,
-                entry.options,
-                runtime_data.config,
-            ),
-            "runtime": {"status": "unloaded"},
-        }
+        return result
 
     snapshot = host.snapshot_source.snapshot_at(datetime.now(UTC))
     registry = er.async_get(hass)
@@ -322,34 +363,31 @@ async def async_get_config_entry_diagnostics(
     operational_events = host.operational_event_diagnostics()
     user_activities = host.user_activity_diagnostics()
     notification_policy = host.notification_diagnostics()
-    return {
-        "configuration": _normalized_config(runtime_data.config),
-        "configuration_provenance": _configuration_provenance(
-            entry.data,
-            entry.options,
-            runtime_data.config,
-        ),
-        "versions": {
-            "integration": snapshot.integration_version,
-            "core": snapshot.core_version,
-        },
-        "operational_snapshot": snapshot_to_dict(snapshot),
-        "decision_trace": trace_to_dict(host.snapshot_source.trace),
-        "observability": host.observability.diagnostics(datetime.now(UTC)),
-        "heat_delivery": [_heat_delivery_state(state) for state in host.heat_delivery_states],
-        "heating_diagnostics": heating_diagnostics_to_dict(snapshot.heating_diagnostics),
-        "runtime_supervision": host.runtime_supervision_diagnostics(),
-        "operational_events": operational_events,
-        "user_activities": user_activities,
-        "notification_policy": notification_policy,
-        "source_resilience": source_resilience,
-        "counters": {
-            "snapshot_revision": snapshot.revision,
-            "decision_trace_records": len(host.snapshot_source.trace),
-            "operational_event_records": operational_events["retained_count"],
-            "user_activity_records": user_activities["retained_count"],
-            "duplicate_commands_suppressed": snapshot.duplicate_commands_suppressed,
-        },
-        "entity_ids": entity_ids,
-        "active_issue_ids": list(host.active_issue_ids),
-    }
+    result.update(
+        {
+            "versions": {
+                "integration": snapshot.integration_version,
+                "core": snapshot.core_version,
+            },
+            "operational_snapshot": snapshot_to_dict(snapshot),
+            "decision_trace": trace_to_dict(host.snapshot_source.trace),
+            "observability": host.observability.diagnostics(datetime.now(UTC)),
+            "heat_delivery": [_heat_delivery_state(state) for state in host.heat_delivery_states],
+            "heating_diagnostics": heating_diagnostics_to_dict(snapshot.heating_diagnostics),
+            "runtime_supervision": host.runtime_supervision_diagnostics(),
+            "operational_events": operational_events,
+            "user_activities": user_activities,
+            "notification_policy": notification_policy,
+            "source_resilience": source_resilience,
+            "counters": {
+                "snapshot_revision": snapshot.revision,
+                "decision_trace_records": len(host.snapshot_source.trace),
+                "operational_event_records": operational_events["retained_count"],
+                "user_activity_records": user_activities["retained_count"],
+                "duplicate_commands_suppressed": snapshot.duplicate_commands_suppressed,
+            },
+            "entity_ids": entity_ids,
+            "active_issue_ids": list(host.active_issue_ids),
+        }
+    )
+    return result

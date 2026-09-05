@@ -33,7 +33,7 @@ else:
 
 ROOT = Path(__file__).parents[2]
 COMPOSITION_SCHEMA_VERSION = 1
-DEVELOPMENT_CORE_VERSION = "0.17.0"
+DEVELOPMENT_CORE_VERSION = "0.18.0"
 ARCHIVE_PREFIX = "controlel-dev"
 
 
@@ -236,7 +236,7 @@ def validate_development_composition(archive_path: Path, *, expected_core_versio
         raise DevelopmentCompositionError("development integration hash does not match")
     if integration.get("development_requirement") != f"controlel=={expected_core_version}":
         raise DevelopmentCompositionError("development integration requirement does not match Core")
-    if integration.get("release_source_requirement") != "controlel==0.17.0":
+    if integration.get("release_source_requirement") != "controlel==0.18.0":
         raise DevelopmentCompositionError("published integration requirement history was not preserved")
     wheel_name, wheel_version = _wheel_identity(wheel_content)
     if (wheel_name.casefold(), wheel_version) != ("controlel", expected_core_version):

@@ -111,7 +111,7 @@ async def _prepare_activation(hass, saved):
     review = await _choose(hass, saved, "heating_review")
     assert review["step_id"] == "heating_review"
     activate = await hass.config_entries.options.async_configure(review["flow_id"], {})
-    assert activate["step_id"] == "activate"
+    assert activate["step_id"] == "heating_activate"
     return activate
 
 
