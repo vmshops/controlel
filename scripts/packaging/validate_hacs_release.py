@@ -12,6 +12,34 @@ import zipfile
 from collections.abc import Iterable, Mapping
 from pathlib import Path, PurePosixPath
 
+if __package__:
+    from .integration_runtime_files import (
+        DEV_ONLY_ARCHIVE_FILES,
+        discover_integration_runtime_files,
+        is_dev_only_archive_file,
+    )
+else:
+    from integration_runtime_files import (  # type: ignore[no-redef]
+        DEV_ONLY_ARCHIVE_FILES,
+        discover_integration_runtime_files,
+        is_dev_only_archive_file,
+    )
+
+# Keep historical import paths stable for packaging callers/tests.
+__all__ = (
+    "ARCHIVE_FILENAME",
+    "DEV_ONLY_ARCHIVE_FILES",
+    "EXPECTED_ARCHIVE_FILES",
+    "EXPECTED_HACS_MANIFEST",
+    "FIXED_ZIP_MODE",
+    "FIXED_ZIP_TIMESTAMP",
+    "HacsReleaseValidationError",
+    "ROOT",
+    "validate_archive",
+    "validate_source",
+    "write_checksum",
+)
+
 ROOT = Path(__file__).parents[2]
 DOMAIN = "controlel"
 ARCHIVE_FILENAME = "controlel.zip"
@@ -22,6 +50,8 @@ HOME_ASSISTANT_VERSION = "2026.7.3"
 FIXED_ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
 FIXED_ZIP_MODE = stat.S_IFREG | 0o644
 
+# Explicit HACS release registration. Discovery is the filesystem source of
+# truth; this allowlist is the stricter public-release gate that must match it.
 EXPECTED_ARCHIVE_FILES = frozenset(
     {
         "__init__.py",
@@ -43,6 +73,7 @@ EXPECTED_ARCHIVE_FILES = frozenset(
         "heat_delivery.py",
         "host.py",
         "legacy_config_converter.py",
+        "lifecycle_diagnostics.py",
         "manifest.json",
         "measurement_ingestion.py",
         "notification_renderer.py",
@@ -60,6 +91,8 @@ EXPECTED_ARCHIVE_FILES = frozenset(
         "water_safety_activation.py",
         "water_safety_area_sensor.py",
         "water_safety_configure_view.py",
+        "water_safety_draft_semantics.py",
+        "water_safety_messages.py",
         "water_safety_notifications.py",
         "water_safety_shutoff_valves.py",
         "water_safety_sirens.py",
@@ -76,27 +109,12 @@ EXPECTED_ARCHIVE_FILES = frozenset(
         "frontend/styles.css",
         "frontend/wizard.js",
         "frontend/water-wizard.js",
+        "translations/cs.json",
     }
 )
 
-# Development-only frontend files that must not ship in the HACS release.
-# The runtime panel loads only the files listed in EXPECTED_ARCHIVE_FILES;
-# the demo pages, documentation, and Node test harness are dev tooling.
-DEV_ONLY_ARCHIVE_FILES = frozenset(
-    {
-        "frontend/index.html",
-        "frontend/wizard.html",
-        "frontend/water-wizard.html",
-        "frontend/README.md",
-        "frontend/mock-data.js",
-        "frontend/mock-app-data.js",
-    }
-)
-
-
-def _is_dev_only_archive_file(name: str) -> bool:
-    """Return True for development-only files that must not ship in the release."""
-    return name in DEV_ONLY_ARCHIVE_FILES or name.startswith("frontend/tests/")
+# Re-exported for callers that historically imported these from this module.
+_is_dev_only_archive_file = is_dev_only_archive_file
 
 
 EXPECTED_HACS_MANIFEST = {
@@ -197,21 +215,10 @@ def _scan_for_secrets(files: Mapping[str, bytes], *, source: str) -> None:
 
 
 def _source_file_map(component: Path) -> dict[str, bytes]:
-    files: dict[str, bytes] = {}
-    for path in component.rglob("*"):
-        if not path.is_file():
-            continue
-        relative = path.relative_to(component)
-        if "__pycache__" in relative.parts or path.suffix in {".pyc", ".pyo"}:
-            continue
-        name = relative.as_posix()
-        if _is_dev_only_archive_file(name):
-            continue
-        try:
-            files[name] = path.read_bytes()
-        except OSError as error:
-            raise HacsReleaseValidationError(f"cannot read integration source {path}") from error
-    return files
+    try:
+        return discover_integration_runtime_files(component)
+    except OSError as error:
+        raise HacsReleaseValidationError(f"cannot read integration source under {component}") from error
 
 
 def validate_source(root: Path, *, version: str) -> dict[str, bytes]:

@@ -20,6 +20,29 @@ activate revisions, mutate canonical drafts, or issue runtime control commands.
 When configuration is required, the panel directs users to **Settings → Devices
 & services → Controlel → Configure** in Home Assistant.
 
+## Native Configure UX contract (product requirement)
+
+This contract applies to every current and future Controlel editable
+configuration screen in native Home Assistant Configure (Heating, Water Safety,
+and all future modules). It is a recorded product requirement; native flows are
+not reopened merely to implement new Back buttons in a documentation update.
+
+- The user must have an obvious **Back / Cancel without saving** path.
+- Navigation itself must never mutate configuration.
+- Opening a form must never create a draft merely to display current or default
+  values.
+- Back / Cancel must return to the previous Configure level without saving.
+- Save / Submit must represent an explicit user intent to change configuration.
+- The user must never be forced to choose only between leaving Configure
+  entirely (for example the Home Assistant dialog close control) and Submit
+  that might save values they did not intend to change.
+- Active canonical configuration remains authoritative until explicit successful
+  activation.
+
+Related follow-up (do not expand scope here): ensure every native section form
+exposes that Back / Cancel path where Home Assistant options-flow UX allows it
+cleanly.
+
 ## Required development order for every new module
 
 Follow this sequence for each new Controlel module. Do not skip layers or imply

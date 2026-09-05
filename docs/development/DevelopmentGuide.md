@@ -63,8 +63,12 @@ artifact before running both HA suites.
 
 The non-publishable development composition described in
 `HomeAssistantDevelopmentComposition.md` remains available for offline HAOS
-testing when PyPI access is unavailable. It bundles the exact Core wheel with
-the integration ZIP without changing the source manifest.
+testing when PyPI access is unavailable. For ordinary manual HA OS testing, use
+the canonical bundle workflow in `HomeAssistantManualTestBundle.md`:
+
+```text
+python scripts/packaging/build_ha_test_bundle.py
+```
 
 Home Assistant 2026.7.3 imports POSIX-only `fcntl` and `resource` modules in
 its pytest bootstrap, so the standard framework command does not run in native

@@ -1,5 +1,9 @@
 # Home Assistant development composition
 
+> For ordinary manual Home Assistant OS testing, use the canonical workflow in
+> [HomeAssistantManualTestBundle.md](HomeAssistantManualTestBundle.md) instead:
+> `python scripts/packaging/build_ha_test_bundle.py`.
+
 The development composition is a local-test artifact that keeps one integration
 ZIP and its exact Core wheel together. It is intentionally non-publishable. The
 source integration manifest requires immutable, published `controlel==0.16.0`;

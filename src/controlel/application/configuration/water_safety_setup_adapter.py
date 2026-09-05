@@ -170,7 +170,7 @@ class WaterSafetySetupPayload(BaseModel):
     critical_sensor: bool = False
     unavailable_grace_seconds: float = Field(default=60.0, ge=0, le=MAX_UNAVAILABLE_GRACE_SECONDS)
     fault_repeat_interval_seconds: float | None = Field(default=None, ge=1, le=MAX_FAULT_REPEAT_SECONDS)
-    notification_target_roles: tuple[str, ...] = Field(min_length=1, max_length=MAX_NOTIFICATION_TARGETS)
+    notification_target_roles: tuple[str, ...] = Field(default=(), max_length=MAX_NOTIFICATION_TARGETS)
     siren_target_roles: tuple[str, ...] = Field(default=(), max_length=MAX_SIREN_TARGETS)
     shutoff_valve_target_roles: tuple[str, ...] = Field(default=(), max_length=MAX_SHUTOFF_VALVE_TARGETS)
     messages: WaterSafetyMessages = Field(default_factory=WaterSafetyMessages)
@@ -406,16 +406,27 @@ class WaterSafetySetupAdapter:
             expected_roles.update(normalized.notification_target_roles)
             expected_roles.update(normalized.siren_target_roles)
             expected_roles.update(normalized.shutoff_valve_target_roles)
-        for role in sorted(set(bindings_by_role) - expected_roles):
+            for role in sorted(set(bindings_by_role) - expected_roles):
+                issues.append(
+                    _issue(
+                        "water_safety.unsupported_binding_role",
+                        ("bindings", role),
+                        "setup.water_safety.unsupported_binding_role",
+                        role=role,
+                    )
+                )
+        elif WATER_SAFETY_SENSOR_ROLE not in bindings_by_role:
+            # Settings failed payload validation: do not also treat optional output
+            # bindings as "unexpected". Still require the moisture sensor binding.
             issues.append(
                 _issue(
-                    "water_safety.unsupported_binding_role",
-                    ("bindings", role),
-                    "setup.water_safety.unsupported_binding_role",
-                    role=role,
+                    "water_safety.required_binding_missing",
+                    ("bindings", WATER_SAFETY_SENSOR_ROLE),
+                    "setup.water_safety.required_binding_missing",
+                    role=WATER_SAFETY_SENSOR_ROLE,
                 )
             )
-        for role in sorted(expected_roles):
+        for role in sorted(expected_roles if normalized is not None else ()):
             binding = bindings_by_role.get(role)
             if binding is None:
                 issues.append(

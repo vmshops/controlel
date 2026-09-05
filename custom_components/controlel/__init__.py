@@ -42,6 +42,7 @@ from .failure_sink import HomeAssistantScheduledFailureSink, clear_entry_issues
 from .frontend_api import create_frontend_api_provider_v1
 from .heat_source import HomeAssistantHeatSourcePort
 from .host import HomeAssistantControlelHost
+from .lifecycle_diagnostics import record_lifecycle_failure
 from .measurement_ingestion import HomeAssistantMeasurementMapper
 from .notifications import HomeAssistantNotificationCoordinator, HomeAssistantNotificationTransport
 from .runtime_executor import HomeAssistantRuntimeExecutor
@@ -68,6 +69,7 @@ class ControlelEntryRuntime:
     reloading: bool = False
     frontend_api_unregister: Callable[[], None] | None = None
     water_safety_action_unregister: Callable[[], None] | None = None
+    forwarded_platforms: tuple[str, ...] = ()
 
 
 if TYPE_CHECKING:
@@ -93,6 +95,18 @@ async def async_setup_entry(
     entry: ControlelConfigEntry,
 ) -> bool:
     """Set up one Controlel runtime from a config entry."""
+    try:
+        return await _async_setup_entry(hass, entry)
+    except Exception as error:
+        record_lifecycle_failure(hass, entry, phase="setup", error=error)
+        raise
+
+
+async def _async_setup_entry(
+    hass: HomeAssistant,
+    entry: ControlelConfigEntry,
+) -> bool:
+    """Implement config-entry setup under lifecycle failure reporting."""
     heating_active = active_reference_for_module(entry.data, "heating")
     water_active = active_reference_for_module(entry.data, "water_safety")
     if heating_active is None and water_active is not None and staged_candidate_runtime(hass, entry.entry_id) is None:
@@ -354,6 +368,7 @@ async def async_setup_entry(
     )
     try:
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+        entry.runtime_data.forwarded_platforms = PLATFORMS
         from .activation_backend import async_recover_interrupted_activation
 
         await async_recover_interrupted_activation(hass, entry, setup_backend, selection)
@@ -449,10 +464,10 @@ async def async_unload_entry(
 ) -> bool:
     """Unload the entry through the host's terminal serialized stop path."""
     runtime_data = entry.runtime_data
-    platforms_unloaded = await hass.config_entries.async_unload_platforms(
-        entry,
-        PLATFORMS,
-    )
+    forwarded_platforms = runtime_data.forwarded_platforms
+    if forwarded_platforms and not await hass.config_entries.async_unload_platforms(entry, forwarded_platforms):
+        return False
+    runtime_data.forwarded_platforms = ()
     unregister = runtime_data.frontend_api_unregister
     if unregister is not None:
         unregister()
@@ -473,7 +488,7 @@ async def async_unload_entry(
     from .panel import async_remove_controlel_panel
 
     async_remove_controlel_panel(hass)
-    return platforms_unloaded
+    return True
 
 
 async def async_remove_entry(

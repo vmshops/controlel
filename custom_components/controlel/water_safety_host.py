@@ -359,12 +359,18 @@ def build_water_safety_host(
 
     if not isinstance(bridge, HomeAssistantEventLoopBridge):
         raise TypeError("bridge must be a HomeAssistantEventLoopBridge")
+    payload = WaterSafetySetupPayload.model_validate_json(canonical_json(effective.module_payload))
     sensor_binding = next(binding for binding in effective.bindings if binding.role == WATER_SAFETY_SENSOR_ROLE)
     mapper = HomeAssistantMoistureMapper(
-        sensor_id=WaterSafetySetupPayload.model_validate_json(canonical_json(effective.module_payload)).sensor_id,
+        sensor_id=payload.sensor_id,
         binding=sensor_binding.reference,
     )
-    output_port = HomeAssistantWaterSafetyOutputPort(hass, bridge, logger=logger)
+    output_port = HomeAssistantWaterSafetyOutputPort(
+        hass,
+        bridge,
+        logger=logger,
+        area_name=payload.area_name,
+    )
     runtime = WaterSafetyRuntime(
         effective,
         output_port,

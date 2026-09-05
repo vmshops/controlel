@@ -7,7 +7,6 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
-from uuid import uuid4
 
 from controlel.application.configuration.water_safety_setup_adapter import (
     DEFAULT_NOTIFICATION_ROLE,
@@ -15,7 +14,6 @@ from controlel.application.configuration.water_safety_setup_adapter import (
     NOTIFICATION_ROLE_PREFIX,
     WATER_SAFETY_MODULE_KEY,
     WATER_SAFETY_RECOMMENDATION_POLICY_VERSION,
-    WATER_SAFETY_SETUP_SCHEMA_VERSION,
     WaterSafetySetupAdapter,
     WaterSafetySetupCandidate,
 )
@@ -32,6 +30,7 @@ from controlel.infrastructure.home_assistant.setup_persistence import HomeAssist
 from controlel.infrastructure.home_assistant.water_safety_discovery import async_snapshot_with_notify_services
 
 from .water_safety_configure_view import async_list_module_drafts
+from .water_safety_draft_semantics import async_commit_water_draft_if_changed
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,8 +111,12 @@ async def async_save_water_safety_notifications_draft(
     target_ids: Sequence[str],
     saved_at: datetime,
     report_id: str,
-) -> DraftRevision:
-    """Persist notification intent as an inactive Water draft revision."""
+) -> DraftRevision | None:
+    """Persist notification intent as an inactive Water draft revision.
+
+    Submitting the same notification selection as the active configuration is a no-op.
+    Explicit empty selection clears notification targets and remains valid when optional.
+    """
 
     selected_targets = _canonical_targets(target_ids)
     unavailable = tuple(target for target in selected_targets if target not in editor.available_target_ids)
@@ -172,44 +175,18 @@ async def async_save_water_safety_notifications_draft(
         )
 
     settings["notification_target_roles"] = list(roles)
-    bindings_tuple = tuple(sorted((*retained_bindings, *notification_bindings), key=lambda item: item.role))
-    if current is not None:
-        draft = current.next_revision(
-            updated_at=saved_at,
-            settings=settings,
-            bindings=bindings_tuple,
-        )
-    else:
-        active = editor.active_reference
-        draft = DraftRevision(
-            draft_id=f"ha-water-draft-{uuid4().hex}",
-            revision=1,
-            environment_id=(active.environment_id if active is not None else editor.discovery.provider_instance_id),
-            module_key=WATER_SAFETY_MODULE_KEY,
-            module_instance_id=(active.module_instance_id if active is not None else f"water-safety-{uuid4().hex}"),
-            module_schema_version=WATER_SAFETY_SETUP_SCHEMA_VERSION,
-            created_at=saved_at,
-            updated_at=saved_at,
-            base_active_revision_id=(active.canonical_revision_id if active is not None else None),
-            settings=settings,
-            bindings=bindings_tuple,
-            lineage={
-                "created_from_discovery_snapshot_id": editor.discovery.snapshot_id,
-                "recommendation_policy_version": WATER_SAFETY_RECOMMENDATION_POLICY_VERSION,
-                "source": "home_assistant_native_configure",
-            },
-        )
-
-    await repository.save_draft(draft)
-    report = WaterSafetySetupAdapter().validate(
-        draft,
+    return await async_commit_water_draft_if_changed(
+        repository,
+        current_draft=current,
+        active_reference=editor.active_reference,
+        active_revision=editor.active_revision,
+        settings=settings,
+        bindings=(*retained_bindings, *notification_bindings),
+        saved_at=saved_at,
         report_id=report_id,
-        evaluated_at=saved_at,
         discovery_snapshot_id=editor.discovery.snapshot_id,
-        resolution_generation=draft.revision,
+        environment_fallback=editor.discovery.provider_instance_id,
     )
-    await repository.save_validation_report(report)
-    return draft
 
 
 async def async_test_water_safety_notification(

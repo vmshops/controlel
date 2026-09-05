@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from importlib import metadata
@@ -24,8 +25,12 @@ from controlel.application.configuration import (
     canonical_field_registry_v3,
 )
 from controlel.application.configuration.heating_setup_adapter import HeatingSetupAdapter
-from controlel.application.configuration.water_safety_setup_adapter import WATER_SAFETY_MODULE_KEY
+from controlel.application.configuration.water_safety_setup_adapter import (
+    WATER_SAFETY_MODULE_KEY,
+    WATER_SAFETY_SENSOR_ROLE,
+)
 from controlel.application.setup import SetupConflictError, SetupNotFoundError
+from controlel.application.setup.json_data import canonical_json
 from controlel.infrastructure.home_assistant import (
     ACTIVE_REFERENCE_KEY,
     ACTIVE_REFERENCES_KEY,
@@ -36,6 +41,7 @@ from controlel.infrastructure.home_assistant.setup_discovery import HA_AREA_KIND
 
 from .activation_backend import async_activate_canonical_revision
 from .const import CONFIG_ENTRY_VERSION, DOMAIN, INTEGRATION_VERSION
+from .lifecycle_diagnostics import lifecycle_failures_for_entry, record_lifecycle_failure
 from .setup_backend import async_get_setup_backend, async_get_setup_service
 from .water_safety_activation import WaterSafetyActivationService
 from .water_safety_area_sensor import (
@@ -70,24 +76,28 @@ LOGGER = logging.getLogger(__name__)
 
 HUB_MENU_OPTIONS = ("general_hub", "heating", "water_safety")
 GENERAL_MENU_OPTIONS = ("back_to_hub",)
-HEATING_REQUIRED_BASIC_SECTIONS = ("zone", "sensor", "heat_source")
+HEATING_BASIC_SECTIONS = ("zone",)
+HEATING_REQUIRED_SECTIONS = ("sensor", "heat_source")
 HEATING_OPTIONAL_SECTIONS = ("heat_delivery", "notifications")
 HEATING_ADVANCED_SECTIONS = ("safety_timing", "diagnostics")
 HEATING_SECTION_MENU_OPTIONS = (
     "heating_review",
-    *HEATING_REQUIRED_BASIC_SECTIONS,
-    *HEATING_OPTIONAL_SECTIONS,
-    *HEATING_ADVANCED_SECTIONS,
     "abandon_current",
+    "zone",
+    "sensor",
+    "heat_source",
+    "heat_delivery",
+    "safety_timing",
+    "notifications",
+    "diagnostics",
     "back_to_hub",
 )
 WATER_SAFETY_MENU_OPTIONS = (
-    "water_safety_status",
+    "water_safety_validation",
     "water_safety_area_sensor",
     "water_safety_notifications",
     "water_safety_sirens",
     "water_safety_shutoff_valves",
-    "water_safety_validation",
     "back_to_hub",
 )
 HUB_EXPLANATION = (
@@ -355,9 +365,21 @@ class ControlelOptionsFlow(OptionsFlow):
             (await async_get_setup_backend(self.hass, self.config_entry)).repository,
             self.config_entry.data,
         )
+        menu = ["water_safety_validation"]
+        if view.draft is not None:
+            menu.append("water_safety_abandon")
+        menu.extend(
+            (
+                "water_safety_area_sensor",
+                "water_safety_notifications",
+                "water_safety_sirens",
+                "water_safety_shutoff_valves",
+                "back_to_hub",
+            )
+        )
         return self.async_show_menu(
             step_id="water_safety",
-            menu_options=list(WATER_SAFETY_MENU_OPTIONS),
+            menu_options=menu,
             description_placeholders={"water_safety_summary": water_safety_menu_summary(view)},
         )
 
@@ -525,8 +547,8 @@ class ControlelOptionsFlow(OptionsFlow):
             errors=dict(errors),
             description_placeholders={
                 "notification_behavior": (
-                    "The existing Water Safety contract sends wet incident and recovery notifications to the same "
-                    "configured targets. Clearing all targets saves an incomplete draft."
+                    "Optional. Wet and cleared notifications go to the same selected targets for this one "
+                    "monitored area. Clearing all targets is valid and leaves notifications unconfigured."
                 ),
                 "notification_test_result": self._water_notification_test_result,
                 "unavailable_notification_targets": (", ".join(editor.unavailable_target_ids) or "None"),
@@ -583,7 +605,7 @@ class ControlelOptionsFlow(OptionsFlow):
             errors=dict(errors),
             description_placeholders={
                 "siren_behavior": (
-                    "Sirens are alarm outputs only. Water alarm state continues to come from moisture evidence. "
+                    "Optional. Sirens are alarm outputs only. Moisture evidence still decides wet or dry. "
                     "A service request does not prove that a siren physically sounded."
                 ),
                 "unavailable_sirens": unavailable,
@@ -643,8 +665,9 @@ class ControlelOptionsFlow(OptionsFlow):
             errors=dict(errors),
             description_placeholders={
                 "shutoff_valve_behavior": (
-                    "On a wet incident, Controlel requests every configured water shutoff valve to close. "
-                    "The request is an action, not proof of physical valve position. Recovery never reopens water."
+                    "Optional. On wet detection Controlel requests every selected water shutoff valve to close. "
+                    "That is a close request only, not proof of physical valve position. Clearing moisture never "
+                    "reopens water."
                 ),
                 "unavailable_shutoff_valves": unavailable,
             },
@@ -654,12 +677,20 @@ class ControlelOptionsFlow(OptionsFlow):
         backend = await async_get_setup_backend(self.hass, self.config_entry)
         view = await async_build_water_safety_configure_view(backend.repository, self.config_entry.data)
         if view.draft is None:
+            if view.active_revision is not None:
+                summary = (
+                    "NO DRAFT CHANGES. Active Water Safety remains in effect. "
+                    "Review & activate is only needed after you save draft changes."
+                )
+            else:
+                summary = (
+                    "Water Safety is NOT ACTIVE and there are NO DRAFT CHANGES. "
+                    "Open Area & moisture sensor to configure the required settings."
+                )
             return self.async_show_menu(
                 step_id="water_safety_validation",
                 menu_options=["back_to_water_safety"],
-                description_placeholders={
-                    "validation_summary": "No Water Safety draft exists. Configure the required sections first."
-                },
+                description_placeholders={"validation_summary": summary},
             )
 
         draft = view.draft
@@ -682,13 +713,11 @@ class ControlelOptionsFlow(OptionsFlow):
         )
         validation = await backend.repository.get_latest_validation_report(draft.draft_id)
         activation_ready = bool(validation is not None and validation.assesses(draft) and validation.activation_ready)
-        issue_codes = tuple(sorted({issue.code for issue in validation.issues})) if validation is not None else ()
         summary = (
-            "Draft is ready for activation. Continue to create an immutable canonical revision; "
-            "the active configuration remains unchanged until the final confirmation."
+            "READY TO ACTIVATE. Continue to create an immutable configuration; "
+            "the active Water Safety configuration remains unchanged until the final confirmation."
             if activation_ready
-            else "Draft is incomplete and cannot be activated. Complete the required area, moisture sensor, "
-            f"and notification settings. Current issues: {', '.join(issue_codes) or 'unknown'}."
+            else _water_validation_user_summary(draft, validation)
         )
         if user_input is None or not activation_ready:
             return self.async_show_form(
@@ -706,6 +735,7 @@ class ControlelOptionsFlow(OptionsFlow):
         configuration_id = (
             active_revision.configuration_id if active_revision is not None else _id("ha-water-configuration")
         )
+        core_version = await self.hass.async_add_executor_job(metadata.version, "controlel")
         canonicalized = await service.canonicalize_water_draft(
             draft.draft_id,
             snapshot_id=snapshot_id,
@@ -718,7 +748,7 @@ class ControlelOptionsFlow(OptionsFlow):
             source="home_assistant_native_configure",
             change_kind="UPDATE" if active_reference is not None else "CREATE",
             reason="native_home_assistant_water_safety_configure",
-            core_version=metadata.version("controlel"),
+            core_version=core_version,
             integration_version=INTEGRATION_VERSION,
             parent_revision_id=(active_reference.canonical_revision_id if active_reference is not None else None),
             notification_roles=tuple(draft.settings.get("notification_target_roles", ())),
@@ -730,6 +760,19 @@ class ControlelOptionsFlow(OptionsFlow):
         self._water_activation_candidate_id = canonicalized.canonical_revision_id
         self._water_activation_draft = (draft.draft_id, draft.revision)
         return await self.async_step_water_safety_activate()
+
+    async def async_step_water_safety_abandon(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ) -> ConfigFlowResult:
+        backend = await async_get_setup_backend(self.hass, self.config_entry)
+        view = await async_build_water_safety_configure_view(backend.repository, self.config_entry.data)
+        if view.draft is None:
+            return await self.async_step_water_safety()
+        if user_input is None:
+            return self.async_show_form(step_id="water_safety_abandon", data_schema=vol.Schema({}))
+        await backend.repository.delete_draft(view.draft.draft_id, expected_revision=view.draft.revision)
+        return await self.async_step_water_safety()
 
     async def async_step_water_safety_activate(
         self,
@@ -743,7 +786,6 @@ class ControlelOptionsFlow(OptionsFlow):
             return self.async_show_form(
                 step_id="water_safety_activate",
                 data_schema=vol.Schema({}),
-                description_placeholders={"revision_id": candidate_id},
             )
 
         runtime_data = getattr(self.config_entry, "runtime_data", None)
@@ -767,7 +809,6 @@ class ControlelOptionsFlow(OptionsFlow):
                 step_id="water_safety_activate",
                 data_schema=vol.Schema({}),
                 errors={"base": "water_safety_activation_failed"},
-                description_placeholders={"revision_id": candidate_id},
             )
 
         try:
@@ -902,13 +943,14 @@ class ControlelOptionsFlow(OptionsFlow):
         if user_input is None:
             return self.async_show_form(step_id="convert_legacy", data_schema=vol.Schema({}))
         now = _now()
+        core_version = await self.hass.async_add_executor_job(metadata.version, "controlel")
         review = await (await self._service()).convert_legacy(
             draft_id=_id("ha-legacy-conversion-draft"),
             v2_revision_id=_id("ha-legacy-v2-projection"),
             projection_revision_id=_id("ha-legacy-v3-projection"),
             created_at=now,
             snapshot_id=_id("ha-legacy-conversion-snapshot"),
-            core_version=metadata.version("controlel"),
+            core_version=core_version,
             integration_version=INTEGRATION_VERSION,
         )
         return await self._load_review(review)
@@ -1074,6 +1116,7 @@ class ControlelOptionsFlow(OptionsFlow):
     async def async_step_diagnostics(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         document = self._require_document()
         diagnostics = document["diagnostics"]
+        diagnostics_summary = await self._heating_diagnostics_summary()
         if user_input is not None:
             try:
                 diagnostics["steady_profile"] = user_input[DIAGNOSTIC_PROFILE]
@@ -1086,8 +1129,34 @@ class ControlelOptionsFlow(OptionsFlow):
                     step_id="diagnostics",
                     data_schema=_diagnostics_schema(diagnostics),
                     errors={"base": "invalid_configuration"},
+                    description_placeholders={"diagnostics_summary": diagnostics_summary},
                 )
-        return self.async_show_form(step_id="diagnostics", data_schema=_diagnostics_schema(diagnostics))
+        return self.async_show_form(
+            step_id="diagnostics",
+            data_schema=_diagnostics_schema(diagnostics),
+            description_placeholders={"diagnostics_summary": diagnostics_summary},
+        )
+
+    async def _heating_diagnostics_summary(self) -> str:
+        draft = self._require_draft()
+        validation = await self._async_heating_overview_validation(await self._service(), draft)
+        readiness = (
+            "READY TO ACTIVATE — required Home Assistant references are currently usable."
+            if validation is not None and validation.activation_ready
+            else (
+                f"NOT READY — {_heating_validation_attention(validation)}"
+                if validation is not None
+                else "READINESS UNKNOWN — Home Assistant could not evaluate this saved draft."
+            )
+        )
+        failures = lifecycle_failures_for_entry(self.hass, self.config_entry.entry_id)
+        setup_failure = _lifecycle_failure_summary(failures["setup"])
+        activation_failure = _lifecycle_failure_summary(failures["activation"])
+        return (
+            f"Configuration readiness: {readiness} Last setup failure: {setup_failure}. "
+            f"Last activation failure: {activation_failure}. Full exception details remain in "
+            "Settings → System → Logs."
+        )
 
     async def async_step_notifications(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         document = self._require_document()
@@ -1141,11 +1210,16 @@ class ControlelOptionsFlow(OptionsFlow):
 
     async def _persist_heating_document(self) -> None:
         draft = self._require_draft()
+        scopes = ConfigurationScopesV3.model_validate(self._require_document())
+        if canonical_json(scopes.model_dump(mode="json", by_alias=True)) == canonical_json(
+            draft.scopes.model_dump(mode="json", by_alias=True)
+        ):
+            return
         self._draft = await (await self._service()).update_draft(
             draft.draft_id,
             expected_revision=draft.revision,
             updated_at=_now(),
-            configuration_scopes=ConfigurationScopesV3.model_validate(self._require_document()),
+            configuration_scopes=scopes,
         )
         self._load_document()
 
@@ -1226,6 +1300,7 @@ class ControlelOptionsFlow(OptionsFlow):
         change_kind = "CREATE" if draft.base_active_revision_id is None else "UPDATE"
         if draft.lineage.get("authoring_origin") == "canonical_v2_conversion":
             change_kind = "MIGRATE"
+        core_version = await self.hass.async_add_executor_job(metadata.version, "controlel")
         self._candidate = await (await self._service()).canonicalize_draft(
             draft.draft_id,
             validation_report_id=self._validation.report_id,
@@ -1236,18 +1311,18 @@ class ControlelOptionsFlow(OptionsFlow):
             source="home_assistant_native_configure",
             change_kind=change_kind,
             reason="native_home_assistant_configure",
-            core_version=metadata.version("controlel"),
+            core_version=core_version,
             integration_version=INTEGRATION_VERSION,
         )
-        return await self.async_step_activate()
+        return await self.async_step_heating_activate()
 
-    async def async_step_activate(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+    async def async_step_heating_activate(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         if self._candidate is None:
             raise SetupConflictError("canonical v3 flow has no canonical candidate")
         if user_input is None:
             self._heating_activation_failure_reason = None
             return self.async_show_form(
-                step_id="activate",
+                step_id="heating_activate",
                 data_schema=vol.Schema({}),
                 description_placeholders={"activation_summary": _heating_activation_summary()},
             )
@@ -1264,9 +1339,21 @@ class ControlelOptionsFlow(OptionsFlow):
             )
         except Exception as error:
             LOGGER.exception("Heating canonical activation failed")
-            self._heating_activation_failure_reason = _heating_activation_failure_reason(error, self._validation)
+            record_lifecycle_failure(self.hass, self.config_entry, phase="activation", error=error)
+            failure_validation = self._validation
+            try:
+                failure_validation = await (await self._service()).validate_draft(
+                    draft.draft_id,
+                    report_id=_id("ha-heating-activation-failure-validation"),
+                    snapshot_id=_id("ha-heating-activation-failure-snapshot"),
+                    evaluated_at=_now(),
+                )
+            except Exception:
+                LOGGER.exception("Heating draft could not be revalidated after activation failure")
+            self._validation = failure_validation
+            self._heating_activation_failure_reason = _heating_activation_failure_reason(error, failure_validation)
             return self.async_show_form(
-                step_id="activate",
+                step_id="heating_activate",
                 data_schema=vol.Schema({}),
                 errors={"base": "heating_activation_failed"},
                 description_placeholders={
@@ -1290,34 +1377,32 @@ def _heating_menu_summary(
 ) -> str:
     active_summary = "ACTIVE" if active is not None else "NOT ACTIVE"
     if current is not None:
-        draft_summary = "SAVED DRAFT OPEN — section changes are durable but inactive."
+        draft_summary = "DRAFT CHANGES — section edits are durable but inactive."
     elif drafts:
         draft_summary = (
-            "SAVED INACTIVE DRAFT — continue it to edit or review."
+            "DRAFT CHANGES — continue the saved inactive draft to edit or review."
             if len(drafts) == 1
-            else f"{len(drafts)} SAVED INACTIVE DRAFTS — continue one to edit or review."
+            else f"DRAFT CHANGES — {len(drafts)} saved inactive drafts; continue one to edit or review."
         )
     else:
-        draft_summary = "NO SAVED DRAFT."
+        draft_summary = "NO DRAFT CHANGES."
 
     if overview_draft is None:
         readiness = (
-            "No draft is awaiting activation."
+            "READY TO ACTIVATE already applies to the active configuration."
             if active is not None
-            else (
-                "NOT READY — start Basic setup and provide Zone & demand, Temperature sensor, and Heat source commands."
-            )
+            else ("NEEDS ATTENTION — start Basic setup and provide a Temperature sensor and Heat source commands.")
         )
     elif validation is None:
-        readiness = "READINESS UNKNOWN — continue the saved draft and review the required sections."
+        readiness = "NEEDS ATTENTION — continue the saved draft and review the required sections."
     elif validation.activation_ready:
         readiness = "READY TO ACTIVATE — all required runtime references are available."
     else:
-        readiness = f"NOT READY — {_heating_validation_attention(validation)}"
+        readiness = f"NEEDS ATTENTION — {_heating_validation_attention(validation)}"
 
     return (
         f"Heating: {active_summary}. Draft: {draft_summary} Readiness: {readiness}\n\n"
-        "REQUIRED / BASIC: Zone & demand; Temperature sensor; Heat source commands. "
+        "BASIC: Zone & demand. REQUIRED: Temperature sensor; Heat source commands. "
         "OPTIONAL: Heat delivery; Notifications. ADVANCED: Safety & timing; Diagnostics.\n\n"
         "Saving a section changes only the draft. The currently active Heating configuration and Water Safety "
         "stay unchanged until you explicitly choose Review & activate and confirm activation."
@@ -1344,7 +1429,7 @@ def _heating_validation_attention(validation: CanonicalConfigurationValidationV3
     for health in validation.reference_health:
         if not health.activation_required or health.runtime_ready:
             continue
-        section = _heating_section_for_reference(health.canonical_path)
+        location = _heating_reference_location(health.canonical_path)
         status = str(health.status.value)
         explanation = {
             "MISSING": "the saved entity no longer exists in Home Assistant",
@@ -1352,7 +1437,7 @@ def _heating_validation_attention(validation: CanonicalConfigurationValidationV3
             "AMBIGUOUS": "more than one possible replacement exists; select the correct entity explicitly",
             "ENVIRONMENT_MISMATCH": "the saved entity belongs to a different Home Assistant installation",
         }.get(status, "the saved entity reference cannot currently be used")
-        problems.append(f"{section}: {explanation}")
+        problems.append(f"{location}: {explanation}")
     if problems:
         return "Needs attention — " + "; ".join(dict.fromkeys(problems)) + "."
     return "Needs attention — validation could not confirm the required Home Assistant entities."
@@ -1370,6 +1455,23 @@ def _heating_section_for_reference(path: str) -> str:
     return "Basic Heating setup"
 
 
+def _heating_reference_location(path: str) -> str:
+    section = _heating_section_for_reference(path)
+    if "primary_temperature_sensor" in path:
+        field = "Temperature sensor"
+    elif "enable_permission.command_target_reference" in path:
+        field = "Enable target entity"
+    elif "disable_permission.command_target_reference" in path:
+        field = "Disable target entity"
+    elif "reported_actuator_state_reference" in path:
+        field = "Reported actuator-state entity"
+    elif "heat_delivery" in path and "actuator_reference" in path:
+        field = "Heat-delivery actuator"
+    else:
+        return section
+    return f"{section} — {field}"
+
+
 def _heating_activation_summary(failure_reason: str | None = None) -> str:
     if failure_reason is not None:
         return (
@@ -1383,38 +1485,112 @@ def _heating_activation_summary(failure_reason: str | None = None) -> str:
     )
 
 
+def _lifecycle_failure_summary(failure: object | None) -> str:
+    if not isinstance(failure, Mapping):
+        return "none recorded"
+    chain = failure.get("exception_chain")
+    first = chain[0] if isinstance(chain, list) and chain and isinstance(chain[0], Mapping) else {}
+    exception_type = str(first.get("exception_type") or "unexpected error")
+    occurred_at = str(failure.get("occurred_at") or "an unknown time")
+    return f"{exception_type} at {occurred_at}"
+
+
 def _heating_activation_failure_reason(
     error: Exception,
     validation: CanonicalConfigurationValidationV3 | None,
 ) -> str:
     if validation is not None and not validation.activation_ready:
-        return _heating_validation_attention(validation)
-    message = str(error).lower()
+        return (
+            f"{_heating_validation_attention(validation)} Reopen the named section, select an available entity, "
+            "save, and run Review & activate again."
+        )
+    error_chain = _exception_chain(error)
+    messages = [str(item).strip() for item in error_chain if str(item).strip()]
+    message = " | ".join(messages).lower()
+    reference_path = _heating_reference_path(messages)
+    if reference_path is not None:
+        return (
+            f"{_heating_reference_location(reference_path)}: the saved Home Assistant entity cannot be resolved "
+            "for runtime. Reopen that section, select an available entity, save, and review again."
+        )
     if "active" in message and ("changed" in message or "generation" in message or "authority" in message):
         return (
             "The active Heating configuration changed while this draft was being prepared. Return to Heating "
             "and start a new edit from the current active configuration."
         )
-    if "reference" in message or "not activation-ready" in message:
+    if "reference" in message or "not activation-ready" in message or "not runtime-ready" in message:
         return (
             "A required Home Assistant entity changed after review. Return to Heating, review the Temperature "
             "sensor and Heat source commands sections, and try again."
         )
-    if "reload" in message or "runtime" in message or "readiness" in message:
-        return (
-            "Home Assistant could not start the candidate Heating runtime during reload. Check the Controlel "
-            "logs and the configured sensor and command entities, then try again."
+    if "config-entry reload did not complete" in message:
+        home_assistant_reason = next(
+            (
+                safe_reason
+                for item in error_chain
+                if (safe_reason := _safe_home_assistant_reason(getattr(item, "home_assistant_reason", None)))
+                is not None
+            ),
+            None,
         )
-    if isinstance(error, SetupNotFoundError):
+        reason_detail = "" if home_assistant_reason is None else f" Home Assistant reported: {home_assistant_reason}."
+        return (
+            "Home Assistant did not complete the Controlel reload."
+            f"{reason_detail} Open Settings → System → Logs, correct the first Controlel setup error, and try "
+            "Review & activate again."
+        )
+    if "did not load the prepared canonical revision" in message:
+        return (
+            "Home Assistant reloaded Controlel but did not load the saved Heating configuration. Reload the "
+            "Controlel integration, reopen Heating, and run Review & activate again."
+        )
+    if "readiness boundary" in message:
+        return (
+            "The reloaded Heating runtime did not finish starting. Check Settings → System → Logs for the first "
+            "Controlel setup error, then verify Temperature sensor and Heat source commands before retrying."
+        )
+    if any(isinstance(item, SetupNotFoundError) for item in error_chain):
         return (
             "The saved Heating draft or activation candidate is no longer available. "
             "Reopen Heating and review it again."
         )
-    if isinstance(error, HomeAssistantError) and str(error).strip():
-        return f"Home Assistant reported: {str(error).strip()}."
+    home_assistant_error = next((item for item in error_chain if isinstance(item, HomeAssistantError)), None)
+    if home_assistant_error is not None and str(home_assistant_error).strip():
+        return f"Home Assistant reported: {str(home_assistant_error).strip()}."
     return (
         "The candidate Heating runtime did not pass the safe activation checks. Check the Controlel logs and try again."
     )
+
+
+def _exception_chain(error: Exception) -> tuple[BaseException, ...]:
+    chain: list[BaseException] = []
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen:
+        chain.append(current)
+        seen.add(id(current))
+        current = current.__cause__ if current.__cause__ is not None else current.__context__
+    return tuple(chain)
+
+
+def _heating_reference_path(messages: list[str]) -> str | None:
+    for message in messages:
+        match = re.search(r"heating\.[a-zA-Z0-9_.\[\]]+", message)
+        if match is not None:
+            return match.group(0).rstrip(".")
+    return None
+
+
+def _safe_home_assistant_reason(reason: object) -> str | None:
+    if not isinstance(reason, str):
+        return None
+    normalized = " ".join(reason.split())
+    if not normalized or len(normalized) > 240:
+        return None
+    lowered = normalized.lower()
+    if any(internal in lowered for internal in ("canonical", "draft", "revision", "fingerprint")):
+        return None
+    return normalized.rstrip(".")
 
 
 def _general_summary(entry_data: Mapping[str, Any]) -> str:
@@ -1424,9 +1600,99 @@ def _general_summary(entry_data: Mapping[str, Any]) -> str:
     def module_status(active: Any | None) -> str:
         if active is None:
             return "not active"
-        return f"active revision {active.canonical_revision_id}"
+        return "active"
 
     return f"{GENERAL_EXPLANATION} Heating is {module_status(heating)}. Water Safety is {module_status(water)}."
+
+
+_WATER_VALIDATION_ISSUE_LABELS = {
+    "water_safety.unsupported_module_contract": "unsupported Water Safety module version",
+    "water_safety.invalid_setting": "invalid setting",
+    "water_safety.unsupported_binding_role": "unexpected binding",
+    "water_safety.required_binding_missing": "required selection missing",
+    "water_safety.binding_confirmation_required": "selection needs confirmation",
+    "water_safety.stable_reference_required": "selection needs a stable Home Assistant identity",
+}
+
+
+def _water_validation_issue_label(code: str) -> str:
+    return _WATER_VALIDATION_ISSUE_LABELS.get(code, "configuration problem")
+
+
+def _water_validation_user_summary(draft: Any, validation: Any | None) -> str:
+    """Build a user-facing Review summary without raw codes or optional-as-required claims."""
+
+    problems: list[str] = []
+    settings = dict(getattr(draft, "settings", {}) or {})
+    bindings = tuple(getattr(draft, "bindings", ()) or ())
+    has_area = bool(_optional_input(settings.get("area_id")))
+    has_sensor = any(binding.role == WATER_SAFETY_SENSOR_ROLE for binding in bindings)
+    if not has_area:
+        problems.append("Open Area & moisture sensor and select an area.")
+    if not has_sensor:
+        problems.append("Moisture sensor is required. Open Area & moisture sensor and select a moisture/leak sensor.")
+
+    if validation is not None:
+        for issue in validation.issues:
+            code = getattr(issue, "code", "")
+            path = tuple(getattr(issue, "path", ()) or ())
+            role = getattr(issue, "module_role", None)
+            parameters = getattr(issue, "parameters", None) or {}
+            if role is None and isinstance(parameters, Mapping):
+                role = parameters.get("role")
+            if code == "water_safety.required_binding_missing" and role == WATER_SAFETY_SENSOR_ROLE:
+                continue
+            if code == "water_safety.unsupported_binding_role":
+                continue
+            if code == "water_safety.invalid_setting":
+                if path and path[0] in {"area_id", "area_name", "zone_id", "zone_name"}:
+                    message = "Area selection is incomplete."
+                elif path and path[0] in {"sensor_id"}:
+                    message = "Moisture sensor is required."
+                else:
+                    message = "One configured value is invalid. Open the related Water Safety section and correct it."
+                if message not in problems:
+                    problems.append(message)
+                continue
+            if code == "water_safety.stable_reference_required":
+                message = (
+                    "A selected Home Assistant entity needs a stable identity. "
+                    "Re-open the related section and choose again."
+                )
+                if message not in problems:
+                    problems.append(message)
+                continue
+            if code == "water_safety.binding_confirmation_required":
+                message = "Confirm the selected bindings in the related Water Safety section."
+                if message not in problems:
+                    problems.append(message)
+                continue
+            if code == "water_safety.unsupported_module_contract":
+                message = "This Water Safety draft uses an unsupported module version."
+                if message not in problems:
+                    problems.append(message)
+                continue
+            if code == "water_safety.required_binding_missing" and isinstance(role, str):
+                if role.startswith("water_safety.notification"):
+                    message = "A notification target listed in the draft is missing. Open Notifications and save again."
+                elif role.startswith("water_safety.siren"):
+                    message = "A siren listed in the draft is missing. Open Sirens and save again."
+                elif role.startswith("water_safety.shutoff"):
+                    message = "A shutoff valve listed in the draft is missing. Open Shutoff valves and save again."
+                else:
+                    message = "A required selection is missing. Open the related Water Safety section and complete it."
+                if message not in problems:
+                    problems.append(message)
+
+    if not problems:
+        problems.append("Complete the required area and moisture sensor settings.")
+
+    active_note = (
+        " The currently active Water Safety configuration remains unchanged."
+        if getattr(draft, "base_active_revision_id", None)
+        else ""
+    )
+    return "NEEDS ATTENTION. Draft cannot be activated. " + " ".join(problems) + active_note
 
 
 def _now() -> datetime:

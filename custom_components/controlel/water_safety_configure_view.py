@@ -112,25 +112,32 @@ async def async_list_module_drafts(
 
 
 def water_safety_menu_summary(view: WaterSafetyConfigureView) -> str:
+    active_summary = (
+        "ACTIVE" if view.active is not None and view.active.module_key == WATER_SAFETY_MODULE_KEY else "NOT ACTIVE"
+    )
     if view.lifecycle == "draft_ready":
-        active = (
-            f" Active revision {view.active.canonical_revision_id} remains unchanged."
-            if view.active is not None and view.active.module_key == WATER_SAFETY_MODULE_KEY
-            else ""
+        return (
+            f"Water Safety: {active_summary}. Draft: DRAFT CHANGES. Readiness: READY TO ACTIVATE. "
+            "Saving sections changes only the inactive draft. The currently active Water Safety "
+            "configuration remains unchanged until you explicitly choose Review & activate."
         )
-        return f"Draft ready.{active}"
     if view.lifecycle == "draft_incomplete":
-        draft_id = view.draft.draft_id if view.draft is not None else "unknown"
-        active = (
-            f" Active revision {view.active.canonical_revision_id} remains unchanged."
-            if view.active is not None and view.active.module_key == WATER_SAFETY_MODULE_KEY
-            else ""
+        return (
+            f"Water Safety: {active_summary}. Draft: DRAFT CHANGES. Readiness: NEEDS ATTENTION. "
+            "Finish the required Area & moisture sensor settings before activation. "
+            "Optional Notifications, Sirens, and Shutoff valves may stay empty. "
+            "The currently active Water Safety configuration remains unchanged."
         )
-        return f"Draft incomplete: Water Safety has an incomplete draft ({draft_id}).{active}"
     if view.lifecycle == "configured":
-        revision_id = view.active.canonical_revision_id if view.active is not None else "unknown"
-        return f"Water Safety is configured. Active revision: {revision_id}."
-    return "Water Safety is not configured. Choose a section below to review current state."
+        return (
+            f"Water Safety: {active_summary}. Draft: NO DRAFT CHANGES. Readiness: READY TO ACTIVATE "
+            "already applies to the active configuration. Opening optional sections without changes "
+            "does not create a draft."
+        )
+    return (
+        f"Water Safety: {active_summary}. Draft: NO DRAFT CHANGES. Readiness: NEEDS ATTENTION. "
+        "Open Area & moisture sensor to configure the required settings."
+    )
 
 
 def water_safety_section_detail(view: WaterSafetyConfigureView, section: WaterSafetySection) -> str:
@@ -174,18 +181,15 @@ def _draft_detail(view: WaterSafetyConfigureView, section: WaterSafetySection) -
         return _not_configured_detail(section)
     if section == "status":
         activation_ready = view.validation is not None and view.validation.activation_ready
-        label = "Draft ready" if activation_ready else "Draft incomplete"
-        return (
-            f"{label} ({draft.draft_id}, revision {draft.revision}). "
-            f"Activation ready: {'yes' if activation_ready else 'no'}."
-        )
+        if activation_ready:
+            return "Draft ready for activation."
+        return "Draft incomplete. Required sections still need attention."
     if section == "validation":
         activation_ready = view.validation is not None and view.validation.activation_ready
         issue_count = len(view.validation.issues) if view.validation is not None else 0
-        return (
-            f"Draft validation: {'ready for activation' if activation_ready else 'not ready'}. "
-            f"Issues reported: {issue_count}."
-        )
+        if activation_ready:
+            return "Draft validation: ready for activation."
+        return f"Draft validation: not ready. Issues to resolve: {issue_count}."
     payload = view.payload
     if payload is None:
         return "Draft incomplete. Section details are not available yet."
@@ -197,7 +201,7 @@ def _configured_detail(view: WaterSafetyConfigureView, section: WaterSafetySecti
     if payload is None or view.active is None:
         return "Configured revision details are not available."
     if section == "status":
-        return f"Configured and active. Revision: {view.active.canonical_revision_id}."
+        return "Configured and active for one monitored area."
     return _payload_detail(payload, view.draft, view.validation, section, lifecycle="configured")
 
 
@@ -213,21 +217,21 @@ def _payload_detail(
     siren_bindings = _role_binding_locators(draft, SIREN_ROLE_PREFIX) if draft is not None else ()
     shutoff_valve_bindings = _role_binding_locators(draft, SHUTOFF_VALVE_ROLE_PREFIX) if draft is not None else ()
     if section == "notifications":
-        roles = ", ".join(payload.notification_target_roles) or "None"
         targets = ", ".join(notification_bindings) or "Not selected"
-        return f"Notification roles: {roles}. Targets: {targets}."
+        return f"Notification targets: {targets}."
     if section == "sirens":
         if not payload.siren_target_roles:
             return "No sirens configured."
-        roles = ", ".join(payload.siren_target_roles)
         targets = ", ".join(siren_bindings) or "Not selected"
-        return f"Siren roles: {roles}. Targets: {targets}."
+        return f"Siren targets: {targets}."
     if section == "shutoff_valves":
         if not payload.shutoff_valve_target_roles:
             return "No automatic shutoff valves configured."
-        roles = ", ".join(payload.shutoff_valve_target_roles)
         targets = ", ".join(shutoff_valve_bindings) or "Not selected"
-        return f"Shutoff valve roles: {roles}. Targets: {targets}. Recovery is manual; no reopen is requested."
+        return (
+            f"Shutoff valve targets: {targets}. "
+            "On wet detection Controlel requests close only; recovery never reopens water."
+        )
     if section == "sensor_fault":
         repeat = (
             "disabled"
