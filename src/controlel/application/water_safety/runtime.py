@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import replace
 from datetime import datetime, timedelta
 
@@ -41,6 +42,8 @@ from controlel.domain.water_safety import (
     WaterSafetySnapshot,
     WaterSafetyState,
 )
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class WaterSafetyRuntime:
@@ -758,7 +761,16 @@ class WaterSafetyRuntime:
         )
         events.append(event)
         if self._evidence_port is not None:
-            self._evidence_port.record(event)
+            try:
+                self._evidence_port.record(event)
+            except Exception:
+                # History is diagnostic, and must not interrupt state transitions
+                # or the independently isolated safety output requests.
+                _LOGGER.exception(
+                    "Water Safety evidence persistence failed (event_id=%s, code=%s)",
+                    event.event_id,
+                    event.code.value,
+                )
 
     @property
     def _active_incident_id(self) -> str | None:
@@ -766,8 +778,18 @@ class WaterSafetyRuntime:
         return None if incident is None else incident.incident_id
 
     def _persist(self) -> None:
-        if self._state_port is not None:
+        if self._state_port is None:
+            return
+        try:
             self._state_port.save(self._snapshot)
+        except Exception:
+            # Restart snapshot durability must not interrupt in-memory safety
+            # transitions, diagnostics refresh, or fault-deadline scheduling.
+            _LOGGER.exception(
+                "Water Safety snapshot persistence failed (state=%s, fault_deadline=%s)",
+                self._snapshot.state.value,
+                None if self._snapshot.fault_deadline is None else self._snapshot.fault_deadline.isoformat(),
+            )
 
     def _result(
         self,
