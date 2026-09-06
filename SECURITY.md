@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Home Assistant integration `0.12.0` is the current published integration.
+Home Assistant integration `0.14.0` is the current published integration.
 Only the latest integration patch and its exact declared core dependency will
 receive security fixes. Published tags and release assets are immutable;
 corrections use a higher version.

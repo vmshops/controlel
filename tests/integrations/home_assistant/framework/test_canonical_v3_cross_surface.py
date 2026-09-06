@@ -180,7 +180,7 @@ async def _ws_validate_canonicalize_activate(
             "change_kind": change_kind,
             "reason": attempt_id,
             "core_version": "0.17.0",
-            "integration_version": "0.14.0",
+            "integration_version": "0.14.1",
         }
     )
     candidate = (await _ws_receive(client))["result"]["result"]

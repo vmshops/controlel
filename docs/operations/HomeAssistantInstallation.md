@@ -2,7 +2,7 @@
 
 ## Hysteresis and anti-cycling settings
 
-New entries use a 0.3 Â°C turn-on differential, 0.1 Â°C turn-off differential,
+New entries use a 0.3 °C turn-on differential, 0.1 °C turn-off differential,
 10-minute minimum on time, and 5-minute minimum off time. Existing entries keep
 legacy exact-threshold/immediate-switching behavior through zero values until
 changed in **Configure**. Minimum times start when a command is successfully
@@ -17,11 +17,11 @@ Protection history is not persisted. After restart or reload, Controlel reads
 the current sensor value deterministically but does not infer prior command
 history or lockout state from the switch.
 
-Controlel `0.13.0` is the current integration candidate for one heating zone,
+Controlel `0.14.0` is the current published integration for one heating zone,
 one primary temperature sensor, and one shared heat source. It requires the
-published immutable core package `controlel==0.14.0`. The current published
-integration remains 0.12.0 until this candidate is separately approved,
-tagged, and released.
+published immutable core package `controlel==0.18.0`. Repository version
+`0.14.1` is an unreleased HACS default-submission readiness candidate and does
+not change runtime behavior or the Core dependency.
 
 Integration `0.11.0` uses published immutable Core `0.10.0`. It retains the
 thread-safe entity publication and runtime-supervision host binding needed for
@@ -101,7 +101,7 @@ custom integration.
 
 HACS downloads the release asset into
 `config/custom_components/controlel/`. During integration setup, Home
-Assistant reads the manifest and installs `controlel==0.14.0` from PyPI.
+Assistant reads the manifest and installs `controlel==0.18.0` from PyPI.
 Manual core installation is neither required nor supported for normal use.
 
 After a successful setup, Controlel registers a sidebar panel backed by
@@ -253,7 +253,7 @@ structure must provide an explicit migration.
 3. Restart Home Assistant.
 
 HACS removes the integration directory but does not uninstall Python packages
-or related Home Assistant data automatically. The `controlel==0.14.0` package
+or related Home Assistant data automatically. The `controlel==0.18.0` package
 may remain in Home Assistant's managed Python environment and must not be
 manually removed.
 

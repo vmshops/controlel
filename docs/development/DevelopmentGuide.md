@@ -6,7 +6,7 @@ The ordinary development environment deliberately has no Home Assistant
 dependency. Use these separate suites:
 
 ```text
-# A. Repository Core 0.18.0 candidate tests
+# A. Repository Core 0.18.0 tests
 python -m pytest tests/domain tests/application tests/infrastructure \
   tests/architecture tests/packaging
 
@@ -125,8 +125,8 @@ python3 -m script.hassfest --action validate \
   --integration-path /absolute/path/to/controlel/custom_components/controlel
 ```
 
-The candidate manifest pins exactly `controlel==0.18.0`, which is not yet
-public. Development CI installs a checkout wheel. HACS release validation
+The candidate manifest pins exactly public `controlel==0.18.0`. Development CI
+installs a checkout wheel. HACS release validation
 requires the reusable published-Core workflow: it downloads the exact PyPI
 artifact, verifies SHA-256/size and installed bytes, checks required APIs, and
 runs both HA suites. A missing public Core version blocks that gate.
@@ -146,10 +146,10 @@ Build and independently validate the fixed-name release candidate from the
 repository root:
 
 ```text
-python scripts/packaging/build_hacs_release.py --version 0.14.0
+python scripts/packaging/build_hacs_release.py --version 0.14.1
 python scripts/packaging/validate_hacs_release.py \
   dist/hacs/controlel.zip \
-  --version 0.14.0 \
+  --version 0.14.1 \
   --checksum dist/hacs/controlel.zip.sha256
 ```
 
@@ -164,9 +164,9 @@ rejection behavior. Generated files remain below ignored `dist/hacs/`.
 
 ## Configuration and options development
 
-Core `0.17.0` is published and immutable. Integration candidate `0.14.0`
-requires Core candidate `0.18.0`, including the module-scoped active-reference
-and Water shutoff contracts missing from the public 0.17.0 wheel.
+Core `0.18.0` and integration `0.14.0` are published and immutable. Integration
+candidate `0.14.1` preserves the exact `controlel==0.18.0` dependency while
+preparing distribution metadata for HACS default submission.
 
 Anomaly v1 extends the passive M31C development boundary with immutable,
 bounded observation state and transition-oriented operational events. New

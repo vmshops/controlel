@@ -20,13 +20,13 @@ The goal is to create a reliable heating controller capable of optimizing comfor
 
 ## Status
 
-Project phase: Core 0.18.0 and Home Assistant 0.14.0 candidate validation
+Project phase: Home Assistant 0.14.1 HACS default-submission preparation
 
 Published Core package: 0.18.0
-Published Home Assistant integration: 0.12.0
-Repository Home Assistant candidate: 0.14.0
+Published Home Assistant integration: 0.14.0
+Repository Home Assistant candidate: 0.14.1
 
-The integration candidate pins exact public Core `controlel==0.18.0`. Core
+The 0.14.1 integration candidate pins exact public Core `controlel==0.18.0`. Core
 0.18.0 packages module-scoped active-reference and Water shutoff contracts and
 isolates Water evidence/snapshot persistence failures from safety outputs. HA
 includes the six Water startup, observation, identity, evidence, activation,
@@ -34,11 +34,12 @@ and recovery fixes. Heating and canonical-configuration-v3 behavior are
 preserved. Local development wheels and HA test bundles are not public release
 artifacts; release validation independently verifies the public 0.18.0 wheel.
 
-The candidate ships the read-only Frontend API v1 bridge, authenticated Home
-Assistant WebSocket commands, sidebar panel lifecycle, packaged real-data UI,
-and English/Czech localization foundations. Loading, disconnected, error, and
-unknown states are explicit. Production failures never fall back to mock data.
-No write API, Setup runtime activation, or reconciliation is included.
+The published 0.14.0 integration ships the read-only Frontend API v1 bridge,
+authenticated Home Assistant WebSocket commands, sidebar panel lifecycle,
+packaged real-data UI, and English/Czech localization foundations. Loading,
+disconnected, error, and unknown states are explicit. Production failures never
+fall back to mock data. No write API, Setup runtime activation, or reconciliation
+is included.
 
 Refer to `release-metadata/releases.yaml` and `docs/releases/` for canonical
 release facts and human-oriented release pages.
@@ -56,8 +57,8 @@ installation flow is:
    **Controlel**.
 
 The currently published integration manifest makes Home Assistant install exact
-public Core `controlel==0.12.0`; users must not install the core manually.
-The repository candidate `0.14.0` pins exact public `controlel==0.18.0`.
+public Core `controlel==0.18.0`; users must not install the core manually.
+The repository candidate `0.14.1` preserves that exact dependency.
 Detailed prerequisites, configuration, safety behavior, manual installation,
 upgrades, removal, and current limitations are in the
 [Home Assistant installation guide](docs/operations/HomeAssistantInstallation.md).
@@ -94,7 +95,7 @@ physical valve position without device feedback. Adaptive assist, learning,
 actuator travel verification, and source-water-temperature control are not part
 of this milestone.
 
-New entries default to asymmetric hysteresis of 0.3 Â°C below and 0.1 Â°C above
+New entries default to asymmetric hysteresis of 0.3 °C below and 0.1 °C above
 the target, a two-minute heat-demand confirmation interval, plus command-based
 minimum on/off times of 10/5 minutes. Existing entries resolve all five
 settings to zero until the user explicitly changes them. The controller
@@ -225,8 +226,8 @@ or control influence. Integration `0.11.0` now hosts this pipeline without
 reimplementing activity composition, policy, de-duplication, rate limits, or
 cursor semantics.
 
-The published integration 0.12.0 requires exact public Core 0.12.0. The
-repository's integration 0.14.0 candidate requires exact Core 0.18.0.
+The published integration 0.14.0 requires exact public Core 0.18.0. The
+repository's integration 0.14.1 candidate preserves that exact Core pin.
 Development tests install a wheel built from the checkout. Release validation
 separately downloads the exact public wheel, verifies its bytes and required
 APIs, and runs the adapter/framework suites. Users of released integrations do
@@ -238,7 +239,7 @@ The isolated, hashed environment is defined by `requirements/ha-test.in` and
 `requirements/ha-test.txt`; setup and suite commands are in the
 [development guide](docs/development/DevelopmentGuide.md). The compatibility
 harness is separate from HACS release validation. HACS metadata and
-deterministic release packaging must pass before the unpublished `0.14.0`
+deterministic release packaging must pass before the unpublished `0.14.1`
 candidate may be tagged; no default-store publication exists.
 
 ## Core package artifacts

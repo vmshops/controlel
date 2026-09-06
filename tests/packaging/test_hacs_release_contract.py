@@ -20,7 +20,7 @@ from scripts.packaging.validate_hacs_release import (
 )
 
 ROOT = Path(__file__).parents[2]
-INTEGRATION_VERSION = "0.14.0"
+INTEGRATION_VERSION = "0.14.1"
 
 
 def test_hacs_source_contract_is_exact() -> None:
@@ -32,6 +32,8 @@ def test_hacs_source_contract_is_exact() -> None:
     assert "water_safety_notifications.py" in files
     assert "water_safety_shutoff_valves.py" in files
     assert "water_safety_sirens.py" in files
+    assert files["brand/icon.png"].startswith(b"\x89PNG\r\n\x1a\n")
+    assert files["brand/icon@2x.png"].startswith(b"\x89PNG\r\n\x1a\n")
     config_flow_source = files["config_flow.py"].decode("utf-8")
     assert "water_safety_configure_view" in config_flow_source
     assert "frontend/i18n.js" in files
@@ -81,6 +83,8 @@ def test_builder_is_deterministic_and_records_a_valid_checksum(tmp_path: Path) -
         assert all(info.date_time == FIXED_ZIP_TIMESTAMP for info in archive.infolist())
         assert all(info.external_attr >> 16 == FIXED_ZIP_MODE for info in archive.infolist())
         assert all(not info.filename.startswith("custom_components/") for info in archive.infolist())
+        assert archive.getinfo("brand/icon.png").file_size > 0
+        assert archive.getinfo("brand/icon@2x.png").file_size > 0
 
 
 def test_validator_rejects_a_nested_component_root(tmp_path: Path) -> None:
@@ -165,13 +169,23 @@ def test_source_validator_rejects_secret_like_content_and_wrong_core_pin(tmp_pat
         validate_source(release_root, version=INTEGRATION_VERSION)
 
 
+def test_source_validator_rejects_invalid_brand_image(tmp_path: Path) -> None:
+    release_root = tmp_path / "release-root"
+    shutil.copytree(ROOT / "custom_components", release_root / "custom_components")
+    shutil.copy2(ROOT / "hacs.json", release_root / "hacs.json")
+    release_root.joinpath("custom_components", "controlel", "brand", "icon.png").write_bytes(b"not a png")
+
+    with pytest.raises(HacsReleaseValidationError, match="brand/icon.png must be a PNG image"):
+        validate_source(release_root, version=INTEGRATION_VERSION)
+
+
 def test_release_workflow_is_validation_only_and_uploads_inspection_artifacts() -> None:
     workflow = (ROOT / ".github" / "workflows" / "integration-release-validation.yml").read_text(encoding="utf-8")
 
-    assert "python scripts/packaging/build_hacs_release.py --version 0.14.0" in workflow
+    assert "python scripts/packaging/build_hacs_release.py --version 0.14.1" in workflow
     assert "python scripts/packaging/validate_hacs_release.py" in workflow
     assert "category: integration" in workflow
-    assert "ignore: brands" in workflow
+    assert "ignore: brands" not in workflow
     assert "home-assistant/actions/hassfest@" in workflow
     assert "actions/upload-artifact@" in workflow
     assert "contents: read" in workflow

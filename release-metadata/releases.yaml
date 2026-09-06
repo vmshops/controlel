@@ -11,9 +11,27 @@ releases:
     component: core
     title: "Controlel Core 0.18.0"
     version: "0.18.0"
-    status: candidate
-    tag: null
-    commit_sha: null
+    status: published
+    tag: "core-v0.18.0"
+    commit_sha: "5ad5eca46046460c711510fbb09011b7db13b924"
+    tagged_at: "2026-09-06T18:02:28+02:00"
+    published_at: "2026-09-06T16:06:44Z"
+    provenance:
+      method: "tag-bound deterministic build verified against public PyPI bytes"
+      tag_object_sha: "cccaab77814f146fbc57a817497a926d96141d04"
+      resolved_tag_commit: "5ad5eca46046460c711510fbb09011b7db13b924"
+      verification_status: passed
+    artifacts:
+      wheel:
+        filename: "controlel-0.18.0-py3-none-any.whl"
+        size: 289368
+        sha256: "559da4af03743728dad0f0b141c3690f918fb84a670928f44881c06e600f092d"
+        uploaded_at: "2026-09-06T16:06:44.455528Z"
+      sdist:
+        filename: "controlel-0.18.0.tar.gz"
+        size: 205854
+        sha256: "3734bf32a509d3fdfc77689407d7b1f51dcd9d5182650b7115fbbc9224cb9b32"
+        uploaded_at: "2026-09-06T16:06:45.558295Z"
     summary: "Module-scoped active authority, Water shutoff contracts, and evidence/snapshot failure isolation"
     highlights:
       - "Module-scoped active-reference persistence and resolution contracts beyond immutable public Core 0.17.0"
@@ -24,10 +42,32 @@ releases:
       python: ">=3.13"
       pydantic: ">=2.0"
     notes:
-      - "Prepared but unpublished; no tag, PyPI upload, push, or Home Assistant release is part of this boundary."
+      - "Published PyPI bytes match the deterministic final artifacts bound to core-v0.18.0."
       - "Heating runtime and canonical configuration v3 behavior from the current mainline are preserved unchanged."
       - "Accepted output requests are command outcomes and do not confirm physical siren or actuator state."
-      - "The repository HA 0.14.0 candidate pins exact public Core 0.18.0."
+      - "Published HA 0.14.0 and the repository HA 0.14.1 candidate pin exact public Core 0.18.0."
+
+  - release_id: controlel-home_assistant-0.14.1
+    component: home_assistant
+    title: "Controlel Home Assistant integration 0.14.1"
+    version: "0.14.1"
+    status: candidate
+    tag: null
+    commit_sha: null
+    summary: "Distribution and metadata readiness for HACS default repository submission"
+    highlights:
+      - "Local HACS brand icon assets at required 1x and 2x dimensions"
+      - "Strict deterministic HACS archive validation includes and verifies both brand assets"
+      - "HACS brands validation ignore removed"
+      - "Current release documentation aligned with published Core 0.18.0 and HA 0.14.0"
+    compatibility:
+      required_core: "0.18.0"
+      config_entry_version: 1
+      home_assistant: "2026.7.3"
+    notes:
+      - "This candidate changes distribution assets and metadata only; runtime product behavior is unchanged."
+      - "The integration pins exactly public controlel==0.18.0."
+      - "Version 0.14.1 remains unpublished pending separate release approval."
 
   - release_id: controlel-core-0.17.0
     component: core
@@ -70,22 +110,23 @@ releases:
       - "UNKNOWN and UNAVAILABLE moisture observations are never dry evidence."
       - "Accepted output requests are command outcomes and do not confirm physical siren or actuator state."
       - "Published PyPI bytes match the deterministic final artifacts bound to core-v0.17.0."
-      - "Historical public Core; current HA 0.14.0 candidate requires Core 0.18.0."
+      - "Historical public Core; the HA 0.14.0 candidate at this boundary required Core 0.18.0."
 
   - release_id: controlel-home_assistant-0.14.0
     component: home_assistant
     title: "Controlel Home Assistant integration 0.14.0"
     version: "0.14.0"
-    status: candidate
-    tag: null
-    commit_sha: null
-    summary: "Canonical configuration v3 Configure, Setup Wizard, Heating settings, and Water Safety over candidate Core 0.18.0"
+    status: published
+    tag: "v0.14.0"
+    commit_sha: "fea69d194be1b660658bd15f708df139bee67c57"
+    tagged_at: "2026-09-06T22:49:08+02:00"
+    summary: "Canonical configuration v3 Configure, Setup Wizard, Heating settings, and Water Safety over public Core 0.18.0"
     highlights:
       - "Configure flow, Setup Wizard, and Heating settings consume canonical configuration v3 lifecycle contracts"
-      - "Water Safety setup, activation, diagnostics, and Frontend API v1 projection over candidate Core 0.18.0"
+      - "Water Safety setup, activation, diagnostics, and Frontend API v1 projection over public Core 0.18.0"
       - "Deterministic v2-to-v3 Heating migration with explicit conversion review and activation"
       - "Authenticated WebSocket commands for canonicalize, activate, and read-only Frontend API v1 surfaces"
-      - "Deterministic HACS release artifact prepared for real HAOS installation testing"
+      - "Deterministic HACS release artifact published for installation testing"
     compatibility:
       required_core: "0.18.0"
       config_entry_version: 1
@@ -93,7 +134,7 @@ releases:
     notes:
       - "Existing version-1 config entries retain their runtime/configuration path without automatic migration."
       - "The integration pins exactly public controlel==0.18.0; release validation verifies that public wheel independently from checked-out-wheel development CI."
-      - "The integration remains unpublished pending real HAOS installation testing and separate release approval."
+      - "Published as an immutable GitHub/HACS integration release."
 
   - release_id: controlel-core-0.16.0
     component: core
@@ -133,7 +174,7 @@ releases:
     notes:
       - "No runtime control algorithm, activation behavior change, or automatic migration beyond explicit v2-to-v3 conversion is included."
       - "Published PyPI bytes match the deterministic final artifacts bound to core-v0.16.0."
-      - "Historical public Core; current HA 0.14.0 candidate requires Core 0.18.0."
+      - "Historical public Core; the HA 0.14.0 candidate at this boundary required Core 0.18.0."
 
   - release_id: controlel-core-0.15.0
     component: core
@@ -142,6 +183,12 @@ releases:
     status: published
     tag: null
     commit_sha: null
+    published_at: "2026-08-26T18:03:58.417803Z"
+    provenance:
+      method: "version-specific PyPI metadata; historical source-to-artifact provenance unavailable"
+      tag_object_sha: null
+      resolved_tag_commit: null
+      verification_status: unverified
     artifacts:
       wheel:
         filename: "controlel-0.15.0-py3-none-any.whl"

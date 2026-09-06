@@ -101,7 +101,7 @@ def test_shipped_core_and_ha_release_contracts() -> None:
 
     assert core_version == "0.18.0"
     assert manifest["requirements"] == ["controlel==0.18.0"]
-    assert manifest["version"] == "0.14.0"
+    assert manifest["version"] == "0.14.1"
     assert manifest["issue_tracker"] == "https://github.com/vmshops/controlel/issues"
 
 
@@ -316,14 +316,15 @@ def test_setup_backend_uses_the_versioned_public_core_surface_without_activation
     assert not hasattr(home_assistant.HeatingSetupHostService, "activate_heating_draft")
 
 
-def test_release_metadata_records_published_core_and_unpublished_ha_boundary() -> None:
+def test_release_metadata_records_published_versions_and_ha_candidate_boundary() -> None:
     metadata = (ROOT / "release-metadata" / "releases.yaml").read_text(encoding="utf-8")
-    candidate_note = (ROOT / "docs" / "releases" / "core-0.18.0.md").read_text(encoding="utf-8")
-    normalized_candidate_note = " ".join(candidate_note.split())
+    current_core_note = (ROOT / "docs" / "releases" / "core-0.18.0.md").read_text(encoding="utf-8")
+    normalized_current_core_note = " ".join(current_core_note.split())
     published_note = (ROOT / "docs" / "releases" / "core-0.17.0.md").read_text(encoding="utf-8")
     normalized_published_note = " ".join(published_note.split())
     core_note = (ROOT / "docs" / "releases" / "core-0.14.0.md").read_text(encoding="utf-8")
     integration_note = (ROOT / "docs" / "releases" / "home-assistant-0.14.0.md").read_text(encoding="utf-8")
+    candidate_note = (ROOT / "docs" / "releases" / "home-assistant-0.14.1.md").read_text(encoding="utf-8")
     previous_integration_note = (ROOT / "docs" / "releases" / "home-assistant-0.13.0.md").read_text(encoding="utf-8")
 
     assert "release_id: controlel-core-0.18.0" in metadata
@@ -334,6 +335,7 @@ def test_release_metadata_records_published_core_and_unpublished_ha_boundary() -
     assert "release_id: controlel-core-0.13.0" in metadata
     assert "release_id: controlel-core-0.12.0" in metadata
     assert "release_id: controlel-home_assistant-0.14.0" in metadata
+    assert "release_id: controlel-home_assistant-0.14.1" in metadata
     assert "release_id: controlel-home_assistant-0.13.0" in metadata
     assert "release_id: controlel-home_assistant-0.12.0" in metadata
     assert metadata.count('version: "0.18.0"') == 1
@@ -341,11 +343,16 @@ def test_release_metadata_records_published_core_and_unpublished_ha_boundary() -
     assert metadata.count('version: "0.16.0"') == 1
     assert metadata.count('version: "0.15.0"') == 1
     assert metadata.count('version: "0.14.0"') == 2
+    assert metadata.count('version: "0.14.1"') == 1
     assert metadata.count('version: "0.13.0"') == 2
     assert metadata.count('version: "0.12.0"') == 2
     assert metadata.count("status: published") >= 7
-    assert metadata.count("status: candidate") >= 3
+    assert metadata.count("status: candidate") >= 2
     assert 'title: "Controlel Core 0.18.0"' in metadata
+    assert 'tag: "core-v0.18.0"' in metadata
+    assert 'commit_sha: "5ad5eca46046460c711510fbb09011b7db13b924"' in metadata
+    assert "559da4af03743728dad0f0b141c3690f918fb84a670928f44881c06e600f092d" in metadata
+    assert "3734bf32a509d3fdfc77689407d7b1f51dcd9d5182650b7115fbbc9224cb9b32" in metadata
     assert 'previous_public_core: "0.17.0"' in metadata
     assert 'title: "Controlel Core 0.17.0"' in metadata
     assert 'previous_public_core: "0.16.0"' in metadata
@@ -374,21 +381,26 @@ def test_release_metadata_records_published_core_and_unpublished_ha_boundary() -
     assert "6e59c5fae5098a35069458f5c09b2eed8e837cd9a95b7bd7156865a1acdde6a6" in metadata
     assert 'required_core: "0.18.0"' in metadata
     assert 'required_core: "0.14.0"' in metadata
-    assert "Status: prepared release candidate" in normalized_candidate_note
-    assert "module-scoped active-reference" in normalized_candidate_note
-    assert "snapshot persistence" in normalized_candidate_note
-    assert "pins exact public Core 0.18.0" in normalized_candidate_note
+    assert 'tag: "v0.14.0"' in metadata
+    assert 'commit_sha: "fea69d194be1b660658bd15f708df139bee67c57"' in metadata
+    assert "Status: published" in normalized_current_core_note
+    assert "module-scoped active-reference" in normalized_current_core_note
+    assert "snapshot persistence" in normalized_current_core_note
+    assert "pin exact public Core 0.18.0" in normalized_current_core_note
     assert "Status: published" in normalized_published_note
     assert "Water Safety V1" in normalized_published_note
     assert "canonical configuration v3 behavior remain unchanged" in normalized_published_note
     assert "does not confirm the physical output state" in normalized_published_note
-    assert "Home Assistant integration 0.14.0 now requires Core 0.18.0" in normalized_published_note
+    assert "later Home Assistant integration 0.14.0 release requires Core 0.18.0" in normalized_published_note
     assert "HeatingDiagnosticPolicy" in core_note
     assert "HeatingNotificationPolicy" in core_note
     assert "schema-v1 revisions" in core_note
     assert "No legacy converter" in core_note
     assert "Both public files match" in core_note
     assert "canonical configuration v3" in integration_note.casefold()
+    assert "Status: published" in integration_note
+    assert "Status: candidate" in candidate_note
+    assert "does not change Core" in candidate_note
     assert "Frontend API v1" in previous_integration_note
     assert "authenticated read-only WebSocket" in previous_integration_note
     assert "No write APIs" in previous_integration_note

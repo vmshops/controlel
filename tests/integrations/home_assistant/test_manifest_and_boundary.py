@@ -20,7 +20,7 @@ def test_manifest_has_required_custom_component_contract():
     assert manifest == {
         "domain": "controlel",
         "name": "Controlel",
-        "codeowners": ["@vmshops"],
+        "codeowners": ["@vmshops", "@marsa99"],
         "config_flow": True,
         "dependencies": ["http"],
         "documentation": "https://github.com/vmshops/controlel",
@@ -29,7 +29,7 @@ def test_manifest_has_required_custom_component_contract():
         "issue_tracker": "https://github.com/vmshops/controlel/issues",
         "requirements": ["controlel==0.18.0"],
         "single_config_entry": True,
-        "version": "0.14.0",
+        "version": "0.14.1",
     }
 
 
@@ -39,7 +39,7 @@ def test_core_and_integration_versions_have_separate_release_contracts():
         core_version = tomllib.load(pyproject_file)["project"]["version"]
 
     assert core_version == "0.18.0"
-    assert manifest["version"] == INTEGRATION_VERSION == "0.14.0"
+    assert manifest["version"] == INTEGRATION_VERSION == "0.14.1"
     assert manifest["requirements"] == ["controlel==0.18.0"]
 
 

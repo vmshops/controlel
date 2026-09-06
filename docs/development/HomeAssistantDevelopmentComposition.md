@@ -6,9 +6,9 @@
 
 The development composition is a local-test artifact that keeps one integration
 ZIP and its exact Core wheel together. It is intentionally non-publishable. The
-source integration manifest requires immutable, published `controlel==0.17.0`;
-the bundled integration copy alone is rewritten to candidate
-`controlel==0.18.0` for an explicit local composition.
+source integration manifest requires immutable, published `controlel==0.18.0`;
+the bundled integration copy preserves that dependency for the explicit local
+composition.
 
 ## Build
 

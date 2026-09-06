@@ -37,13 +37,13 @@ jobs:
           python-version: "3.14"
 
       - name: Build deterministic HACS release archive
-        run: python scripts/packaging/build_hacs_release.py --version 0.14.0
+        run: python scripts/packaging/build_hacs_release.py --version 0.14.1
 
       - name: Validate HACS release archive
         run: |
           python scripts/packaging/validate_hacs_release.py \
             dist/hacs/controlel.zip \
-            --version 0.14.0 \
+            --version 0.14.1 \
             --checksum dist/hacs/controlel.zip.sha256
 
       - name: Upload inspection artifacts
@@ -64,7 +64,6 @@ jobs:
         uses: hacs/action@1ebf01c408f29afcb6406bd431bc98fd8cbb15aa
         with:
           category: integration
-          ignore: brands
 
   hassfest:
     runs-on: ubuntu-latest

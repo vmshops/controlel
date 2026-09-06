@@ -778,7 +778,7 @@ test("fresh install settings show not configured and do not query canonical auth
   const canonicalClient = {
     calls: [],
     discover(request) { this.calls.push(["discovery", request]); return Promise.resolve({ snapshot_id: "s" }); },
-    defaults() { this.calls.push(["defaults"]); return Promise.resolve({ core_version: "0.17.0", integration_version: "0.14.0" }); },
+    defaults() { this.calls.push(["defaults"]); return Promise.resolve({ core_version: "0.18.0", integration_version: "0.14.1" }); },
     readActive(request) {
       this.calls.push(["active", request]);
       return Promise.reject(new Error("Canonical v3 request conflicts with current authority"));

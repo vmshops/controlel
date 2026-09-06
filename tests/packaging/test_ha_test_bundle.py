@@ -117,7 +117,7 @@ def test_source_manifest_is_not_mutated_by_test_build(tmp_path: Path) -> None:
 
     assert manifest_path.read_bytes() == before_manifest
     assert const_path.read_bytes() == before_const
-    assert json.loads(before_manifest)["version"] == "0.14.0"
+    assert json.loads(before_manifest)["version"] == "0.14.1"
 
 
 def test_corrupted_bundle_is_rejected_before_install(tmp_path: Path) -> None:

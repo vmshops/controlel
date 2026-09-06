@@ -1,8 +1,8 @@
 # Controlel — External Tester Guide
 
 This guide is for a technically capable Home Assistant user who wants to test
-the Controlel 0.13.0 candidate. You do not need to know how Controlel works
-internally.
+the Controlel 0.14.1 HACS readiness candidate. You do not need to know how
+Controlel works internally.
 Everything you need is explained here, in plain language.
 
 Controlel is a heating control integration. It watches one room temperature

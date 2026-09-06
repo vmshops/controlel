@@ -349,7 +349,7 @@ async def test_existing_v2_draft_remains_reopen_validate_delete_compatible(
     assert defaults_response["success"] is True
     defaults = defaults_response["result"]["result"]
     assert defaults["core_version"] == expected_framework_core_version
-    assert defaults["integration_version"] == "0.14.0"
+    assert defaults["integration_version"] == "0.14.1"
     assert defaults["settings"]["target_temperature_celsius"] == 21.0
     assert defaults["settings"]["primary_measurement_max_age_seconds"] == 900.0
     assert defaults["settings"]["maximum_future_skew_seconds"] == 30.0
