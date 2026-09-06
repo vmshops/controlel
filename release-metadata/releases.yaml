@@ -7,6 +7,28 @@
 metadata_version: 1
 
 releases:
+  - release_id: controlel-core-0.18.0
+    component: core
+    title: "Controlel Core 0.18.0"
+    version: "0.18.0"
+    status: candidate
+    tag: null
+    commit_sha: null
+    summary: "Module-scoped active authority, Water shutoff contracts, and evidence/snapshot failure isolation"
+    highlights:
+      - "Module-scoped active-reference persistence and resolution contracts beyond immutable public Core 0.17.0"
+      - "Water shutoff output contracts and activation-ready optional notification/output role lists"
+      - "Water Safety evidence and snapshot persistence failures isolated from in-memory safety transitions and outputs"
+    compatibility:
+      previous_public_core: "0.17.0"
+      python: ">=3.13"
+      pydantic: ">=2.0"
+    notes:
+      - "Prepared but unpublished; no tag, PyPI upload, push, or Home Assistant release is part of this boundary."
+      - "Heating runtime and canonical configuration v3 behavior from the current mainline are preserved unchanged."
+      - "Accepted output requests are command outcomes and do not confirm physical siren or actuator state."
+      - "The repository HA 0.14.0 candidate remains a separate composition on published Core 0.17.0."
+
   - release_id: controlel-core-0.17.0
     component: core
     title: "Controlel Core 0.17.0"

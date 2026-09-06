@@ -38,7 +38,7 @@ def test_project_metadata_and_runtime_dependencies_match_release_contract() -> N
     project = load_pyproject()["project"]
 
     assert project["name"] == "controlel"
-    assert project["version"] == "0.17.0"
+    assert project["version"] == "0.18.0"
     assert project["readme"] == "README.md"
     assert project["requires-python"] == ">=3.13"
     assert project["license"] == "MIT"
@@ -86,7 +86,7 @@ def test_project_version_is_the_only_release_version_source() -> None:
         path for path in (ROOT / "src" / "controlel").rglob("*.py") if "__version__" in path.read_text(encoding="utf-8")
     ]
 
-    assert project_version == "0.17.0"
+    assert project_version == "0.18.0"
     assert controlel.__version__ == project_version
     assert importlib.metadata.version("controlel") == project_version
     assert version_files == [ROOT / "src" / "controlel" / "__init__.py"]
@@ -95,11 +95,11 @@ def test_project_version_is_the_only_release_version_source() -> None:
     assert project_version not in package_source
 
 
-def test_core_public_pin_matches_repository_core_version() -> None:
+def test_core_candidate_remains_separate_from_ha_public_core_pin() -> None:
     manifest = json.loads((ROOT / "custom_components" / "controlel" / "manifest.json").read_text(encoding="utf-8"))
     core_version = load_pyproject()["project"]["version"]
 
-    assert core_version == "0.17.0"
+    assert core_version == "0.18.0"
     assert manifest["requirements"] == ["controlel==0.17.0"]
     assert manifest["version"] == "0.14.0"
     assert manifest["version"] != core_version
@@ -319,12 +319,15 @@ def test_setup_backend_uses_the_versioned_public_core_surface_without_activation
 
 def test_release_metadata_records_published_core_and_unpublished_ha_boundary() -> None:
     metadata = (ROOT / "release-metadata" / "releases.yaml").read_text(encoding="utf-8")
-    candidate_note = (ROOT / "docs" / "releases" / "core-0.17.0.md").read_text(encoding="utf-8")
+    candidate_note = (ROOT / "docs" / "releases" / "core-0.18.0.md").read_text(encoding="utf-8")
     normalized_candidate_note = " ".join(candidate_note.split())
+    published_note = (ROOT / "docs" / "releases" / "core-0.17.0.md").read_text(encoding="utf-8")
+    normalized_published_note = " ".join(published_note.split())
     core_note = (ROOT / "docs" / "releases" / "core-0.14.0.md").read_text(encoding="utf-8")
     integration_note = (ROOT / "docs" / "releases" / "home-assistant-0.14.0.md").read_text(encoding="utf-8")
     previous_integration_note = (ROOT / "docs" / "releases" / "home-assistant-0.13.0.md").read_text(encoding="utf-8")
 
+    assert "release_id: controlel-core-0.18.0" in metadata
     assert "release_id: controlel-core-0.17.0" in metadata
     assert "release_id: controlel-core-0.14.0" in metadata
     assert "release_id: controlel-core-0.16.0" in metadata
@@ -334,6 +337,7 @@ def test_release_metadata_records_published_core_and_unpublished_ha_boundary() -
     assert "release_id: controlel-home_assistant-0.14.0" in metadata
     assert "release_id: controlel-home_assistant-0.13.0" in metadata
     assert "release_id: controlel-home_assistant-0.12.0" in metadata
+    assert metadata.count('version: "0.18.0"') == 1
     assert metadata.count('version: "0.17.0"') == 1
     assert metadata.count('version: "0.16.0"') == 1
     assert metadata.count('version: "0.15.0"') == 1
@@ -342,6 +346,8 @@ def test_release_metadata_records_published_core_and_unpublished_ha_boundary() -
     assert metadata.count('version: "0.12.0"') == 2
     assert metadata.count("status: published") >= 7
     assert metadata.count("status: candidate") >= 3
+    assert 'title: "Controlel Core 0.18.0"' in metadata
+    assert 'previous_public_core: "0.17.0"' in metadata
     assert 'title: "Controlel Core 0.17.0"' in metadata
     assert 'previous_public_core: "0.16.0"' in metadata
     assert 'tag: "core-v0.17.0"' in metadata
@@ -369,11 +375,15 @@ def test_release_metadata_records_published_core_and_unpublished_ha_boundary() -
     assert "6e59c5fae5098a35069458f5c09b2eed8e837cd9a95b7bd7156865a1acdde6a6" in metadata
     assert 'required_core: "0.17.0"' in metadata
     assert 'required_core: "0.14.0"' in metadata
-    assert "Status: published" in normalized_candidate_note
-    assert "Water Safety V1" in normalized_candidate_note
-    assert "canonical configuration v3 behavior remain unchanged" in normalized_candidate_note
-    assert "does not confirm the physical output state" in normalized_candidate_note
-    assert "Home Assistant integration 0.14.0 pins exactly" in normalized_candidate_note
+    assert "Status: prepared release candidate" in normalized_candidate_note
+    assert "module-scoped active-reference" in normalized_candidate_note
+    assert "snapshot persistence" in normalized_candidate_note
+    assert "separate composition on published Core 0.17.0" in normalized_candidate_note
+    assert "Status: published" in normalized_published_note
+    assert "Water Safety V1" in normalized_published_note
+    assert "canonical configuration v3 behavior remain unchanged" in normalized_published_note
+    assert "does not confirm the physical output state" in normalized_published_note
+    assert "Home Assistant integration 0.14.0 pins exactly" in normalized_published_note
     assert "HeatingDiagnosticPolicy" in core_note
     assert "HeatingNotificationPolicy" in core_note
     assert "schema-v1 revisions" in core_note
@@ -396,7 +406,8 @@ def test_development_composition_matches_the_public_release_boundary() -> None:
     manifest = json.loads((ROOT / "custom_components" / "controlel" / "manifest.json").read_text(encoding="utf-8"))
 
     assert manifest["requirements"] == ["controlel==0.17.0"]
-    assert 'DEVELOPMENT_CORE_VERSION = "0.17.0"' in builder
+    assert 'DEVELOPMENT_CORE_VERSION = "0.18.0"' in builder
+    assert 'release_source_requirement") != "controlel==0.17.0"' in builder
     assert '"publishable": False' in builder
     assert '"integration/controlel.zip"' in builder
     assert "development integration manifest has the wrong Core pin" in builder
