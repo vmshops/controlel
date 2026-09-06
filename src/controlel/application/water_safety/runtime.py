@@ -786,8 +786,7 @@ class WaterSafetyRuntime:
             # Restart snapshot durability must not interrupt in-memory safety
             # transitions, diagnostics refresh, or fault-deadline scheduling.
             _LOGGER.exception(
-                "Water Safety snapshot persistence failed "
-                "(state=%s, fault_deadline=%s)",
+                "Water Safety snapshot persistence failed (state=%s, fault_deadline=%s)",
                 self._snapshot.state.value,
                 None if self._snapshot.fault_deadline is None else self._snapshot.fault_deadline.isoformat(),
             )

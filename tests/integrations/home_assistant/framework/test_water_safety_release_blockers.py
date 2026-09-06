@@ -158,9 +158,7 @@ async def test_snapshot_write_failure_after_unknown_still_schedules_fault_deadli
         await host.async_stop()
 
 
-async def test_snapshot_write_failure_fault_deadline_reaches_sensor_fault_via_real_timer(
-    hass, caplog, monkeypatch
-):
+async def test_snapshot_write_failure_fault_deadline_reaches_sensor_fault_via_real_timer(hass, caplog, monkeypatch):
     """Persistence failure must still arm the HA timer; the timer path alone enters SENSOR_FAULT."""
 
     from pytest_homeassistant_custom_component.common import async_fire_time_changed_exact
