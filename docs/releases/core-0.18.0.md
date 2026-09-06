@@ -25,9 +25,7 @@ Core 0.17.0 while preserving Heating and canonical configuration v3 behavior:
   only; it does not confirm the physical output state.
 - Water Safety adaptation, device-specific automation, and Heating redesign are
   outside this release.
-- No Home Assistant manifest, release artifact, tag, publication, or dependency
-  change is prepared here. The repository HA candidate remains a separate
-  composition on published Core 0.17.0.
+- The repository HA 0.14.0 candidate separately pins exact public Core 0.18.0.
 
 ## Candidate validation and publication separation
 

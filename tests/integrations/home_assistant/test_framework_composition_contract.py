@@ -12,15 +12,18 @@ from tests.integrations.home_assistant.framework.framework_composition import (
 )
 
 
-def test_checked_out_wheel_uses_installed_core_while_manifest_stays_public() -> None:
+@pytest.mark.parametrize("manifest_public_version", ["1.2.3", "4.5.6"])
+def test_checked_out_wheel_uses_installed_core_independently_of_manifest_pin(
+    manifest_public_version: str,
+) -> None:
     assert resolve_framework_composition(CHECKED_OUT_WHEEL_COMPOSITION) == CHECKED_OUT_WHEEL_COMPOSITION
     assert (
         resolve_installed_framework_core_version(
             composition=CHECKED_OUT_WHEEL_COMPOSITION,
-            installed_version="0.18.0",
-            manifest_public_version="0.17.0",
+            installed_version="1.2.3",
+            manifest_public_version=manifest_public_version,
         )
-        == "0.18.0"
+        == "1.2.3"
     )
 
 
@@ -28,16 +31,16 @@ def test_public_composition_requires_installed_core_to_match_manifest_pin() -> N
     assert (
         resolve_installed_framework_core_version(
             composition=PUBLIC_COMPOSITION,
-            installed_version="0.17.0",
-            manifest_public_version="0.17.0",
+            installed_version="1.2.3",
+            manifest_public_version="1.2.3",
         )
-        == "0.17.0"
+        == "1.2.3"
     )
     with pytest.raises(AssertionError, match="equal manifest public Core"):
         resolve_installed_framework_core_version(
             composition=PUBLIC_COMPOSITION,
-            installed_version="0.18.0",
-            manifest_public_version="0.17.0",
+            installed_version="4.5.6",
+            manifest_public_version="1.2.3",
         )
 
 

@@ -18,31 +18,33 @@ from scripts.ci.verify_public_core import (
 ROOT = Path(__file__).parents[2]
 
 
-def test_development_wheel_mode_allows_core_candidate_ahead_of_public_manifest_pin() -> None:
+@pytest.mark.parametrize("public_core_version", ["1.2.3", "4.5.6"])
+def test_development_wheel_mode_keeps_checkout_and_manifest_versions_independent(
+    public_core_version: str,
+) -> None:
     installed, manifest_requirement = composition_expectations(
         development_wheel=True,
-        project_version="0.18.0",
-        public_core_version="0.17.0",
+        project_version="1.2.3",
+        public_core_version=public_core_version,
     )
 
-    assert installed == "0.18.0"
-    assert manifest_requirement == "controlel==0.17.0"
-    assert installed != manifest_requirement.removeprefix("controlel==")
+    assert installed == "1.2.3"
+    assert manifest_requirement == f"controlel=={public_core_version}"
 
 
 def test_public_mode_requires_installed_core_to_match_manifest_pin() -> None:
     installed, manifest_requirement = composition_expectations(
         development_wheel=False,
         project_version="0.18.0",
-        public_core_version="0.17.0",
+        public_core_version=CORE_VERSION,
     )
 
-    assert installed == "0.17.0"
-    assert manifest_requirement == "controlel==0.17.0"
+    assert installed == "0.18.0"
+    assert manifest_requirement == "controlel==0.18.0"
     assert installed == CORE_VERSION
 
 
-def test_repository_core_candidate_uses_development_expectations() -> None:
+def test_repository_shipped_core_uses_development_expectations() -> None:
     project = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     manifest = json.loads((ROOT / "custom_components" / "controlel" / "manifest.json").read_text(encoding="utf-8"))
     installed, manifest_requirement = composition_expectations(
@@ -51,7 +53,7 @@ def test_repository_core_candidate_uses_development_expectations() -> None:
     )
 
     assert 'version = "0.18.0"' in project
-    assert manifest["requirements"] == [manifest_requirement] == ["controlel==0.17.0"]
+    assert manifest["requirements"] == [manifest_requirement] == ["controlel==0.18.0"]
     assert installed == "0.18.0"
 
 

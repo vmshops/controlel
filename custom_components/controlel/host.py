@@ -1825,14 +1825,36 @@ def _default_shutdown_subscriber(
     hass: object,
     listener: Callable[[], None],
 ) -> Unsubscribe:
+    """Subscribe once to Home Assistant stop with explicit cleanup ownership.
+
+    ``async_listen_once`` removes itself before invoking the callback. The
+    returned unsubscribe must therefore become a no-op after the event fires,
+    otherwise later ``async_stop`` cleanup raises
+    ``Unable to remove unknown job listener``.
+    """
+
     from homeassistant.const import EVENT_HOMEASSISTANT_STOP
     from homeassistant.core import callback
 
+    consumed = False
+
     @callback
     def on_stop(_: Any) -> None:
+        nonlocal consumed
+        # The one-time bus entry is already gone before this runs.
+        consumed = True
         listener()
 
-    return hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, on_stop)
+    remove_listener = hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, on_stop)
+
+    def unsubscribe() -> None:
+        nonlocal consumed
+        if consumed:
+            return
+        consumed = True
+        remove_listener()
+
+    return unsubscribe
 
 
 def _default_interval_subscriber(

@@ -27,9 +27,21 @@ from .canonical_runtime import (
     clear_staged_candidate_runtime,
     stage_candidate_runtime,
 )
+from .lifecycle_diagnostics import record_lifecycle_failure
 from .setup_backend import SetupBackend, async_get_setup_backend
 
 LOGGER = logging.getLogger(__name__)
+
+
+class _ConfigEntryReloadError(RuntimeError):
+    """Preserve HA's setup reason while rollback restores the prior runtime."""
+
+    def __init__(self, *, state: str | None, reason: str | None) -> None:
+        details = "; ".join(
+            item for item in (f"state={state}" if state else None, f"reason={reason}" if reason else None) if item
+        )
+        super().__init__("Home Assistant config-entry reload did not complete" + (f" ({details})" if details else ""))
+        self.home_assistant_reason = reason
 
 
 async def async_activate_canonical_revision(
@@ -132,6 +144,7 @@ async def async_activate_canonical_revision(
                     raise
             return committed
         except Exception as error:
+            record_lifecycle_failure(hass, entry, phase="activation", error=error)
             active_after_error = _entry_active_reference(entry)
             if _is_durable_commit(active_after_error, attempt_id, selection):
                 raise
@@ -258,7 +271,11 @@ async def _async_quiesce_non_authoritative_runtime(entry: Any) -> None:
 
 async def _require_reload_success(hass: Any, entry_id: str) -> None:
     if not await hass.config_entries.async_reload(entry_id):
-        raise RuntimeError("Home Assistant config-entry reload did not complete")
+        get_entry = getattr(hass.config_entries, "async_get_entry", None)
+        entry = None if get_entry is None else get_entry(entry_id)
+        state = None if entry is None else getattr(getattr(entry, "state", None), "value", None)
+        reason = None if entry is None else getattr(entry, "reason", None)
+        raise _ConfigEntryReloadError(state=state, reason=reason)
 
 
 def _entry_active_reference(entry: Any) -> ActiveReference | None:

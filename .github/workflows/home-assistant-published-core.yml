@@ -4,6 +4,7 @@ on:
   release:
     types:
       - published
+  workflow_call:
   workflow_dispatch:
 
 permissions:
@@ -33,9 +34,7 @@ jobs:
         run: python -m pip install --require-hashes -r requirements/ha-test.txt
 
       - name: Install Core requirement declared by the HA manifest from PyPI
-        run: |
-          core_requirement="$(python -c 'import json; print(json.load(open("custom_components/controlel/manifest.json"))["requirements"][0])')"
-          python -m pip install --no-cache-dir "${core_requirement}"
+        run: python scripts/ci/public_core_artifact.py --install
 
       - name: Verify Home Assistant published Core composition
         run: python scripts/ci/verify_public_core.py
@@ -70,9 +69,7 @@ jobs:
         run: python -m pip install --require-hashes -r requirements/ha-test.txt
 
       - name: Install Core requirement declared by the HA manifest from PyPI
-        run: |
-          core_requirement="$(python -c 'import json; print(json.load(open("custom_components/controlel/manifest.json"))["requirements"][0])')"
-          python -m pip install --no-cache-dir "${core_requirement}"
+        run: python scripts/ci/public_core_artifact.py --install
 
       - name: Verify Home Assistant published Core composition
         run: python scripts/ci/verify_public_core.py

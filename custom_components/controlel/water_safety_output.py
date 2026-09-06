@@ -1,5 +1,7 @@
 """Home Assistant adapter for truthful Water Safety output requests."""
 
+from __future__ import annotations
+
 import logging
 from collections.abc import Coroutine
 from datetime import UTC, datetime
@@ -16,26 +18,28 @@ from controlel.application.water_safety.model import (
 )
 
 from .event_loop_bridge import HomeAssistantEventLoopBridge
+from .water_safety_messages import (
+    WATER_SAFETY_DEFAULT_MESSAGES,
+    WATER_SAFETY_DEFAULT_TITLES,
+    WATER_SAFETY_FALLBACK_MESSAGES,
+    WATER_SAFETY_MOJIBAKE_FRAGMENTS,
+    default_water_safety_message,
+    default_water_safety_title,
+    water_safety_locale,
+)
 
-WATER_SAFETY_DEFAULT_MESSAGES: dict[str, dict[str, str]] = {
-    "water_safety.wet": {
-        "cs": "­čĺž Detekov├ína vlhkost!",
-        "en": "­čĺž Moisture detected!",
-    },
-    "water_safety.recovery": {
-        "cs": "Ôťů Vlhkost ustoupila",
-        "en": "Ôťů Moisture cleared",
-    },
-    "water_safety.sensor_fault": {
-        "cs": "ÔÜá´ŞĆ Porucha senzoru vlhkosti",
-        "en": "ÔÜá´ŞĆ Moisture sensor fault",
-    },
-}
-
-WATER_SAFETY_DEFAULT_TITLES: dict[str, str] = {
-    "cs": "Bezpe─Źnost vody",
-    "en": "Water Safety",
-}
+__all__ = [
+    "WATER_SAFETY_DEFAULT_MESSAGES",
+    "WATER_SAFETY_DEFAULT_TITLES",
+    "WATER_SAFETY_FALLBACK_MESSAGES",
+    "WATER_SAFETY_MOJIBAKE_FRAGMENTS",
+    "HomeAssistantWaterSafetyOutputPort",
+    "ShutoffValveUnavailableError",
+    "SirenUnavailableError",
+    "default_water_safety_message",
+    "default_water_safety_title",
+    "water_safety_locale",
+]
 
 
 class ServiceRegistryLike(Protocol):
@@ -85,10 +89,12 @@ class HomeAssistantWaterSafetyOutputPort:
         bridge: HomeAssistantEventLoopBridge,
         *,
         logger: logging.Logger | None = None,
+        area_name: str | None = None,
     ) -> None:
         self._hass = hass
         self._bridge = bridge
         self._logger = logger or logging.getLogger(__name__)
+        self._area_name = area_name.strip() if isinstance(area_name, str) and area_name.strip() else None
 
     def request(self, command: WaterOutputCommand) -> WaterOutputCommandResult:
         try:
@@ -149,8 +155,12 @@ class HomeAssistantWaterSafetyOutputPort:
         domain, service = locator.split(".", 1)
         if domain != "notify":
             raise ValueError("notification target must use the notify domain")
-        message = command.custom_message or _default_message(command.message_code, self._hass.config.language)
-        title = _default_title(self._hass.config.language)
+        message = command.custom_message or default_water_safety_message(
+            command.message_code,
+            self._hass.config.language,
+            area_name=self._area_name,
+        )
+        title = default_water_safety_title(self._hass.config.language)
         await self._hass.services.async_call(
             "notify",
             service,
@@ -204,18 +214,3 @@ class HomeAssistantWaterSafetyOutputPort:
             blocking=True,
             target={"entity_id": entity_id},
         )
-
-
-def _default_message(message_code: str | None, language: str) -> str:
-    if message_code is None:
-        raise ValueError("notification requires message_code when custom_message is absent")
-    messages = WATER_SAFETY_DEFAULT_MESSAGES.get(message_code)
-    if messages is None:
-        raise ValueError(f"unsupported water safety message code: {message_code}")
-    locale = "cs" if language.casefold().startswith("cs") else "en"
-    return messages[locale]
-
-
-def _default_title(language: str) -> str:
-    locale = "cs" if language.casefold().startswith("cs") else "en"
-    return WATER_SAFETY_DEFAULT_TITLES[locale]

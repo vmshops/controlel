@@ -1,0 +1,86 @@
+{
+  "options": {
+    "step": {
+      "init": {
+        "menu_options": {
+          "water_safety": "Ochrana proti úniku vody"
+        }
+      },
+      "water_safety": {
+        "title": "Ochrana proti úniku vody",
+        "description": "{water_safety_summary}",
+        "menu_options": {
+          "water_safety_validation": "Kontrola a aktivace",
+          "water_safety_abandon": "Zahodit aktuální koncept",
+          "water_safety_status": "Stav",
+          "water_safety_area_sensor": "Místnost a senzor vlhkosti — Povinné",
+          "water_safety_notifications": "Notifikace — Volitelné",
+          "water_safety_sirens": "Sirény — Volitelné",
+          "water_safety_shutoff_valves": "Uzavírací ventily — Volitelné",
+          "back_to_hub": "Zpět do nastavení Controlel"
+        }
+      },
+      "water_safety_status": {
+        "title": "Ochrana proti úniku vody — Stav",
+        "description": "{section_detail}",
+        "menu_options": {
+          "back_to_water_safety": "Zpět k ochraně proti úniku vody"
+        }
+      },
+      "water_safety_area_sensor": {
+        "title": "Ochrana proti úniku vody — Místnost a senzor vlhkosti",
+        "description": "Povinné. Vyberte jednu místnost Home Assistant a jeden senzor vlhkosti / úniku pro tento modul. Obě položky jsou nutné k aktivaci. Kompatibilní kandidáti: {candidate_scope} ({candidate_count}). Uložení upraví jen neaktivní koncept. Aktuálně chybějící výběry: {unavailable_area_sensor}.",
+        "data": {
+          "water_safety_area_id": "Místnost (povinné)",
+          "water_safety_moisture_entity_id": "Senzor vlhkosti / úniku (povinné)",
+          "show_all_compatible_entities": "Zobrazit všechny kompatibilní entity"
+        }
+      },
+      "water_safety_notifications": {
+        "title": "Ochrana proti úniku vody — Notifikace",
+        "description": "{notification_behavior} Uložení upraví jen neaktivní koncept. Aktuálně chybějící cíle: {unavailable_notification_targets}. {notification_test_result}",
+        "data": {
+          "water_safety_notification_targets": "Cíle notifikací při detekci a při vyčištění (volitelné)",
+          "water_safety_test_notification": "Odeslat testovací notifikaci místo uložení"
+        }
+      },
+      "water_safety_sirens": {
+        "title": "Ochrana proti úniku vody — Sirény",
+        "description": "{siren_behavior} Uložení upraví jen neaktivní koncept. Aktuálně chybějící cíle: {unavailable_sirens}.",
+        "data": {
+          "water_safety_siren_targets": "Sirény (volitelné)"
+        }
+      },
+      "water_safety_shutoff_valves": {
+        "title": "Ochrana proti úniku vody — Uzavírací ventily",
+        "description": "{shutoff_valve_behavior} Uložení upraví jen neaktivní koncept. Aktuálně chybějící cíle: {unavailable_shutoff_valves}.",
+        "data": {
+          "water_safety_shutoff_valve_targets": "Uzavírací ventily vody (volitelné)"
+        }
+      },
+      "water_safety_validation": {
+        "title": "Ochrana proti úniku vody — Kontrola a aktivace",
+        "description": "{validation_summary}",
+        "menu_options": {
+          "back_to_water_safety": "Zpět k ochraně proti úniku vody"
+        }
+      },
+      "water_safety_abandon": {
+        "title": "Ochrana proti úniku vody — Zahodit aktuální koncept",
+        "description": "Smazat tento trvalý neaktivní koncept ochrany proti úniku vody? Aktuálně aktivní konfigurace ochrany proti úniku vody i Topení zůstanou beze změny."
+      },
+      "water_safety_activate": {
+        "title": "Ochrana proti úniku vody — Aktivovat konfiguraci",
+        "description": "Aktivovat tuto konfiguraci ochrany proti úniku vody? Tím se nahradí aktuálně aktivní konfigurace (pokud nějaká je) a Controlel se znovu načte. Uložený koncept se odstraní až po úspěšné aktivaci."
+      }
+    },
+    "error": {
+      "invalid_water_area_sensor": "Výběr místnosti nebo senzoru vlhkosti už není platný. Zkontrolujte aktuální entity v Home Assistant a zkuste to znovu.",
+      "invalid_water_notification_targets": "Jeden nebo více cílů notifikací je neplatný nebo nedostupný. Zkontrolujte služby notify v Home Assistant a zkuste to znovu.",
+      "invalid_water_siren_targets": "Jeden nebo více cílů sirén není kompatibilní nebo už není registrovaný. Vyberte kompatibilní entity sirén a zkuste to znovu.",
+      "invalid_water_shutoff_valve_targets": "Jeden nebo více uzavíracích ventilů není kompatibilní nebo už není registrovaný. Vyberte vodní ventily Home Assistant s podporou uzavření a zkuste to znovu.",
+      "water_safety_validation_failed": "Koncept ochrany proti úniku vody není připravený k aktivaci. Doplňte povinnou místnost a senzor vlhkosti a zkontrolujte jej znovu.",
+      "water_safety_activation_failed": "Ochrana proti úniku vody se nepodařilo bezpečně aktivovat. Uložený koncept i předchozí aktivní konfigurace zůstaly zachovány."
+    }
+  }
+}

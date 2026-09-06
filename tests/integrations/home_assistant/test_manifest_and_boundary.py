@@ -1,5 +1,6 @@
 import ast
 import json
+import re
 import tomllib
 from pathlib import Path
 
@@ -26,29 +27,27 @@ def test_manifest_has_required_custom_component_contract():
         "integration_type": "hub",
         "iot_class": "local_push",
         "issue_tracker": "https://github.com/vmshops/controlel/issues",
-        "requirements": ["controlel==0.17.0"],
+        "requirements": ["controlel==0.18.0"],
         "single_config_entry": True,
         "version": "0.14.0",
     }
 
 
-def test_core_and_integration_versions_are_intentionally_independent():
+def test_core_and_integration_versions_have_separate_release_contracts():
     manifest = json.loads((COMPONENT / "manifest.json").read_text(encoding="utf-8"))
     with (ROOT / "pyproject.toml").open("rb") as pyproject_file:
         core_version = tomllib.load(pyproject_file)["project"]["version"]
 
     assert core_version == "0.18.0"
     assert manifest["version"] == INTEGRATION_VERSION == "0.14.0"
-    assert manifest["requirements"] == ["controlel==0.17.0"]
-    assert manifest["version"] != manifest["requirements"][0].partition("==")[2]
-    assert core_version != manifest["requirements"][0].partition("==")[2]
+    assert manifest["requirements"] == ["controlel==0.18.0"]
 
 
 def test_pr_ha_tests_install_checked_out_core_wheel() -> None:
     workflow = (ROOT / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8")
 
-    assert "home-assistant-public:" in workflow
-    assert "home-assistant-framework-public:" in workflow
+    assert "home-assistant-checked-out-wheel:" in workflow
+    assert "home-assistant-framework-checked-out-wheel:" in workflow
     assert "home-assistant-candidate:" not in workflow
     assert "CONTROLEL_FRAMEWORK_COMPOSITION: checked-out-wheel" in workflow
     assert workflow.count("python -m pip install -e .") == 1
@@ -57,22 +56,25 @@ def test_pr_ha_tests_install_checked_out_core_wheel() -> None:
     assert (
         workflow.count("python scripts/ci/verify_public_core.py --development-wheel dist/ha-core/controlel-*.whl") == 2
     )
-    assert "python -m pip install --no-cache-dir controlel==0.17.0" not in workflow
+    assert "python -m pip install --no-cache-dir controlel==" not in workflow
     assert workflow.count("python scripts/ci/verify_ha_candidate_core.py") == 0
     assert "tests/integrations/home_assistant \\" in workflow
     assert "--ignore=tests/integrations/home_assistant/framework" in workflow
     assert workflow.count("--asyncio-mode=auto") == 1
 
 
-def test_published_core_ha_tests_are_not_a_pr_required_check() -> None:
+def test_published_core_ha_tests_are_required_by_release_validation() -> None:
     workflow = (ROOT / ".github" / "workflows" / "home-assistant-published-core.yml").read_text(encoding="utf-8")
 
     assert "release:" in workflow
     assert "workflow_dispatch:" in workflow
     assert "pull_request:" not in workflow
     assert "push:" not in workflow
-    assert "custom_components/controlel/manifest.json" in workflow
-    assert workflow.count('python -m pip install --no-cache-dir "${core_requirement}"') == 2
+    assert "workflow_call:" in workflow
+    assert workflow.count("python scripts/ci/public_core_artifact.py --install") == 2
+    release = (ROOT / ".github/workflows/integration-release-validation.yml").read_text()
+    assert "uses: ./.github/workflows/home-assistant-published-core.yml" in release
+    assert "needs: published-core" in release
     assert workflow.count("python scripts/ci/verify_public_core.py") == 2
     assert "home-assistant-published-core:" in workflow
     assert "home-assistant-framework-published-core:" in workflow
@@ -84,8 +86,9 @@ def test_manifest_requirement_is_one_exact_public_distribution_pin():
     manifest = json.loads((COMPONENT / "manifest.json").read_text(encoding="utf-8"))
     requirements = manifest["requirements"]
 
-    assert requirements == ["controlel==0.17.0"]
+    assert requirements == ["controlel==0.18.0"]
     assert len(requirements) == 1
+    assert re.fullmatch(r"controlel==\d+\.\d+\.\d+", requirements[0])
     assert not any(marker in requirements[0] for marker in ("~=", ">=", "<=", " @ ", "git+", "-e ", "file:"))
 
 

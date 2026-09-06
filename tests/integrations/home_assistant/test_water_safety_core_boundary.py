@@ -1,4 +1,4 @@
-"""Verify Water Safety integration boundaries against public core."""
+"""Verify Water Safety integration boundaries against the required Core boundary."""
 
 from __future__ import annotations
 
@@ -11,19 +11,19 @@ from custom_components.controlel.const import INTEGRATION_VERSION
 
 ROOT = Path(__file__).parents[3]
 COMPONENT = ROOT / "custom_components" / "controlel"
-PUBLIC_CORE_VERSION = "0.17.0"
+REQUIRED_CORE_VERSION = "0.18.0"
 
 
-def test_manifest_pins_public_core_baseline() -> None:
+def test_manifest_pins_required_core_baseline() -> None:
     manifest = json.loads((COMPONENT / "manifest.json").read_text(encoding="utf-8"))
 
-    assert manifest["requirements"] == [f"controlel=={PUBLIC_CORE_VERSION}"]
+    assert manifest["requirements"] == [f"controlel=={REQUIRED_CORE_VERSION}"]
     assert manifest["version"] == INTEGRATION_VERSION
 
 
-def test_public_core_0170_includes_water_safety_symbols() -> None:
+def test_required_core_includes_water_safety_symbols() -> None:
     if importlib.util.find_spec("controlel.application.water_safety") is None:
-        raise AssertionError("public Core 0.17.0 must expose Water Safety contracts")
+        raise AssertionError("required Core 0.18.0 must expose Water Safety contracts")
 
     frontend_api = importlib.import_module("controlel.frontend_api.v1")
     assert hasattr(frontend_api, "WaterSafetyEvidenceV1")
