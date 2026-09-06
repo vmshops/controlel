@@ -323,12 +323,24 @@ class HomeAssistantWaterSafetyHost:
             self._deadline_handle = None
 
     def _on_deadline(self) -> None:
-        async def async_tick() -> None:
-            await self._process(lambda: self._runtime.tick(datetime.now(UTC)))
+        """Scheduler delivers this on the runtime worker; hop back to the HA loop for tick."""
 
-        task = self._hass.async_create_task(async_tick(), "Controlel Water Safety deadline tick")
-        self._callback_tasks.add(task)
-        task.add_done_callback(self._callback_tasks.discard)
+        loop = getattr(self._hass, "loop", None)
+        if loop is None:
+            raise RuntimeError("Water Safety deadline tick requires a Home Assistant event loop")
+
+        def enqueue_tick() -> None:
+            if not self._accepting or self._stopping:
+                return
+
+            async def async_tick() -> None:
+                await self._process(lambda: self._runtime.tick(datetime.now(UTC)))
+
+            task = self._hass.async_create_task(async_tick(), "Controlel Water Safety deadline tick")
+            self._callback_tasks.add(task)
+            task.add_done_callback(self._callback_tasks.discard)
+
+        loop.call_soon_threadsafe(enqueue_tick)
 
     def _refresh_diagnostics(self) -> None:
         self._diagnostics_snapshot = self._projector.project(

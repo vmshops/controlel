@@ -29,7 +29,7 @@ from tests.integrations.home_assistant.test_water_safety_integration import (
 SENSOR = "binary_sensor.utility_moisture"
 
 
-def _host(hass, effective=None):
+def _host(hass, effective=None, *, state_store=None):
     bridge = HomeAssistantEventLoopBridge(hass.loop)
     host = build_water_safety_host(
         hass,
@@ -38,7 +38,7 @@ def _host(hass, effective=None):
         scheduler=HomeAssistantScheduler(
             hass=hass, bridge=bridge, submit_runtime_callback=lambda callback: host.submit_scheduled_callback(callback)
         ),
-        state_store=RecordingState(),
+        state_store=state_store or RecordingState(),
         evidence_store=RecordingEvidence(),
         logger=logging.getLogger(__name__),
     )
@@ -103,6 +103,126 @@ async def test_configured_state_disappearance_enters_unknown_grace(hass):
         assert snapshot.fault_deadline == snapshot.unavailable_since + timedelta(seconds=30)
         assert host.runtime.next_deadline == snapshot.fault_deadline
         assert host._deadline_handle is not None
+    finally:
+        await host.async_stop()
+
+
+async def test_snapshot_write_failure_after_unknown_still_schedules_fault_deadline(hass, caplog):
+    class FailingState(RecordingState):
+        def __init__(self) -> None:
+            super().__init__()
+            self.fail = False
+
+        def save(self, snapshot):
+            if self.fail:
+                raise OSError("snapshot storage unavailable")
+            super().save(snapshot)
+
+    hass.states.async_set(SENSOR, "off")
+    await hass.async_block_till_done()
+    state = FailingState()
+    host = _host(hass, state_store=state)
+    try:
+        await host.async_initialize()
+        assert host.runtime.snapshot.latest_observation.condition is MoistureCondition.DRY
+        diagnostics_before = host.frontend_api_water_safety_evidence
+        assert diagnostics_before.assessment_status == WaterSafetyAssessmentStatus.CONFIRMED.value
+        state.fail = True
+        hass.states.async_remove(SENSOR)
+        await hass.async_block_till_done()
+
+        snapshot = host.runtime.snapshot
+        deadline = snapshot.fault_deadline
+        assert snapshot.latest_observation.condition is MoistureCondition.UNKNOWN
+        assert snapshot.assessment_status is WaterSafetyAssessmentStatus.INDETERMINATE_GRACE
+        assert deadline == snapshot.unavailable_since + timedelta(seconds=30)
+        assert host.runtime.next_deadline == deadline
+        assert host._deadline_handle is not None
+        diagnostics_after = host.frontend_api_water_safety_evidence
+        assert diagnostics_after is not diagnostics_before
+        assert diagnostics_after.assessment_status == WaterSafetyAssessmentStatus.INDETERMINATE_GRACE.value
+        assert diagnostics_after.sensor_condition == MoistureCondition.UNKNOWN.value
+        assert "Water Safety snapshot persistence failed" in caplog.text
+        assert "snapshot storage unavailable" in caplog.text
+
+        # The one-shot HA timer is armed; drive the due Core deadline without another
+        # sensor event. async_fire_time_changed advances HA timers, but tick() uses
+        # wall-clock now, so invoke the host processing path at the known deadline.
+        await host._process(lambda: host.runtime.tick(deadline))
+        assert host.runtime.state is WaterSafetyState.SENSOR_FAULT
+        assert host.runtime.snapshot.fault_deadline is None
+        assert host.frontend_api_water_safety_evidence.state == WaterSafetyState.SENSOR_FAULT.value
+        assert host.frontend_api_water_safety_evidence.assessment_status == WaterSafetyAssessmentStatus.CONFIRMED.value
+        assert hass.states.get(SENSOR) is None
+    finally:
+        await host.async_stop()
+
+
+async def test_snapshot_write_failure_fault_deadline_reaches_sensor_fault_via_real_timer(
+    hass, caplog, monkeypatch
+):
+    """Persistence failure must still arm the HA timer; the timer path alone enters SENSOR_FAULT."""
+
+    from pytest_homeassistant_custom_component.common import async_fire_time_changed_exact
+
+    import custom_components.controlel.water_safety_host as host_module
+
+    class FailingState(RecordingState):
+        def __init__(self) -> None:
+            super().__init__()
+            self.fail = False
+
+        def save(self, snapshot):
+            if self.fail:
+                raise OSError("snapshot storage unavailable")
+            super().save(snapshot)
+
+    hass.states.async_set(SENSOR, "off")
+    await hass.async_block_till_done()
+    state = FailingState()
+    host = _host(hass, state_store=state)
+    try:
+        await host.async_initialize()
+        assert host.runtime.snapshot.latest_observation.condition is MoistureCondition.DRY
+        diagnostics_before = host.frontend_api_water_safety_evidence
+        state.fail = True
+        hass.states.async_remove(SENSOR)
+        await hass.async_block_till_done()
+
+        deadline = host.runtime.snapshot.fault_deadline
+        assert deadline is not None
+        assert host.runtime.next_deadline == deadline
+        assert host._deadline_handle is not None
+        assert host.runtime.state is WaterSafetyState.OK
+        assert host.frontend_api_water_safety_evidence.assessment_status == (
+            WaterSafetyAssessmentStatus.INDETERMINATE_GRACE.value
+        )
+        assert "Water Safety snapshot persistence failed" in caplog.text
+
+        # HA one-shot timers advance via async_fire_time_changed; the deadline hop
+        # still calls tick(datetime.now(UTC)). Align that wall-clock read so the
+        # real scheduler → worker → call_soon_threadsafe path can enter SENSOR_FAULT
+        # without another sensor event or a manual host._process()/tick() drive.
+        tick_at = deadline + timedelta(seconds=1)
+
+        class _AlignedDateTime:
+            @staticmethod
+            def now(tz=None):
+                return tick_at if tz is not None else tick_at.replace(tzinfo=None)
+
+        monkeypatch.setattr(host_module, "datetime", _AlignedDateTime)
+        async_fire_time_changed_exact(hass, tick_at)
+        await hass.async_block_till_done()
+
+        assert host.runtime.state is WaterSafetyState.SENSOR_FAULT
+        assert host.runtime.snapshot.fault_deadline is None
+        assert host.runtime.next_deadline is None
+        assert host._deadline_handle is None
+        diagnostics_after = host.frontend_api_water_safety_evidence
+        assert diagnostics_after is not diagnostics_before
+        assert diagnostics_after.state == WaterSafetyState.SENSOR_FAULT.value
+        assert diagnostics_after.assessment_status == WaterSafetyAssessmentStatus.CONFIRMED.value
+        assert hass.states.get(SENSOR) is None
     finally:
         await host.async_stop()
 

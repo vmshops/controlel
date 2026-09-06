@@ -609,6 +609,42 @@ def test_stable_identity_survives_locator_changes_and_hooks_receive_state_and_ev
     assert diagnostics.owned_outputs[0].last_requested_action is WaterOutputAction.REQUEST_SIREN_ON
 
 
+def test_snapshot_persistence_failure_keeps_unknown_grace_and_fault_deadline(caplog) -> None:
+    class FailingState(RecordingState):
+        def __init__(self) -> None:
+            super().__init__()
+            self.fail = False
+
+        def save(self, snapshot: WaterSafetySnapshot) -> None:
+            if self.fail:
+                raise OSError("snapshot disk unavailable")
+            super().save(snapshot)
+
+    state = FailingState()
+    runtime = _runtime(RecordingOutput(), effective=_effective(grace=30.0), state=state)
+    runtime.start(_observation(MoistureCondition.DRY, T0), started_at=T0)
+    assert state.snapshots[-1].state is WaterSafetyState.OK
+
+    state.fail = True
+    unknown = runtime.observe(_observation(MoistureCondition.UNKNOWN, T0 + timedelta(seconds=5)))
+    deadline = unknown.snapshot.fault_deadline
+
+    assert unknown.state is WaterSafetyState.OK
+    assert unknown.snapshot.assessment_status is WaterSafetyAssessmentStatus.INDETERMINATE_GRACE
+    assert deadline == T0 + timedelta(seconds=35)
+    assert runtime.next_deadline == deadline
+    assert "Water Safety snapshot persistence failed" in caplog.text
+    assert "snapshot disk unavailable" in caplog.text
+
+    before = runtime.tick(deadline - timedelta(seconds=1))
+    fault = runtime.tick(deadline)
+    assert before.state is WaterSafetyState.OK
+    assert before.snapshot.fault_deadline == deadline
+    assert fault.state is WaterSafetyState.SENSOR_FAULT
+    assert fault.snapshot.fault_deadline is None
+    assert runtime.next_deadline is None
+
+
 @pytest.mark.parametrize(
     "failed_code",
     [
