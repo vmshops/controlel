@@ -1,3 +1,4 @@
+import importlib.metadata
 import json
 from collections.abc import Iterator
 from pathlib import Path
@@ -23,12 +24,16 @@ from custom_components.controlel.const import (
     CONF_ZONE_ID,
     CONF_ZONE_NAME,
 )
+from tests.integrations.home_assistant.framework.framework_composition import (
+    resolve_framework_composition,
+    resolve_installed_framework_core_version,
+)
 
 ROOT = Path(__file__).parents[4]
 MANIFEST_REQUIREMENT = json.loads(
     (ROOT / "custom_components" / "controlel" / "manifest.json").read_text(encoding="utf-8")
 )["requirements"][0]
-MANIFEST_CORE_VERSION = MANIFEST_REQUIREMENT.removeprefix("controlel==")
+MANIFEST_PUBLIC_CORE_VERSION = MANIFEST_REQUIREMENT.removeprefix("controlel==")
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -37,15 +42,40 @@ def pytest_configure(config: pytest.Config) -> None:
 
 
 @pytest.fixture(scope="session")
-def expected_framework_core_version() -> str:
-    """Return the exact public core version declared by the integration manifest."""
-    return MANIFEST_CORE_VERSION
+def framework_composition() -> str:
+    """Return checked-out-wheel or public Core composition mode."""
+    return resolve_framework_composition()
 
 
 @pytest.fixture(scope="session")
 def manifest_core_requirement() -> str:
-    """Return the released public core requirement declared by the integration."""
+    """Return the released public Core requirement declared by the integration."""
     return MANIFEST_REQUIREMENT
+
+
+@pytest.fixture(scope="session")
+def manifest_public_core_version() -> str:
+    """Return the public Core version declared by the HA release manifest."""
+    return MANIFEST_PUBLIC_CORE_VERSION
+
+
+@pytest.fixture(scope="session")
+def installed_framework_core_version(
+    framework_composition: str,
+    manifest_public_core_version: str,
+) -> str:
+    """Return the installed Core package version for the active composition."""
+    return resolve_installed_framework_core_version(
+        composition=framework_composition,
+        installed_version=importlib.metadata.version("controlel"),
+        manifest_public_version=manifest_public_core_version,
+    )
+
+
+@pytest.fixture(scope="session")
+def expected_framework_core_version(installed_framework_core_version: str) -> str:
+    """Compatibility alias for runtime/framework Core version assertions."""
+    return installed_framework_core_version
 
 
 @pytest.fixture

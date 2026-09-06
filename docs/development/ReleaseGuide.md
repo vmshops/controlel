@@ -1,19 +1,28 @@
 # Release guide
 
-## Prepared Core 0.17.0 candidate
+## Prepared Core 0.18.0 candidate
 
-Core `0.17.0` is prepared from current mainline as the Water Safety V1 Core
-release candidate. It adds host-neutral Water Safety domain and application
-contracts, an event-driven runtime with explicit one-shot deadlines, Setup
-schema v1 contracts, diagnostics, Frontend API v1 projection, and optional Home
-Assistant infrastructure adapters. UNKNOWN and UNAVAILABLE are never dry
-evidence, and accepted output requests never claim physical output state.
+Core `0.18.0` is prepared from current mainline as the next Core release
+candidate after immutable public Core `0.17.0`. It packages module-scoped
+active-reference persistence/resolution, Water shutoff contracts, optional
+empty notification/output role lists that remain activation-ready, and Water
+Safety evidence/snapshot persistence isolation. UNKNOWN and UNAVAILABLE remain
+never dry evidence, and accepted output requests never claim physical output
+state.
 
 The candidate preserves the current Heating runtime and canonical configuration
 v3 behavior. It does not change the Home Assistant `0.14.0` candidate or that
-candidate's exact dependency on published `controlel==0.16.0`. Core `0.17.0`
+candidate's exact dependency on published `controlel==0.17.0`. Core `0.18.0`
 remains untagged and unpublished until the later publication sequence is
 separately approved.
+
+## Published Core 0.17.0
+
+Core `0.17.0` is published and immutable from `core-v0.17.0`. It provides Water
+Safety V1 domain, runtime, Setup, diagnostics, Frontend API projection, and
+optional Home Assistant adapters. Its public wheel and sdist identities remain
+recorded unchanged in `release-metadata/releases.yaml` and
+`docs/releases/core-0.17.0.md`.
 
 ## Published Core 0.16.0
 
@@ -301,10 +310,10 @@ Controlel uses distinct release states:
    backend under `dist/`.
 3. **Verified wheel** has passed metadata, archive-content, and clean
    out-of-checkout installation checks.
-4. **Published core package** is currently immutable `controlel==0.16.0` on
+4. **Published core package** is currently immutable `controlel==0.17.0` on
    PyPI.
 5. **Home Assistant exact dependency pin** for the next candidate is
-   `"requirements": ["controlel==0.16.0"]`; the public Core gate is satisfied.
+   `"requirements": ["controlel==0.17.0"]`; the public Core gate is satisfied.
 6. **HACS readiness** additionally requires integration release packaging and
    HACS metadata. A verified or published core wheel alone does not provide
    HACS readiness.
@@ -313,10 +322,10 @@ Controlel uses distinct release states:
 
 The distribution name and Python import package are both `controlel`. Versions
 `0.1.0`, `0.2.0`, `0.3.0`, `0.4.0`, `0.5.0`, `0.6.0`, `0.7.0`, `0.8.0`,
-`0.9.0` through `0.16.0` are publicly available on PyPI and immutable. PyPI
+`0.9.0` through `0.17.0` are publicly available on PyPI and immutable. PyPI
 versions are immutable; corrections always require a higher version.
 
-The current public core release is immutable `0.16.0`. Integration metadata is
+The current public core release is immutable `0.17.0`. Integration metadata is
 the separate `0.14.0` candidate; its composition checks install and verify the
 public package rather than repository source.
 
@@ -600,7 +609,7 @@ paths.
 
 ## Future core release checklist
 
-Published core versions `0.1.0` through `0.16.0` are immutable. Every
+Published core versions `0.1.0` through `0.17.0` are immutable. Every
 future core publication follows this order:
 
 1. implementation;
@@ -643,7 +652,7 @@ must not upload rebuilt artifacts for an already published version.
 
 ## Home Assistant dependency contract
 
-The `0.14.0` candidate pins exactly `controlel==0.16.0`. Its adapter and
+The `0.14.0` candidate pins exactly `controlel==0.17.0`. Its adapter and
 framework public-package jobs install with `--no-cache-dir`, verify both public
 artifact identities and the installed Setup and Frontend API v1 surfaces, and
 never install the repository as a distribution. Repository Core source is
@@ -661,7 +670,7 @@ Integration releases use a separate version stream:
   `Controlel Home Assistant Integration v0.14.0`;
 - HACS asset: `controlel.zip`;
 - checksum asset: `controlel.zip.sha256`;
-- exact core dependency: `controlel==0.16.0`.
+- exact core dependency: `controlel==0.17.0`.
 
 The published `v0.6.0` tag is immutable. The unpublished `v0.7.0` candidate was
 never tagged or released. Integration tags always use

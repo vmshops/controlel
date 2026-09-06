@@ -112,6 +112,24 @@ def test_water_draft_validates_and_canonicalizes_with_explicit_v1_meaning() -> N
     assert canonical.module_payload["shutoff_valve_target_roles"] == ()
 
 
+def test_water_empty_notifications_and_outputs_are_activation_ready_with_required_bindings() -> None:
+    draft = _draft()
+    settings = dict(draft.settings)
+    settings["notification_target_roles"] = []
+    settings["siren_target_roles"] = []
+    settings["shutoff_valve_target_roles"] = []
+    trimmed = draft.next_revision(
+        updated_at=NOW,
+        settings=settings,
+        bindings=(draft.bindings[0],),
+    )
+
+    report = WaterSafetySetupAdapter().validate(trimmed, report_id="optional-empty", evaluated_at=NOW)
+
+    assert report.activation_ready
+    assert not any(issue.code == "water_safety.unsupported_binding_role" for issue in report.issues)
+
+
 def test_water_validation_requires_stable_references_without_entity_locator_assumptions() -> None:
     draft = _draft(sensor_stable=False)
 

@@ -13,7 +13,7 @@ import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import unquote, urlparse
-from urllib.request import Request, urlopen
+from urllib.request import Request, url2pathname, urlopen
 
 import controlel
 from controlel.application.configuration import (
@@ -161,12 +161,32 @@ def _verify_development_wheel_install(
     direct_url = json.loads(direct_url_text)
     parsed_url = urlparse(direct_url["url"])
     assert parsed_url.scheme == "file"
-    installed_from = Path(unquote(parsed_url.path)).resolve(strict=True)
+    installed_from = Path(url2pathname(unquote(parsed_url.path))).resolve(strict=True)
     assert installed_from == wheel_path
     archive_info = direct_url["archive_info"]
     assert archive_info["hashes"]["sha256"] == wheel_sha256
     assert archive_info["hash"] == f"sha256={wheel_sha256}"
     return wheel_sha256
+
+
+def composition_expectations(
+    *,
+    development_wheel: bool,
+    project_version: str,
+    public_core_version: str = CORE_VERSION,
+) -> tuple[str, str]:
+    """Return installed Core version and HA manifest requirement for a composition mode.
+
+    Development-wheel CI installs the checked-out Core candidate while the HA
+    release manifest remains pinned to the current public Core. Public-mode CI
+    requires the installed package and the manifest pin to match that public
+    Core identity.
+    """
+
+    manifest_requirement = f"controlel=={public_core_version}"
+    if development_wheel:
+        return project_version, manifest_requirement
+    return public_core_version, manifest_requirement
 
 
 def main(*, development_wheel: Path | None = None) -> int:
@@ -180,8 +200,10 @@ def main(*, development_wheel: Path | None = None) -> int:
     with (REPOSITORY_ROOT / "pyproject.toml").open("rb") as pyproject_file:
         project = tomllib.load(pyproject_file)["project"]
 
-    expected_version = project["version"] if development_wheel is not None else CORE_VERSION
-    expected_requirement = f"controlel=={expected_version}"
+    expected_version, expected_manifest_requirement = composition_expectations(
+        development_wheel=development_wheel is not None,
+        project_version=project["version"],
+    )
     assert importlib.metadata.version("controlel") == expected_version
     assert controlel.__version__ == expected_version
     assert "site-packages" in package_path.as_posix()
@@ -207,7 +229,7 @@ def main(*, development_wheel: Path | None = None) -> int:
     ]
     assert project["dependencies"] == ["pydantic>=2.0"]
     assert not any("homeassistant" in dependency.casefold() for dependency in project["dependencies"])
-    assert manifest["requirements"] == [expected_requirement]
+    assert manifest["requirements"] == [expected_manifest_requirement]
 
     setup_contracts = (
         ActiveReference,
