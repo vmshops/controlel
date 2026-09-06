@@ -518,6 +518,10 @@ def test_public_core_provenance_records_history_and_current_composition_hash() -
     assert "PUBLIC_SDIST_SIZE = 203_980" in checker
     assert "9020487dd1325ff58ec3ac0e9e3541a78840eaaae803b05f9613f28525bd41bd" in checker
     assert 'distribution.read_text("direct_url.json") is None' in checker
+    assert "def composition_expectations(" in checker
+    assert "development_wheel=development_wheel is not None" in checker
+    assert "expected_manifest_requirement" in checker
+    assert 'f"controlel=={expected_version}"' not in checker
 
 
 def test_strict_final_core_release_interface_and_sequence_are_documented() -> None:
