@@ -95,14 +95,13 @@ def test_project_version_is_the_only_release_version_source() -> None:
     assert project_version not in package_source
 
 
-def test_shipped_core_and_ha_public_core_pin_match() -> None:
+def test_shipped_core_and_ha_release_contracts() -> None:
     manifest = json.loads((ROOT / "custom_components" / "controlel" / "manifest.json").read_text(encoding="utf-8"))
     core_version = load_pyproject()["project"]["version"]
 
     assert core_version == "0.18.0"
     assert manifest["requirements"] == ["controlel==0.18.0"]
     assert manifest["version"] == "0.14.0"
-    assert manifest["version"] != core_version
     assert manifest["issue_tracker"] == "https://github.com/vmshops/controlel/issues"
 
 
@@ -468,7 +467,7 @@ def test_pr_ci_validates_ha_against_a_wheel_built_from_the_checked_out_commit() 
     assert (
         workflow.count("python scripts/ci/verify_public_core.py --development-wheel dist/ha-core/controlel-*.whl") == 2
     )
-    assert "python -m pip install --no-cache-dir controlel==0.17.0" not in workflow
+    assert "python -m pip install --no-cache-dir controlel==" not in workflow
     assert workflow.count("python scripts/ci/verify_ha_candidate_core.py") == 0
     assert workflow.count("--asyncio-mode=auto") == 1
     assert "controlel==0.10.0" not in workflow

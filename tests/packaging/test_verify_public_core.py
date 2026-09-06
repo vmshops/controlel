@@ -18,16 +18,18 @@ from scripts.ci.verify_public_core import (
 ROOT = Path(__file__).parents[2]
 
 
-def test_development_wheel_mode_allows_core_candidate_ahead_of_public_manifest_pin() -> None:
+@pytest.mark.parametrize("public_core_version", ["1.2.3", "4.5.6"])
+def test_development_wheel_mode_keeps_checkout_and_manifest_versions_independent(
+    public_core_version: str,
+) -> None:
     installed, manifest_requirement = composition_expectations(
         development_wheel=True,
-        project_version="0.18.0",
-        public_core_version="0.17.0",
+        project_version="1.2.3",
+        public_core_version=public_core_version,
     )
 
-    assert installed == "0.18.0"
-    assert manifest_requirement == "controlel==0.17.0"
-    assert installed != manifest_requirement.removeprefix("controlel==")
+    assert installed == "1.2.3"
+    assert manifest_requirement == f"controlel=={public_core_version}"
 
 
 def test_public_mode_requires_installed_core_to_match_manifest_pin() -> None:

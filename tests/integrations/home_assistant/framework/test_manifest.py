@@ -7,6 +7,10 @@ from homeassistant.loader import async_get_integration
 
 import controlel
 from custom_components.controlel.const import DOMAIN
+from tests.integrations.home_assistant.framework.framework_composition import (
+    CHECKED_OUT_WHEEL_COMPOSITION,
+    PUBLIC_COMPOSITION,
+)
 
 ROOT = Path(__file__).parents[4].resolve()
 INTEGRATION_VERSION = "0.14.0"
@@ -57,13 +61,12 @@ def test_framework_composition_keeps_manifest_pin_separate_from_installed_core(
     manifest_public_core_version: str,
     manifest_core_requirement: str,
 ) -> None:
-    assert manifest_core_requirement == "controlel==0.17.0"
-    assert manifest_public_core_version == "0.17.0"
-    if framework_composition == "checked-out-wheel":
-        assert installed_framework_core_version == "0.18.0"
-        assert installed_framework_core_version != manifest_public_core_version
-    else:
+    assert manifest_core_requirement == f"controlel=={manifest_public_core_version}"
+    if framework_composition == PUBLIC_COMPOSITION:
         assert installed_framework_core_version == manifest_public_core_version
+    else:
+        assert framework_composition == CHECKED_OUT_WHEEL_COMPOSITION
+        assert importlib.metadata.version("controlel") == installed_framework_core_version
 
 
 def test_custom_component_does_not_vendor_core() -> None:
