@@ -32,15 +32,38 @@ async def test_real_loader_accepts_manifest_and_discovers_component(
     assert integration.file_path.name == DOMAIN
 
 
-def test_core_package_matches_public_composition(expected_framework_core_version: str) -> None:
+def test_core_package_matches_framework_composition(
+    installed_framework_core_version: str,
+    manifest_core_requirement: str,
+    manifest_public_core_version: str,
+    framework_composition: str,
+) -> None:
     package_path = Path(controlel.__file__).resolve()
     source_root = (ROOT / "src").resolve()
 
-    assert importlib.metadata.version("controlel") == expected_framework_core_version
-    assert controlel.__version__ == expected_framework_core_version
+    assert importlib.metadata.version("controlel") == installed_framework_core_version
+    assert controlel.__version__ == installed_framework_core_version
+    assert manifest_core_requirement == f"controlel=={manifest_public_core_version}"
+    if framework_composition == "public":
+        assert installed_framework_core_version == manifest_public_core_version
     assert "site-packages" in package_path.as_posix()
     assert not package_path.is_relative_to(source_root)
     assert source_root not in {Path(entry or ".").resolve() for entry in sys.path}
+
+
+def test_framework_composition_keeps_manifest_pin_separate_from_installed_core(
+    framework_composition: str,
+    installed_framework_core_version: str,
+    manifest_public_core_version: str,
+    manifest_core_requirement: str,
+) -> None:
+    assert manifest_core_requirement == "controlel==0.17.0"
+    assert manifest_public_core_version == "0.17.0"
+    if framework_composition == "checked-out-wheel":
+        assert installed_framework_core_version == "0.18.0"
+        assert installed_framework_core_version != manifest_public_core_version
+    else:
+        assert installed_framework_core_version == manifest_public_core_version
 
 
 def test_custom_component_does_not_vendor_core() -> None:
