@@ -14,16 +14,20 @@ releases:
     status: candidate
     tag: null
     commit_sha: null
-    summary: "Module-scoped active authority, Water shutoff contracts, and evidence failure isolation"
+    summary: "Module-scoped active authority, Water shutoff contracts, and evidence/snapshot failure isolation"
+    highlights:
+      - "Module-scoped active-reference persistence and resolution contracts beyond immutable public Core 0.17.0"
+      - "Water shutoff output contracts and activation-ready optional notification/output role lists"
+      - "Water Safety evidence and snapshot persistence failures isolated from in-memory safety transitions and outputs"
     compatibility:
       previous_public_core: "0.17.0"
-      home_assistant_integration_candidate: "0.14.0"
       python: ">=3.13"
       pydantic: ">=2.0"
     notes:
-      - "Unpublished candidate; no public artifact hashes or tag identity assigned."
-      - "HA release validation must use the actual public 0.18.0 wheel after Core publication."
-      - "Local development wheels and HA test bundles are not public artifacts."
+      - "Prepared but unpublished; no tag, PyPI upload, push, or Home Assistant release is part of this boundary."
+      - "Heating runtime and canonical configuration v3 behavior from the current mainline are preserved unchanged."
+      - "Accepted output requests are command outcomes and do not confirm physical siren or actuator state."
+      - "The repository HA 0.14.0 candidate pins exact public Core 0.18.0."
 
   - release_id: controlel-core-0.17.0
     component: core
@@ -88,7 +92,7 @@ releases:
       home_assistant: "2026.7.3"
     notes:
       - "Existing version-1 config entries retain their runtime/configuration path without automatic migration."
-      - "The integration pins exactly controlel==0.18.0. Public-wheel release validation remains blocked until Core publication; development CI uses a checked-out wheel."
+      - "The integration pins exactly public controlel==0.18.0; release validation verifies that public wheel independently from checked-out-wheel development CI."
       - "The integration remains unpublished pending real HAOS installation testing and separate release approval."
 
   - release_id: controlel-core-0.16.0

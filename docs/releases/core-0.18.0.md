@@ -1,47 +1,40 @@
 # Controlel Core 0.18.0
 
-Status: unpublished candidate.
+Status: prepared release candidate
 
-This candidate adds module-scoped active-reference persistence/resolution and
-Water shutoff output contracts added after immutable public Core 0.17.0.
-Water evidence-store errors are logged without blocking incident processing or
-valve, siren, and notification attempts. Output failures remain isolated;
-accepted commands do not prove physical state. No automatic valve reopening
-or Heating control redesign is included.
+Release: Controlel Core 0.18.0
 
-The minor increment follows the repository's feature-release convention.
-Python remains >=3.13 and the only runtime dependency remains pydantic>=2.0.
-HA 0.14.0 pins exactly controlel==0.18.0. The real public 0.17.0 wheel cannot
-satisfy the current integration imports.
+## Summary
 
-No tag, public wheel/sdist hash, or publication identity is assigned to this
-candidate. Checked-out wheels and canonical HA test bundles are development
-artifacts. Core publication must precede successful public-wheel compatibility
-validation and the later HA release.
+Core 0.18.0 packages mainline Core capabilities added after immutable public
+Core 0.17.0 while preserving Heating and canonical configuration v3 behavior:
 
-## Candidate validation
+- module-scoped active-reference persistence and resolution contracts;
+- Water shutoff output contracts and activation-ready optional notification,
+  siren, and shutoff role lists;
+- Water Safety evidence-store and snapshot persistence failures logged without
+  blocking in-memory state transitions, fault deadlines, or independently
+  isolated valve, siren, and notification attempts.
 
-Validation on 2026-09-06 used the installed candidate wheel with Home Assistant
-2026.7.3 on WSL/Linux. Core and packaging suites passed 1,021 tests on both
-Windows and Linux. The HA adapter/framework suites passed 443 tests with one
-intentional opt-in bundle-loader skip; the isolated bundle-loader test passed
-separately. All 20 HA Water blocker regressions passed against the final
-candidate wheel. Ruff, formatting, compile/AST, translation JSON, YAML, and
-strict HACS/Core package validation passed.
+## Frozen release boundary
 
-An independently reported unload during SETUP_IN_PROGRESS could not be
-reproduced: 42 unload/reload test functions expanded to 49 cases, and all six
-runs passed (294 cases total) in normal, reverse and seeded shuffled order.
-The original traceback was unavailable, so the original cause remains
-undetermined; no assertion was suppressed or speculative lifecycle fix added.
+- Heating and canonical configuration v3 behavior remain unchanged from the
+  current mainline at base `e1f2db5511c11949d8230fd0126b2705d2665249`.
+- UNKNOWN and UNAVAILABLE sensor observations are not interpreted as dry.
+- An accepted notification, siren, or valve request records a command outcome
+  only; it does not confirm the physical output state.
+- Water Safety adaptation, device-specific automation, and Heating redesign are
+  outside this release.
+- The repository HA 0.14.0 candidate separately pins exact public Core 0.18.0.
 
-The real public Core 0.17.0 wheel fails current HA imports, including
-`active_reference_for_module`, `active_references_from_data`,
-`ACTIVE_REFERENCES_KEY`, `MAX_SHUTOFF_VALVE_TARGETS` and
-`SHUTOFF_VALVE_ROLE_PREFIX`. Its immutable artifact identities remain in the
-[0.17.0 release notes](core-0.17.0.md).
+## Candidate validation and publication separation
 
-Core 0.18.0 is intentionally not public. The required public-wheel release gate
-therefore remains blocked. After Core publication, the exact public composition
-must pass independently before HA release approval, alongside remote CI and
-real HAOS acceptance checks.
+- Python: 3.13 or newer.
+- Runtime dependency remains only `pydantic>=2.0`.
+- Candidate validation builds exactly one wheel and one sdist, checks their
+  Water API contents and metadata, runs Twine validation, and imports the wheel
+  from an isolated clean environment without Home Assistant installed.
+- Candidate SHA-256 identities and the provenance manifest are generated only
+  after the release-preparation commit so that they bind to that exact commit.
+- The candidate is not published or tagged. Publication requires separate
+  approval and a later annotated `core-v0.18.0` tag on the reviewed commit.

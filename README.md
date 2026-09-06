@@ -22,19 +22,17 @@ The goal is to create a reliable heating controller capable of optimizing comfor
 
 Project phase: Core 0.18.0 and Home Assistant 0.14.0 candidate validation
 
-Published Core package: 0.17.0
-Prepared Core candidate: 0.18.0
+Published Core package: 0.18.0
 Published Home Assistant integration: 0.12.0
 Repository Home Assistant candidate: 0.14.0
 
-The integration candidate pins exactly `controlel==0.18.0`. This Core candidate
-is not yet public. Public 0.17.0 lacks the module-scoped active-reference and
-Water shutoff APIs used by this integration. Core 0.18.0 adds those contracts
-and isolates Water evidence failures from safety outputs; HA includes the six
-Water startup, observation, identity, evidence, activation, and recovery fixes.
-Heating behavior is preserved. Local candidate wheels and HA test bundles are
-not public release artifacts. HA release validation requires the real 0.18.0
-PyPI wheel before this integration may be released.
+The integration candidate pins exact public Core `controlel==0.18.0`. Core
+0.18.0 packages module-scoped active-reference and Water shutoff contracts and
+isolates Water evidence/snapshot persistence failures from safety outputs. HA
+includes the six Water startup, observation, identity, evidence, activation,
+and recovery fixes. Heating and canonical-configuration-v3 behavior are
+preserved. Local development wheels and HA test bundles are not public release
+artifacts; release validation independently verifies the public 0.18.0 wheel.
 
 The candidate ships the read-only Frontend API v1 bridge, authenticated Home
 Assistant WebSocket commands, sidebar panel lifecycle, packaged real-data UI,
@@ -59,7 +57,7 @@ installation flow is:
 
 The currently published integration manifest makes Home Assistant install exact
 public Core `controlel==0.12.0`; users must not install the core manually.
-The repository candidate `0.14.0` pins `controlel==0.18.0`; use the canonical development bundle until Core publication.
+The repository candidate `0.14.0` pins exact public `controlel==0.18.0`.
 Detailed prerequisites, configuration, safety behavior, manual installation,
 upgrades, removal, and current limitations are in the
 [Home Assistant installation guide](docs/operations/HomeAssistantInstallation.md).
@@ -231,8 +229,8 @@ The published integration 0.12.0 requires exact public Core 0.12.0. The
 repository's integration 0.14.0 candidate requires exact Core 0.18.0.
 Development tests install a wheel built from the checkout. Release validation
 separately downloads the exact public wheel, verifies its bytes and required
-APIs, and runs the adapter/framework suites. This gate remains blocked until
-Core 0.18.0 is published. Users of released integrations do not install Core manually.
+APIs, and runs the adapter/framework suites. Users of released integrations do
+not install Core manually.
 
 Framework compatibility is tested against Home Assistant `2026.7.3` with
 `pytest-homeassistant-custom-component==0.13.347` on Python 3.14.2 or newer.
@@ -246,14 +244,13 @@ candidate may be tagged; no default-store publication exists.
 ## Core package artifacts
 
 The reusable core is published as the `controlel` distribution and import
-package. Version `0.17.0` is the latest public immutable release; `0.18.0` is
-the prepared local candidate. The static version source
+package. Version `0.18.0` is the latest public immutable release. The static version source
 and PEP 517 build configuration live in `pyproject.toml`; normal installation
 depends only on Pydantic. Packaging validation builds one wheel and one sdist,
 inspects their contents, and installs the wheel into a clean environment
 outside the checkout.
 
-Core versions `0.1.0` through `0.17.0` are published on PyPI and immutable.
+Core versions `0.1.0` through `0.18.0` are published on PyPI and immutable.
 Future core corrections require a new version; rebuilt artifacts for an already
 published version must never be uploaded.
 Repository packaging CI remains validation-only and contains no publication

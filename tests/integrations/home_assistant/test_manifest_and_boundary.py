@@ -41,6 +41,7 @@ def test_core_and_integration_versions_are_intentionally_independent():
     assert manifest["version"] == INTEGRATION_VERSION == "0.14.0"
     assert manifest["requirements"] == ["controlel==0.18.0"]
     assert manifest["version"] != manifest["requirements"][0].partition("==")[2]
+    assert core_version != manifest["requirements"][0].partition("==")[2]
 
 
 def test_pr_ha_tests_install_checked_out_core_wheel() -> None:
