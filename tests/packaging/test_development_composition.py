@@ -62,7 +62,7 @@ def test_development_bundle_contains_matching_frontend_and_core_without_mutating
         with zipfile.ZipFile(io.BytesIO(bundle.read("integration/controlel.zip"))) as integration:
             manifest = json.loads(integration.read("manifest.json"))
             assert manifest["requirements"] == ["controlel==0.18.0"]
-            assert manifest["version"] == "0.14.0"
+            assert manifest["version"] == "0.14.1"
             assert not any(name.startswith("controlel/") for name in integration.namelist())
 
 

@@ -6,9 +6,9 @@
 
 The development composition is a local-test artifact that keeps one integration
 ZIP and its exact Core wheel together. It is intentionally non-publishable. The
-source integration manifest requires immutable, published `controlel==0.17.0`;
-the bundled integration copy alone is rewritten to candidate
-`controlel==0.18.0` for an explicit local composition.
+source integration manifest requires immutable, published `controlel==0.18.0`;
+the bundled integration copy preserves that dependency for the explicit local
+composition.
 
 ## Build
 
@@ -51,13 +51,13 @@ find "$HA_CONFIG/custom_components/controlel" -type d -name __pycache__ \
   "import importlib.metadata; print(importlib.metadata.version('controlel'))"
 ```
 
-The version check must print `0.18.0`. Start Home Assistant and confirm that the
-development bundle loads integration `0.14.0` with its rewritten local
-requirement `controlel==0.18.0`, then run the Setup Wizard smoke flow. The
-source release manifest remains pinned to public `controlel==0.17.0`. A restart
-of an existing Docker container retains
-the wheel; recreating the container does not, so reinstall the wheel after a
-container recreation.
+The version check must print `0.18.0`. The development bundle contains Home
+Assistant integration version `0.14.1`. The source manifest requires exactly
+`controlel==0.18.0`, and the generated development bundle preserves exactly
+`controlel==0.18.0`; there is no local dependency rewrite or override to another
+Core version. Start Home Assistant, then run the Setup Wizard smoke flow. A
+restart of an existing Docker container retains the wheel; recreating the
+container does not, so reinstall the wheel after a container recreation.
 
 Do not install this bundle through HACS and do not upload either artifact to
 PyPI or GitHub Releases. Home Assistant OS does not expose a supported persistent

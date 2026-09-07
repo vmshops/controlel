@@ -13,7 +13,7 @@ from tests.integrations.home_assistant.framework.framework_composition import (
 )
 
 ROOT = Path(__file__).parents[4].resolve()
-INTEGRATION_VERSION = "0.14.0"
+INTEGRATION_VERSION = "0.14.1"
 
 
 @pytest.mark.asyncio
@@ -25,7 +25,7 @@ async def test_real_loader_accepts_manifest_and_discovers_component(
 
     assert integration.domain == DOMAIN
     assert str(integration.version) == INTEGRATION_VERSION
-    assert integration.manifest["codeowners"] == ["@vmshops"]
+    assert integration.manifest["codeowners"] == ["@vmshops", "@marsa99"]
     assert integration.manifest["documentation"] == "https://github.com/vmshops/controlel"
     assert integration.manifest["issue_tracker"] == "https://github.com/vmshops/controlel/issues"
     assert integration.manifest["config_flow"] is True

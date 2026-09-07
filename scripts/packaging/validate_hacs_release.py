@@ -8,6 +8,7 @@ import hashlib
 import json
 import re
 import stat
+import struct
 import zipfile
 from collections.abc import Iterable, Mapping
 from pathlib import Path, PurePosixPath
@@ -49,6 +50,10 @@ DOCUMENTATION_URL = "https://github.com/vmshops/controlel"
 HOME_ASSISTANT_VERSION = "2026.7.3"
 FIXED_ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
 FIXED_ZIP_MODE = stat.S_IFREG | 0o644
+EXPECTED_BRAND_IMAGES = {
+    "brand/icon.png": (256, 256),
+    "brand/icon@2x.png": (512, 512),
+}
 
 # Explicit HACS release registration. Discovery is the filesystem source of
 # truth; this allowlist is the stricter public-release gate that must match it.
@@ -56,6 +61,8 @@ EXPECTED_ARCHIVE_FILES = frozenset(
     {
         "__init__.py",
         "activation_backend.py",
+        "brand/icon.png",
+        "brand/icon@2x.png",
         "binary_sensor.py",
         "canonical_runtime.py",
         "canonical_v3_service.py",
@@ -214,6 +221,18 @@ def _scan_for_secrets(files: Mapping[str, bytes], *, source: str) -> None:
                 raise HacsReleaseValidationError(f"{source} contains secret-like content in {name}")
 
 
+def _validate_brand_images(files: Mapping[str, bytes], *, source: str) -> None:
+    for name, expected_dimensions in EXPECTED_BRAND_IMAGES.items():
+        content = files[name]
+        if len(content) < 24 or content[:8] != b"\x89PNG\r\n\x1a\n" or content[12:16] != b"IHDR":
+            raise HacsReleaseValidationError(f"{source} {name} must be a PNG image")
+        dimensions = struct.unpack(">II", content[16:24])
+        if dimensions != expected_dimensions:
+            raise HacsReleaseValidationError(
+                f"{source} {name} dimensions are {dimensions}, expected {expected_dimensions}"
+            )
+
+
 def _source_file_map(component: Path) -> dict[str, bytes]:
     try:
         return discover_integration_runtime_files(component)
@@ -259,6 +278,7 @@ def validate_source(root: Path, *, version: str) -> dict[str, bytes]:
         source="custom_components/controlel/translations/en.json",
     )
     _validate_translations(strings, english, source="custom_components/controlel")
+    _validate_brand_images(files, source="custom_components/controlel")
     _scan_for_secrets(files, source="integration source")
     return files
 
@@ -310,6 +330,8 @@ def validate_archive(archive: Path, *, version: str) -> str:
         raise HacsReleaseValidationError(
             f"release archive file set mismatch; missing={missing}, unexpected={unexpected}"
         )
+
+    _validate_brand_images(files, source=ARCHIVE_FILENAME)
     manifest = _load_json_bytes(files["manifest.json"], source=f"{archive.name}:manifest.json")
     _validate_manifest(manifest, version=version, source=f"{archive.name}:manifest.json")
     declared_version = _integration_version(

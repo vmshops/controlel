@@ -1,10 +1,10 @@
 # Controlel Home Assistant integration 0.14.0
 
-Status: candidate
+Status: published
 
 ## Summary
 
-Integration 0.14.0 pins the not-yet-published Core candidate
+Integration 0.14.0 pins the published Core
 `controlel==0.18.0` package and ships canonical configuration v3 Configure,
 Setup Wizard, Heating/Settings, and Water Safety surfaces for Home Assistant.
 It connects the public Frontend API v1 and v3 lifecycle contracts to
@@ -23,7 +23,7 @@ reload, unload, and partial-failure cleanup.
 
 ## Compatibility
 
-- Required Core package: exactly `controlel==0.18.0`; publication is required before HA release.
+- Required Core package: exactly `controlel==0.18.0`.
 - Home Assistant: 2026.7.3 or newer.
 - Config-entry version remains 1.
 - Existing version-1 entries retain their runtime/configuration path and do
@@ -37,18 +37,18 @@ inferred physical state is included. Commands, observations, assessments, and
 decisions remain separate, and unknown physical state is not treated as false
 or inferred from command success.
 
-## Candidate gate
+## Published release boundary
 
-Core 0.17.0 is public but lacks the active-reference and shutoff APIs this HA
-candidate requires. Core 0.18.0 is not yet public. The required public-wheel
-workflow must pass against actual PyPI bytes before HACS artifact validation
-can succeed. Local checked-out-wheel tests provide development evidence only.
+Core 0.18.0 is public and supplies the active-reference and shutoff APIs this
+integration requires. Public-wheel validation passed against actual PyPI bytes
+before the HACS artifact was released.
 
-The candidate includes Water startup buffering, missing-state fault grace,
+The release includes Water startup buffering, missing-state fault grace,
 stable identity resolution, evidence/output failure isolation, transactional
 activation handover, and stale interrupted-activation recovery. No automatic
 valve reopening is added. Heating control behavior is unchanged.
 
-Adapter/framework tests, deterministic HACS validation, lint/format checks,
-and real HAOS installation testing remain required before separate release
-approval. No `v0.14.0` tag or GitHub/HACS release exists from this preparation.
+The immutable integration tag is `v0.14.0`, resolving to
+`fea69d194be1b660658bd15f708df139bee67c57`. The GitHub release includes the
+installable `controlel.zip` HACS asset. Version 0.14.1 is a separate,
+unpublished distribution/metadata readiness candidate.

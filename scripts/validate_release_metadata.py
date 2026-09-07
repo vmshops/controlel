@@ -76,11 +76,20 @@ def validate(releases_yaml: dict) -> int:
                 if not isinstance(provenance, dict):
                     print("provenance must be a mapping", r, file=sys.stderr)
                     return 2
-                if (
-                    not isinstance(provenance.get("method"), str)
-                    or not FULL_SHA.fullmatch(str(provenance.get("tag_object_sha", "")))
-                    or provenance.get("resolved_tag_commit") != r.get("commit_sha")
-                    or provenance.get("verification_status") != "passed"
+                tag_bound_provenance = (
+                    FULL_SHA.fullmatch(str(provenance.get("tag_object_sha", ""))) is not None
+                    and provenance.get("resolved_tag_commit") == r.get("commit_sha")
+                    and provenance.get("verification_status") == "passed"
+                )
+                untagged_historical_provenance = (
+                    r.get("tag") is None
+                    and r.get("commit_sha") is None
+                    and provenance.get("tag_object_sha") is None
+                    and provenance.get("resolved_tag_commit") is None
+                    and provenance.get("verification_status") == "unverified"
+                )
+                if not isinstance(provenance.get("method"), str) or not (
+                    tag_bound_provenance or untagged_historical_provenance
                 ):
                     print("published provenance is incomplete or inconsistent", r, file=sys.stderr)
                     return 2

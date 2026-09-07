@@ -44,5 +44,5 @@ existing Heating runtime and canonical configuration v3 behavior:
 
 - Python: 3.13 or newer.
 - Runtime dependency remains only `pydantic>=2.0`.
-- Home Assistant integration 0.14.0 now requires Core 0.18.0: its current
-  checkpoint imports module-scoped active-reference and shutoff APIs absent here.
+- The later Home Assistant integration 0.14.0 release requires Core 0.18.0;
+  those module-scoped active-reference and shutoff APIs are absent here.
