@@ -148,6 +148,50 @@ Prefer:
 
 ---
 
+# Development Harness V2 execution governance
+
+Development Harness V2 is the default execution foundation for bounded
+Controlel work.
+
+For every task, CONTROL decides and records:
+
+- the exact baseline/checkpoint
+- READ-ONLY or WRITE mode
+- the exact worktree and branch
+- the FREE deterministic PowerShell/Git/WSL setup and preflight
+- the verification/test profile
+- the executor, model, and reasoning effort
+- the success criteria
+
+Execution order is mandatory:
+
+1. CONTROL decides the task contract.
+2. FREE deterministic setup prepares the exact worktree, branch, and required
+   environment.
+3. The fail-closed preflight verifies repository, origin, baseline, branch,
+   worktree, Git-operation state, protected-branch safety, and required
+   environment.
+4. The preflight must finish with exactly `=== PREFLIGHT OK ===`. On
+   `=== PREFLIGHT FAIL ===`, executor work must not start.
+5. Only after `=== PREFLIGHT OK ===` is the selected executor started.
+
+Do not send deterministic work unnecessarily to paid or limited models.
+
+Work is an explicit exception, not the standard coding workflow. Do not hand a
+task to Work or another executor before the FREE setup/preflight has prepared
+and verified the exact execution worktree.
+
+The preferred Codex flow is:
+
+1. FREE setup/preflight prepares the exact worktree;
+2. require `=== PREFLIGHT OK ===`;
+3. the user manually opens Codex in the ChatGPT app on that exact worktree and
+   pastes the task prompt.
+
+For normal development, do not auto-open VS Code and do not create
+executor-managed `Users/.codex` worktrees.
+
+---
 # When uncertain
 
 Prefer:
