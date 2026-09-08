@@ -164,17 +164,10 @@ Simple architecture over premature intelligence.
 
 Home Assistant framework tests MUST run in WSL/Linux.
 
-Canonical WSL test runner:
-
-`~/bin/controlel-ha-test`
-
-Windows worktree:
-
-`C:\GitHub\Controlel\controlel-ui-local`
-
-WSL view of the worktree:
-
-`/mnt/c/GitHub/Controlel/controlel-ui-local`
+Use the repository-owned `scripts/agent/ha-test.sh` runner with an explicit
+worktree, profile, and fingerprinted task-scoped HA environment. See
+`docs/development/AgentWorkflow.md`. The historical machine-local runner is
+not canonical infrastructure.
 
 Use Windows/Bionic for:
 - editing files
@@ -187,9 +180,8 @@ Use WSL/Linux for:
 - Linux/CI reproduction
 - Home Assistant Python integration verification
 
-Run Home Assistant tests from Bionic with:
-
-`wsl.exe -d Ubuntu -- bash -lc "~/bin/controlel-ha-test <pytest arguments>"`
+Run Home Assistant tests from Bionic via the repository runner in WSL; do not
+let the runner infer a worktree from the shell current directory.
 
 Never use a Windows `.venv-ha/Scripts/python.exe` environment for Home Assistant framework tests.
 
@@ -199,7 +191,8 @@ Do not add Windows-specific compatibility hacks for Home Assistant tests, includ
 - asyncio/event-loop policy changes
 - pytest/conftest changes whose only purpose is native Windows compatibility
 
-For local Frontend API development, use the local editable Controlel source installed in the canonical WSL environment.
+For source/candidate work, use a dedicated environment bound to one selected
+source worktree; never share an editable Controlel installation across tasks.
 
 Published Core `0.15.0` contains Frontend API v1. Home Assistant 0.13.0
 public-composition tests must install exact `controlel==0.15.0` from PyPI and
