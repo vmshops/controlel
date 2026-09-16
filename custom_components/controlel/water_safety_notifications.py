@@ -93,16 +93,14 @@ async def async_load_water_safety_notifications_editor(
         )
     )
     unavailable = tuple(target for target in selected if target not in available)
-    # Defaults include only currently resolvable targets so Save recovers from
-    # stale MISSING notification bindings without requiring a manual deselect.
-    # Unavailable targets remain visible in options and description placeholders.
-    selected_available = tuple(target for target in selected if target in available)
+    # Discovery is only a current service snapshot. Preserve the stable saved
+    # identity by default and require an explicit clear or replacement.
     return WaterSafetyNotificationsEditor(
         discovery=discovery,
         current_draft=current_draft,
         active_reference=active_reference,
         active_revision=active_revision,
-        selected_target_ids=selected_available,
+        selected_target_ids=selected,
         available_target_ids=available,
         unavailable_target_ids=unavailable,
     )
@@ -251,7 +249,7 @@ def _roles_for_targets(
         if existing is not None and existing not in assigned:
             assigned.append(existing)
             continue
-        if DEFAULT_NOTIFICATION_ROLE not in assigned and DEFAULT_NOTIFICATION_ROLE not in existing_roles.values():
+        if DEFAULT_NOTIFICATION_ROLE not in assigned:
             assigned.append(DEFAULT_NOTIFICATION_ROLE)
             continue
         digest = hashlib.sha256(target.encode("utf-8")).hexdigest()[:12]

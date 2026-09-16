@@ -329,7 +329,7 @@ class WaterSafetyActivationService:
         host_holder.append(host)
         try:
             await host.async_initialize()
-        except Exception:
+        except BaseException:
             await host.async_stop()
             raise
         return host
