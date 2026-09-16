@@ -150,36 +150,102 @@ class HomeAssistantWaterSafetyHost:
             except BaseException:
                 self._accepting = False
                 self._startup_observations = None
-                if self._unsubscribe is not None:
-                    self._unsubscribe()
-                    self._unsubscribe = None
+                unsubscribe = self._unsubscribe
+                if unsubscribe is not None:
+                    try:
+                        unsubscribe()
+                    except BaseException:
+                        self._logger.exception("Water Safety state-listener cleanup after failed initialization failed")
+                    else:
+                        self._unsubscribe = None
                 raise
             self._logger.info("Water Safety runtime started")
 
     async def async_stop(self) -> None:
+        cleanup_task = asyncio.create_task(self._async_stop_owned_resources())
+        cancellation: asyncio.CancelledError | None = None
+        while not cleanup_task.done():
+            try:
+                await asyncio.shield(cleanup_task)
+            except asyncio.CancelledError as error:
+                if cancellation is None:
+                    cancellation = error
+
+        cleanup_cancellation = cleanup_task.result()
+        if cancellation is not None:
+            raise cancellation
+        if cleanup_cancellation is not None:
+            raise cleanup_cancellation
+
+    async def _async_stop_owned_resources(self) -> asyncio.CancelledError | None:
         async with self._lifecycle_lock:
             if self._stopped:
-                return
+                return None
             self._accepting = False
             self._stopping = True
+            cancellation: asyncio.CancelledError | None = None
+
+            def record_failure(step: str, error: BaseException) -> None:
+                nonlocal cancellation
+                self._logger.error(
+                    "Water Safety cleanup step failed (%s); continuing teardown",
+                    step,
+                    exc_info=(type(error), error, error.__traceback__),
+                )
+                if isinstance(error, asyncio.CancelledError) and cancellation is None:
+                    cancellation = error
+
             unsubscribe = self._unsubscribe
-            self._unsubscribe = None
             if unsubscribe is not None:
-                unsubscribe()
-            try:
-                if not self._executor.closed:
+                try:
+                    unsubscribe()
+                except BaseException as error:
+                    record_failure("state listener unsubscribe", error)
+                else:
+                    self._unsubscribe = None
+
+            if not self._executor.closed:
+                try:
                     await self._async_submit_runtime(self._cancel_deadline)
+                except BaseException as error:
+                    record_failure("current deadline cancellation", error)
+
+            if not self._executor.closed:
+                try:
                     await self._async_submit_runtime(self._scheduler.cancel_all)
-            except Exception:
-                self._logger.exception("Water Safety scheduler cleanup failed")
+                except BaseException as error:
+                    record_failure("scheduler cancel_all", error)
+
             callback_tasks = [task for task in self._callback_tasks if task is not asyncio.current_task()]
             if callback_tasks:
-                await asyncio.gather(*callback_tasks, return_exceptions=True)
+                try:
+                    await asyncio.gather(*callback_tasks, return_exceptions=True)
+                except BaseException as error:
+                    record_failure("callback task draining", error)
+
             if not self._executor.closed:
-                await self._executor.async_close()
+                try:
+                    await self._executor.async_close()
+                except BaseException as error:
+                    record_failure("runtime executor close", error)
+
+            for task in callback_tasks:
+                if task.done():
+                    self._callback_tasks.discard(task)
+
             self._stopping = False
-            self._stopped = True
-            self._logger.info("Water Safety runtime stopped")
+            self._stopped = (
+                self._unsubscribe is None
+                and self._deadline_handle is None
+                and self._scheduler._closed
+                and not self._callback_tasks
+                and self._executor.closed
+            )
+            if self._stopped:
+                self._logger.info("Water Safety runtime stopped")
+            else:
+                self._logger.warning("Water Safety runtime cleanup remains incomplete; a later stop may retry")
+            return cancellation
 
     async def silence(self) -> WaterSafetyProcessingResult:
         return await self._process(lambda: self._runtime.silence(silenced_at=datetime.now(UTC)))

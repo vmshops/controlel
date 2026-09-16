@@ -330,7 +330,10 @@ class WaterSafetyActivationService:
         try:
             await host.async_initialize()
         except BaseException:
-            await host.async_stop()
+            try:
+                await host.async_stop()
+            except BaseException:
+                LOGGER.exception("Water Safety host cleanup after failed initialization did not complete cleanly")
             raise
         return host
 
