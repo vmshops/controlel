@@ -31,6 +31,7 @@ def lifecycle_failures_for_entry(hass: Any, entry_id: str) -> dict[str, object |
     return {
         "setup": entry_failures.get("setup"),
         "activation": entry_failures.get("activation"),
+        "water_safety_setup": entry_failures.get("water_safety_setup"),
     }
 
 

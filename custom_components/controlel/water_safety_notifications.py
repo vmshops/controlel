@@ -93,12 +93,16 @@ async def async_load_water_safety_notifications_editor(
         )
     )
     unavailable = tuple(target for target in selected if target not in available)
+    # Defaults include only currently resolvable targets so Save recovers from
+    # stale MISSING notification bindings without requiring a manual deselect.
+    # Unavailable targets remain visible in options and description placeholders.
+    selected_available = tuple(target for target in selected if target in available)
     return WaterSafetyNotificationsEditor(
         discovery=discovery,
         current_draft=current_draft,
         active_reference=active_reference,
         active_revision=active_revision,
-        selected_target_ids=selected,
+        selected_target_ids=selected_available,
         available_target_ids=available,
         unavailable_target_ids=unavailable,
     )

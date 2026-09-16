@@ -329,6 +329,10 @@ async def _configuration_readiness(
         "water_safety": {
             "configured": water_active is not None,
             "runtime_loaded": water_host is not None,
+            "startup_failure": None if runtime_data is None else runtime_data.water_safety_startup_failure,
+            "degraded_notification_bindings": (
+                None if runtime_data is None else runtime_data.water_safety_degraded_notification_bindings
+            ),
         },
         "heating_draft": {
             "saved_count": len(drafts),

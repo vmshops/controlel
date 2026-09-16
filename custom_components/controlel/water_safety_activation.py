@@ -9,16 +9,21 @@ from datetime import UTC, datetime
 from typing import Any
 
 from controlel.application.configuration.water_safety_setup_adapter import (
+    NOTIFICATION_ROLE_PREFIX,
     WATER_SAFETY_MODULE_KEY,
     WaterSafetySetupPayload,
 )
 from controlel.application.setup import (
     ActivationState,
     ActiveReference,
+    BindingSelection,
     CandidateRuntimeReady,
+    CanonicalConfigurationRevision,
     EffectiveRuntimeConfiguration,
     LoadedRuntimeConfiguration,
+    ProviderReference,
     ReferenceResolutionStatus,
+    RuntimeConfigurationOrigin,
     derive_real_runtime_configuration,
 )
 from controlel.application.setup.json_data import canonical_json
@@ -258,16 +263,34 @@ class WaterSafetyActivationService:
             captured_at=captured_at,
         )
         resolver = HomeAssistantReferenceResolver()
-        resolved = {}
+        resolved: dict[str, ProviderReference] = {}
+        degraded_notifications: dict[str, str] = {}
         for binding in revision.bindings:
             resolution = resolver.resolve(binding.reference, snapshot)
-            if resolution.status is not ReferenceResolutionStatus.RESOLVED or resolution.resolved_reference is None:
-                raise ValueError(
-                    f"canonical Water Safety binding {binding.role} is not resolvable: {resolution.status.value}"
+            if resolution.status is ReferenceResolutionStatus.RESOLVED and resolution.resolved_reference is not None:
+                resolved[binding.role] = resolution.resolved_reference
+                continue
+            status_value = resolution.status.value
+            if binding.role.startswith(NOTIFICATION_ROLE_PREFIX):
+                # Notification outputs are optional at runtime: never invent a replacement,
+                # and never treat an unresolvable notify target as integration-wide fatal.
+                degraded_notifications[binding.role] = status_value
+                LOGGER.warning(
+                    "Water Safety notification binding %s is not resolvable (%s); "
+                    "notifications for that role remain disabled until reconfigured",
+                    binding.role,
+                    status_value,
                 )
-            resolved[binding.role] = resolution.resolved_reference
-        effective = derive_real_runtime_configuration(revision, resolved)
-        return await self._async_build_and_start_host(hass, entry, effective, bridge=bridge)
+                continue
+            raise ValueError(f"canonical Water Safety binding {binding.role} is not resolvable: {status_value}")
+        effective = _effective_runtime_configuration(
+            revision,
+            resolved,
+            degraded_notifications=degraded_notifications,
+        )
+        host = await self._async_build_and_start_host(hass, entry, effective, bridge=bridge)
+        host.mark_degraded_notification_bindings(degraded_notifications)
+        return host
 
     async def _async_build_and_start_host(
         self,
@@ -310,6 +333,55 @@ class WaterSafetyActivationService:
             await host.async_stop()
             raise
         return host
+
+
+def _effective_runtime_configuration(
+    revision: CanonicalConfigurationRevision,
+    resolved: dict[str, ProviderReference],
+    *,
+    degraded_notifications: dict[str, str],
+) -> EffectiveRuntimeConfiguration:
+    """Project REAL runtime config, omitting unresolvable notification outputs only."""
+
+    if not degraded_notifications:
+        return derive_real_runtime_configuration(revision, resolved)
+
+    payload = WaterSafetySetupPayload.model_validate_json(canonical_json(revision.module_payload))
+    remaining_notification_roles = tuple(
+        role for role in payload.notification_target_roles if role not in degraded_notifications
+    )
+    runtime_payload = payload.model_copy(update={"notification_target_roles": remaining_notification_roles})
+    bindings: list[BindingSelection] = []
+    for source in sorted(revision.bindings, key=lambda item: item.role):
+        if source.role not in resolved:
+            continue
+        target = resolved[source.role]
+        if target.semantic_data() != source.reference.semantic_data():
+            raise ValueError("REAL resolution may update locators but cannot replace provider identity")
+        bindings.append(
+            BindingSelection(
+                role=source.role,
+                reference=target,
+                selection_origin=source.selection_origin,
+                user_confirmed=source.user_confirmed,
+                provenance=source.provenance,
+            )
+        )
+    return EffectiveRuntimeConfiguration(
+        canonical_revision_id=revision.revision_id,
+        semantic_configuration_fingerprint=revision.semantic_configuration_fingerprint,
+        module_key=revision.module_key,
+        module_instance_id=revision.module_instance_id,
+        module_schema_version=revision.module_schema_version,
+        origin=RuntimeConfigurationOrigin.REAL,
+        environment_id=revision.environment_id,
+        bindings=tuple(bindings),
+        module_payload=runtime_payload.model_dump(mode="json"),
+        derivation_evidence={
+            "resolution": "explicit_provider_reference_resolution",
+            "degraded_notification_bindings": {role: status for role, status in sorted(degraded_notifications.items())},
+        },
+    )
 
 
 def _restored_snapshot_for_effective(

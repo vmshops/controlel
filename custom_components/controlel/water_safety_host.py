@@ -97,10 +97,22 @@ class HomeAssistantWaterSafetyHost:
         self._stopping = False
         self._stopped = False
         self._diagnostics_snapshot: WaterSafetyDiagnosticsSnapshotV1 | None = None
+        self._degraded_notification_bindings: dict[str, str] = {}
 
     @property
     def runtime(self) -> WaterSafetyRuntime:
         return self._runtime
+
+    @property
+    def degraded_notification_bindings(self) -> dict[str, str]:
+        """Role -> resolution status for notification outputs disabled at startup."""
+
+        return dict(self._degraded_notification_bindings)
+
+    def mark_degraded_notification_bindings(self, degraded: dict[str, str]) -> None:
+        """Record notification roles that were omitted because resolution failed."""
+
+        self._degraded_notification_bindings = dict(degraded)
 
     @property
     def frontend_api_water_safety_evidence(self) -> WaterSafetyDiagnosticsSnapshotV1:
@@ -184,6 +196,8 @@ class HomeAssistantWaterSafetyHost:
 
     async def test_notification(self) -> WaterSafetyProcessingResult:
         self._require_safe_test()
+        if not self._config.notification_target_roles:
+            raise RuntimeError("Water Safety has no configured notification targets")
         role = self._config.notification_target_roles[0]
         command = WaterOutputCommand(
             command_id=f"{self._effective.module_instance_id}:test:notification",

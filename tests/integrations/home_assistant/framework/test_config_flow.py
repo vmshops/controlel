@@ -1560,6 +1560,7 @@ async def test_water_unavailable_notification_target_is_reported_truthfully(hass
     edit = await _choose(hass, saved, "water_safety_notifications")
     options = _field(edit, cf.WATER_NOTIFICATION_TARGETS).config["options"]
     assert options == [{"value": phone, "label": f"{phone} (currently unavailable)"}]
+    assert _defaults(edit)[cf.WATER_NOTIFICATION_TARGETS] == []
     rejected = await hass.config_entries.options.async_configure(
         edit["flow_id"],
         {cf.WATER_NOTIFICATION_TARGETS: [phone], cf.WATER_TEST_NOTIFICATION: False},
@@ -1928,7 +1929,7 @@ async def test_complete_native_water_lifecycle_activation_restart_edit_and_missi
         await _open_water_menu(hass, entry),
         "water_safety_notifications",
     )
-    assert _defaults(missing_notifications)[cf.WATER_NOTIFICATION_TARGETS] == [phone]
+    assert _defaults(missing_notifications)[cf.WATER_NOTIFICATION_TARGETS] == []
     assert phone in missing_notifications["description_placeholders"]["unavailable_notification_targets"]
     hass.config_entries.options.async_abort(missing_notifications["flow_id"])
     missing_sirens = await _choose(hass, await _open_water_menu(hass, entry), "water_safety_sirens")

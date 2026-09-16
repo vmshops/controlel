@@ -70,6 +70,8 @@ class ControlelEntryRuntime:
     frontend_api_unregister: Callable[[], None] | None = None
     water_safety_action_unregister: Callable[[], None] | None = None
     forwarded_platforms: tuple[str, ...] = ()
+    water_safety_startup_failure: str | None = None
+    water_safety_degraded_notification_bindings: dict[str, str] | None = None
 
 
 if TYPE_CHECKING:
@@ -174,6 +176,8 @@ async def _async_setup_entry(
     executor = HomeAssistantRuntimeExecutor()
     host: HomeAssistantControlelHost | None = None
     water_safety_host = None
+    water_safety_startup_failure: str | None = None
+    water_safety_degraded: dict[str, str] | None = None
     failure_sink: HomeAssistantScheduledFailureSink | None = None
     try:
         bridge = HomeAssistantEventLoopBridge(hass.loop)
@@ -320,14 +324,32 @@ async def _async_setup_entry(
         )
         failure_sink.bind_fatal_handler(host.request_fatal_shutdown)
         await host.async_initialize()
-        if water_safety_core_available():
+        if water_safety_core_available() and water_active is not None:
             from .water_safety_activation import WaterSafetyActivationService
 
-            water_safety_host = await WaterSafetyActivationService().async_start_from_active_reference(
-                hass,
-                entry,
-                bridge=bridge,
-            )
+            try:
+                water_safety_host = await WaterSafetyActivationService().async_start_from_active_reference(
+                    hass,
+                    entry,
+                    bridge=bridge,
+                )
+            except Exception as error:
+                water_safety_host = None
+                water_safety_startup_failure = _bounded_water_safety_failure(error)
+                record_lifecycle_failure(hass, entry, phase="water_safety_setup", error=error)
+                LOGGER.exception(
+                    "Water Safety failed to start from the active reference; "
+                    "Controlel config entry continues without a Water Safety runtime"
+                )
+            else:
+                if water_safety_host is not None:
+                    degraded = getattr(water_safety_host, "degraded_notification_bindings", None)
+                    if degraded:
+                        water_safety_degraded = dict(degraded)
+                        LOGGER.warning(
+                            "Water Safety started with degraded notification outputs: %s",
+                            ", ".join(f"{role}={status}" for role, status in sorted(degraded.items())),
+                        )
     except BaseException:
         try:
             if water_safety_host is not None:
@@ -351,7 +373,11 @@ async def _async_setup_entry(
     frontend_api_unregister = register_frontend_api_provider_v1(
         hass,
         entry.entry_id,
-        create_frontend_api_provider_v1(host, water_safety_host=water_safety_host),
+        create_frontend_api_provider_v1(
+            host,
+            water_safety_host=water_safety_host,
+            water_safety_startup_failure=water_safety_startup_failure,
+        ),
     )
 
     async def _water_safety_action(action: str) -> dict[str, object]:
@@ -374,6 +400,8 @@ async def _async_setup_entry(
         ),
         frontend_api_unregister=frontend_api_unregister,
         water_safety_action_unregister=water_safety_action_unregister,
+        water_safety_startup_failure=water_safety_startup_failure,
+        water_safety_degraded_notification_bindings=water_safety_degraded,
     )
     try:
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -416,7 +444,10 @@ async def _async_setup_water_safety_only_entry(
 ) -> bool:
     """Load canonical Water Safety authority without inventing Heating configuration."""
 
-    from .frontend_api import create_water_safety_frontend_api_provider_v1
+    from .frontend_api import (
+        create_failed_water_safety_frontend_api_provider_v1,
+        create_water_safety_frontend_api_provider_v1,
+    )
     from .frontend_api_websocket import (
         register_frontend_api_provider_v1,
         register_water_safety_action_handler_v1,
@@ -427,38 +458,74 @@ async def _async_setup_water_safety_only_entry(
 
     await async_get_setup_backend(hass, entry)
     bridge = HomeAssistantEventLoopBridge(hass.loop)
-    water_safety_host = await WaterSafetyActivationService().async_start_from_active_reference(
-        hass,
-        entry,
-        bridge=bridge,
-    )
+    water_safety_host = None
+    water_safety_startup_failure: str | None = None
+    water_safety_degraded: dict[str, str] | None = None
+    try:
+        water_safety_host = await WaterSafetyActivationService().async_start_from_active_reference(
+            hass,
+            entry,
+            bridge=bridge,
+        )
+    except Exception as error:
+        water_safety_startup_failure = _bounded_water_safety_failure(error)
+        record_lifecycle_failure(hass, entry, phase="water_safety_setup", error=error)
+        LOGGER.exception(
+            "Water Safety failed to start from the active reference; "
+            "Controlel config entry remains loaded without a Water Safety runtime"
+        )
+    else:
+        if water_safety_host is not None:
+            degraded = getattr(water_safety_host, "degraded_notification_bindings", None)
+            if degraded:
+                water_safety_degraded = dict(degraded)
+                LOGGER.warning(
+                    "Water Safety started with degraded notification outputs: %s",
+                    ", ".join(f"{role}={status}" for role, status in sorted(degraded.items())),
+                )
+        elif water_safety_startup_failure is None:
+            water_safety_startup_failure = "active Water Safety authority did not create a runtime host"
+            LOGGER.error("%s", water_safety_startup_failure)
+
     if water_safety_host is None:
-        raise RuntimeError("active Water Safety authority did not create a runtime host")
+        frontend_api_unregister = register_frontend_api_provider_v1(
+            hass,
+            entry.entry_id,
+            create_failed_water_safety_frontend_api_provider_v1(
+                water_safety_startup_failure or "water_safety_startup_failed"
+            ),
+        )
+        water_safety_action_unregister = None
+    else:
+        frontend_api_unregister = register_frontend_api_provider_v1(
+            hass,
+            entry.entry_id,
+            create_water_safety_frontend_api_provider_v1(water_safety_host),
+        )
 
-    frontend_api_unregister = register_frontend_api_provider_v1(
-        hass,
-        entry.entry_id,
-        create_water_safety_frontend_api_provider_v1(water_safety_host),
-    )
+        async def _water_safety_action(action: str) -> dict[str, object]:
+            return await water_safety_host.async_frontend_api_water_safety_action(action)
 
-    async def _water_safety_action(action: str) -> dict[str, object]:
-        return await water_safety_host.async_frontend_api_water_safety_action(action)
-
-    water_safety_action_unregister = register_water_safety_action_handler_v1(
-        hass,
-        entry.entry_id,
-        _water_safety_action,
-    )
+        water_safety_action_unregister = register_water_safety_action_handler_v1(
+            hass,
+            entry.entry_id,
+            _water_safety_action,
+        )
     entry.runtime_data = ControlelEntryRuntime(
         host=None,
         config=None,
         water_safety_host=water_safety_host,
-        loaded_water_safety_configuration=_loaded_configuration_from_active(active),
+        loaded_water_safety_configuration=(
+            _loaded_configuration_from_active(active) if water_safety_host is not None else None
+        ),
         frontend_api_unregister=frontend_api_unregister,
         water_safety_action_unregister=water_safety_action_unregister,
+        water_safety_startup_failure=water_safety_startup_failure,
+        water_safety_degraded_notification_bindings=water_safety_degraded,
     )
     entry.async_on_unload(frontend_api_unregister)
-    entry.async_on_unload(water_safety_action_unregister)
+    if water_safety_action_unregister is not None:
+        entry.async_on_unload(water_safety_action_unregister)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     try:
         await async_register_controlel_panel(hass, entry.entry_id)
@@ -534,10 +601,17 @@ async def _async_update_listener(
             heating_active,
             runtime_data.loaded_configuration,
         ) and ((heating_active is None) == (runtime_data.host is None))
-        water_matches = _loaded_configuration_matches(
-            water_active,
-            runtime_data.loaded_water_safety_configuration,
-        ) and ((water_active is None) == (runtime_data.water_safety_host is None))
+        water_matches = (
+            water_active is not None
+            and runtime_data.water_safety_host is None
+            and runtime_data.water_safety_startup_failure is not None
+        ) or (
+            _loaded_configuration_matches(
+                water_active,
+                runtime_data.loaded_water_safety_configuration,
+            )
+            and ((water_active is None) == (runtime_data.water_safety_host is None))
+        )
         title_matches = runtime_data.config is None or entry.title == runtime_data.config.zone_name
         if heating_matches and water_matches and title_matches:
             return
@@ -575,6 +649,13 @@ def _loaded_configuration_from_active(active: ActiveReference) -> LoadedRuntimeC
         module_key=active.module_key,
         module_instance_id=active.module_instance_id,
     )
+
+
+def _bounded_water_safety_failure(error: BaseException) -> str:
+    message = " ".join(str(error).split())
+    if not message:
+        message = type(error).__name__
+    return message[:500]
 
 
 def _loaded_configuration_matches(

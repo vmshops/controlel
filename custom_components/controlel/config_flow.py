@@ -548,7 +548,9 @@ class ControlelOptionsFlow(OptionsFlow):
             description_placeholders={
                 "notification_behavior": (
                     "Optional. Wet and cleared notifications go to the same selected targets for this one "
-                    "monitored area. Clearing all targets is valid and leaves notifications unconfigured."
+                    "monitored area. Clearing all targets is valid and leaves notifications unconfigured. "
+                    "Unavailable saved targets are shown for diagnosis but are not kept selected; "
+                    "saving without them removes the stale notification binding from the draft."
                 ),
                 "notification_test_result": self._water_notification_test_result,
                 "unavailable_notification_targets": (", ".join(editor.unavailable_target_ids) or "None"),

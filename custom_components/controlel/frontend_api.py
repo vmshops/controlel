@@ -105,17 +105,15 @@ class UnconfiguredFrontendApiEvidenceSourceV1:
 
 
 @dataclass(frozen=True, slots=True)
-class WaterSafetyOnlyFrontendApiEvidenceSourceV1:
-    """Passive evidence for a loaded Water-only canonical authority."""
+class FailedWaterSafetyFrontendApiEvidenceSourceV1:
+    """Passive evidence when Water Safety is configured but failed to start."""
 
-    water_safety_host: object
+    reason: str
 
     def snapshot(self) -> FrontendApiEvidenceV1:
-        water_safety = _water_safety_snapshot_to_evidence(self.water_safety_host.frontend_api_water_safety_evidence)
-        degraded = water_safety.state in {"WET", "SENSOR_FAULT"}
-        evidence = FrontendApiEvidenceV1(
+        return FrontendApiEvidenceV1(
             system=SystemEvidenceV1(
-                status="degraded" if degraded else "active",
+                status="degraded",
                 operating_mode="WATER_SAFETY_ONLY",
             ),
             modules=(
@@ -124,7 +122,38 @@ class WaterSafetyOnlyFrontendApiEvidenceSourceV1:
                     status="inactive",
                     reason=_HEATING_NOT_CONFIGURED,
                 ),
-                _water_safety_module(water_safety),
+                ModuleEvidenceV1(
+                    module_id="water_safety",
+                    status="error",
+                    reason="water_safety_startup_failed",
+                ),
+            ),
+            setup=SetupEvidenceV1(state="ready", reason_code=None),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class WaterSafetyOnlyFrontendApiEvidenceSourceV1:
+    """Passive evidence for a loaded Water-only canonical authority."""
+
+    water_safety_host: object
+
+    def snapshot(self) -> FrontendApiEvidenceV1:
+        water_safety = _water_safety_snapshot_to_evidence(self.water_safety_host.frontend_api_water_safety_evidence)
+        degraded = water_safety.state in {"WET", "SENSOR_FAULT"}
+        degraded_notifications = getattr(self.water_safety_host, "degraded_notification_bindings", None)
+        evidence = FrontendApiEvidenceV1(
+            system=SystemEvidenceV1(
+                status="degraded" if degraded or degraded_notifications else "active",
+                operating_mode="WATER_SAFETY_ONLY",
+            ),
+            modules=(
+                ModuleEvidenceV1(
+                    module_id="heating",
+                    status="inactive",
+                    reason=_HEATING_NOT_CONFIGURED,
+                ),
+                _water_safety_module(water_safety, degraded_notification_bindings=degraded_notifications),
             ),
             setup=SetupEvidenceV1(state="ready", reason_code=None),
         )
@@ -139,6 +168,7 @@ class HomeAssistantFrontendApiHostBridge:
 
     heating_host: FrontendApiHostV1
     water_safety_host: object | None = None
+    water_safety_startup_failure: str | None = None
 
     @property
     def frontend_api_operational_evidence(
@@ -165,6 +195,20 @@ class HomeAssistantFrontendApiHostBridge:
         snapshot = self.water_safety_host.frontend_api_water_safety_evidence
         return _water_safety_snapshot_to_evidence(snapshot)
 
+    @property
+    def frontend_api_water_safety_module(self) -> ModuleEvidenceV1 | None:
+        if not water_safety_core_available():
+            return None
+        if self.water_safety_startup_failure is not None and self.water_safety_host is None:
+            return ModuleEvidenceV1(
+                module_id="water_safety",
+                status="error",
+                reason="water_safety_startup_failed",
+            )
+        evidence = self.frontend_api_water_safety_evidence
+        degraded = getattr(self.water_safety_host, "degraded_notification_bindings", None)
+        return _water_safety_module(evidence, degraded_notification_bindings=degraded)
+
 
 @dataclass(frozen=True, slots=True)
 class HomeAssistantFrontendApiEvidenceSourceV1:
@@ -188,7 +232,8 @@ class HomeAssistantFrontendApiEvidenceSourceV1:
             ),
         ]
         if water_safety_core_available():
-            modules.append(_water_safety_module(water_safety))
+            water_module = getattr(self.host, "frontend_api_water_safety_module", None)
+            modules.append(water_module if water_module is not None else _water_safety_module(water_safety))
         evidence = FrontendApiEvidenceV1(
             system=SystemEvidenceV1(
                 status=status,
@@ -255,6 +300,15 @@ def create_unconfigured_frontend_api_provider_v1() -> FrontendApiProviderV1:
     )
 
 
+def create_failed_water_safety_frontend_api_provider_v1(reason: str) -> FrontendApiProviderV1:
+    """Compose passive observability when Water Safety could not start."""
+
+    return FrontendApiProviderV1(
+        source=FailedWaterSafetyFrontendApiEvidenceSourceV1(reason),
+        clock=SystemClock(),
+    )
+
+
 def create_water_safety_frontend_api_provider_v1(
     water_safety_host: object,
 ) -> FrontendApiProviderV1:
@@ -270,6 +324,7 @@ def create_frontend_api_provider_v1(
     host: FrontendApiHostV1,
     *,
     water_safety_host: object | None = None,
+    water_safety_startup_failure: str | None = None,
     setup_source: SetupEvidenceSource | None = None,
 ) -> FrontendApiProviderV1:
     """Compose the host-independent provider over one loaded HA entry."""
@@ -280,6 +335,7 @@ def create_frontend_api_provider_v1(
         else HomeAssistantFrontendApiHostBridge(
             heating_host=host,
             water_safety_host=water_safety_host,
+            water_safety_startup_failure=water_safety_startup_failure,
         )
     )
     source = HomeAssistantFrontendApiEvidenceSourceV1(
@@ -341,13 +397,23 @@ def _module_reason(snapshot: OperationalSnapshot) -> str | None:
     return None
 
 
-def _water_safety_module(evidence: Any | None) -> ModuleEvidenceV1:
+def _water_safety_module(
+    evidence: Any | None,
+    *,
+    degraded_notification_bindings: dict[str, str] | None = None,
+) -> ModuleEvidenceV1:
     if evidence is None:
         return ModuleEvidenceV1(module_id="water_safety", status="inactive", reason="water_safety_not_configured")
     if not evidence.processing_enabled or evidence.state == "DISABLED":
         return ModuleEvidenceV1(module_id="water_safety", status="inactive", reason="water_safety_disabled")
     if evidence.state in {"WET", "SENSOR_FAULT"}:
         return ModuleEvidenceV1(module_id="water_safety", status="error", reason=evidence.state.lower())
+    if degraded_notification_bindings:
+        return ModuleEvidenceV1(
+            module_id="water_safety",
+            status="error",
+            reason="water_safety_notification_output_unavailable",
+        )
     return ModuleEvidenceV1(module_id="water_safety", status="active", reason=None)
 
 
