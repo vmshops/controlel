@@ -17,6 +17,7 @@ from controlel.domain.water_safety import WaterSafetyState
 from controlel.infrastructure.home_assistant import active_reference_for_module
 from custom_components.controlel import config_flow as cf
 from custom_components.controlel import water_safety_activation as activation
+from custom_components.controlel import water_safety_host as water_host_module
 from custom_components.controlel.diagnostics import async_get_config_entry_diagnostics
 from custom_components.controlel.event_loop_bridge import HomeAssistantEventLoopBridge
 from custom_components.controlel.lifecycle_diagnostics import lifecycle_failures_for_entry
@@ -293,10 +294,13 @@ async def test_unavailable_notification_can_be_explicitly_replaced_and_survives_
 
 
 @pytest.mark.asyncio
-async def test_activation_cancellation_after_partial_initialization_finishes_cleanup(
+async def test_activation_cancellation_bounds_uncooperative_callback_and_remains_retryable(
     hass,
     monkeypatch,
+    caplog,
 ) -> None:
+    monkeypatch.setattr(water_host_module, "CALLBACK_TASK_TERMINATION_TIMEOUT_SECONDS", 0.01)
+    monkeypatch.setattr(water_host_module, "RESOURCE_CLEANUP_TIMEOUT_SECONDS", 0.1)
     entry, _canonical = await _active_entry(hass, monkeypatch)
     hass.states.async_set(SENSOR, "unavailable")
     await hass.async_block_till_done()
@@ -305,8 +309,9 @@ async def test_activation_cancellation_after_partial_initialization_finishes_cle
     created_hosts = []
     resources_ready = asyncio.Event()
     callback_started = asyncio.Event()
-    callback_release = asyncio.Event()
-    cleanup_reached_callback_drain = asyncio.Event()
+    callback_cancelled = asyncio.Event()
+    callback_can_finish = asyncio.Event()
+    scheduler_cancel_all_attempted = asyncio.Event()
     executor_close_attempted = asyncio.Event()
     primary_message = "primary initialization cancellation"
 
@@ -321,7 +326,7 @@ async def test_activation_cancellation_after_partial_initialization_finishes_cle
             try:
                 original_cancel_all()
             finally:
-                hass.loop.call_soon_threadsafe(cleanup_reached_callback_drain.set)
+                hass.loop.call_soon_threadsafe(scheduler_cancel_all_attempted.set)
 
         async def tracked_close():
             executor_close_attempted.set()
@@ -329,7 +334,11 @@ async def test_activation_cancellation_after_partial_initialization_finishes_cle
 
         async def held_callback():
             callback_started.set()
-            await callback_release.wait()
+            while not callback_can_finish.is_set():
+                try:
+                    await callback_can_finish.wait()
+                except asyncio.CancelledError:
+                    callback_cancelled.set()
 
         async def cancel_after_deadline_allocation(operation, *operation_args):
             result = await original_submit(operation, *operation_args)
@@ -362,45 +371,73 @@ async def test_activation_cancellation_after_partial_initialization_finishes_cle
     )
     await resources_ready.wait()
     await callback_started.wait()
-    await cleanup_reached_callback_drain.wait()
+    await callback_cancelled.wait()
     starting.cancel("secondary cancellation during cleanup")
-    callback_release.set()
 
-    with pytest.raises(asyncio.CancelledError) as raised:
-        await starting
+    async with asyncio.timeout(1):
+        with pytest.raises(asyncio.CancelledError) as raised:
+            await starting
 
     assert raised.value.args == (primary_message,)
     assert len(created_hosts) == 1
     host = created_hosts[0]
     assert host._unsubscribe is None
     assert host._deadline_handle is None
-    assert host._callback_tasks == set()
     assert host._scheduler._closed is True
     assert host._scheduler._handles == set()
+    assert scheduler_cancel_all_attempted.is_set()
+    assert not executor_close_attempted.is_set()
+    assert host._executor.closed is False
+    assert host._stopped is False
+    assert host._accepting is False
+    assert len(host._callback_tasks) == 1
+    callback_task = next(iter(host._callback_tasks))
+    assert callback_task.done() is False
+    assert host._cleanup_tasks == {}
+    assert service.__dict__ == {}
+    assert "callback task cancellation" in caplog.text
+    assert "remain retryable" in caplog.text
+
+    callback_can_finish.set()
+    async with asyncio.timeout(1):
+        await callback_task
+    await host.async_stop()
+    assert host._callback_tasks == set()
     assert executor_close_attempted.is_set()
     assert host._executor.closed is True
     assert host._stopped is True
-    assert host._accepting is False
-    assert service.__dict__ == {}
+    assert host._cleanup_tasks == {}
 
     await host.async_stop()
 
 
 @pytest.mark.asyncio
-async def test_cleanup_failure_does_not_replace_cancellation_or_skip_later_steps(
+async def test_cleanup_failure_before_deadline_release_retains_dependency_and_retries(
     hass,
     monkeypatch,
     caplog,
 ) -> None:
+    monkeypatch.setattr(water_host_module, "RESOURCE_CLEANUP_TIMEOUT_SECONDS", 0.1)
     entry, _canonical = await _active_entry(hass, monkeypatch)
     hass.states.async_set(SENSOR, "unavailable")
     await hass.async_block_till_done()
     original_build = activation.build_water_safety_host
     created_hosts = []
-    callback_finished = asyncio.Event()
     scheduler_cancel_all_attempted = asyncio.Event()
     executor_close_attempted = asyncio.Event()
     primary_message = "initialization cancelled before activation completed"
+    deadline_cleanup_fails = True
+
+    class RetryableDeadline:
+        def __init__(self) -> None:
+            self.released = False
+
+        def cancel(self) -> None:
+            if deadline_cleanup_fails:
+                raise RuntimeError("deadline cleanup regression failure before release")
+            self.released = True
+
+    retryable_deadline = RetryableDeadline()
 
     def build_with_failing_deadline_cleanup(*args, **kwargs):
         host = original_build(*args, **kwargs)
@@ -410,42 +447,26 @@ async def test_cleanup_failure_does_not_replace_cancellation_or_skip_later_steps
         original_close = host._executor.async_close
         cancellation_injected = False
 
-        async def held_callback(release):
-            await release.wait()
-            callback_finished.set()
-
         async def cancel_after_deadline_allocation(operation, *operation_args):
             nonlocal cancellation_injected
             result = await original_submit(operation, *operation_args)
             if not cancellation_injected and getattr(operation, "__name__", "") == "_reschedule_deadline":
                 cancellation_injected = True
                 assert host._deadline_handle is not None
-                original_cancel_deadline = host._cancel_deadline
-
-                def fail_deadline_cleanup():
-                    original_cancel_deadline()
-                    raise RuntimeError("deadline cleanup regression failure")
-
-                callback_release = asyncio.Event()
-                callback_task = hass.async_create_task(
-                    held_callback(callback_release),
-                    "Water Safety failed-cleanup regression callback",
-                )
-                host._callback_tasks.add(callback_task)
-                callback_task.add_done_callback(host._callback_tasks.discard)
+                await original_submit(host._cancel_deadline)
+                assert host._deadline_handle is None
+                host._deadline_handle = retryable_deadline
 
                 def tracked_cancel_all():
                     try:
                         original_cancel_all()
                     finally:
                         hass.loop.call_soon_threadsafe(scheduler_cancel_all_attempted.set)
-                        hass.loop.call_soon_threadsafe(callback_release.set)
 
                 async def tracked_close():
                     executor_close_attempted.set()
                     await original_close()
 
-                monkeypatch.setattr(host, "_cancel_deadline", fail_deadline_cleanup)
                 monkeypatch.setattr(host._scheduler, "cancel_all", tracked_cancel_all)
                 monkeypatch.setattr(host._executor, "async_close", tracked_close)
                 raise asyncio.CancelledError(primary_message)
@@ -466,18 +487,26 @@ async def test_cleanup_failure_does_not_replace_cancellation_or_skip_later_steps
     assert len(created_hosts) == 1
     host = created_hosts[0]
     assert scheduler_cancel_all_attempted.is_set()
-    assert callback_finished.is_set()
-    assert executor_close_attempted.is_set()
-    assert host._deadline_handle is None
+    assert not executor_close_attempted.is_set()
+    assert host._deadline_handle is retryable_deadline
+    assert retryable_deadline.released is False
     assert host._scheduler._closed is True
     assert host._scheduler._handles == set()
     assert host._callback_tasks == set()
+    assert host._executor.closed is False
+    assert host._stopped is False
+    assert host._cleanup_tasks == {}
+    assert "current deadline cancellation" in caplog.text
+    assert "deadline cleanup regression failure before release" in caplog.text
+
+    deadline_cleanup_fails = False
+    await host.async_stop()
+    assert host._deadline_handle is None
+    assert retryable_deadline.released is True
+    assert executor_close_attempted.is_set()
     assert host._executor.closed is True
     assert host._stopped is True
-    assert "current deadline cancellation" in caplog.text
-    assert "deadline cleanup regression failure" in caplog.text
-
-    await host.async_stop()
+    assert host._cleanup_tasks == {}
 
 
 @pytest.mark.asyncio

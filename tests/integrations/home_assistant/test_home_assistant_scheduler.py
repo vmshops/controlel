@@ -115,6 +115,46 @@ def test_cancellation_failure_preserves_original_exception():
     assert raised.__cause__ is original
 
 
+def test_cancel_all_failure_retains_timer_ownership_for_retry():
+    async def scenario():
+        executor = HomeAssistantRuntimeExecutor()
+        cancellation_attempts = 0
+        fail_cancellation = True
+        submitted = []
+
+        def installer(hass, action, when):
+            def cancel():
+                nonlocal cancellation_attempts
+                cancellation_attempts += 1
+                if fail_cancellation:
+                    raise RuntimeError("cancel failed before timer release")
+
+            return cancel
+
+        scheduler = HomeAssistantScheduler(
+            "hass",
+            HomeAssistantEventLoopBridge(asyncio.get_running_loop()),
+            submitted.append,
+            timer_installer=installer,
+        )
+        await executor.async_submit(scheduler.schedule_at, NOW, lambda: None)
+        with pytest.raises(HomeAssistantSchedulerCancellationError):
+            await executor.async_submit(scheduler.cancel_all)
+        assert scheduler.released is False
+        assert len(scheduler._handles) == 1
+
+        fail_cancellation = False
+        await executor.async_submit(scheduler.cancel_all)
+        assert scheduler.released is True
+        await executor.async_close()
+        return cancellation_attempts, submitted
+
+    cancellation_attempts, submitted = asyncio.run(scenario())
+
+    assert cancellation_attempts == 2
+    assert submitted == []
+
+
 def test_cancel_all_invalidates_every_timer_and_rejects_stale_callbacks():
     async def scenario():
         executor = HomeAssistantRuntimeExecutor()

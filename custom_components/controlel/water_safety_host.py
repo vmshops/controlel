@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import deque
-from collections.abc import Callable, Coroutine
+from collections.abc import Awaitable, Callable, Coroutine
 from datetime import UTC, datetime
 from functools import partial
 from typing import Any, Protocol
@@ -41,6 +41,9 @@ type Unsubscribe = Callable[[], None]
 type StateListener = Callable[[StateLike | None, StateLike | None], None]
 type StateSubscriber = Callable[[object, str, StateListener], Unsubscribe]
 type StateGetter = Callable[[str], StateLike | None]
+
+CALLBACK_TASK_TERMINATION_TIMEOUT_SECONDS = 1.0
+RESOURCE_CLEANUP_TIMEOUT_SECONDS = 1.0
 
 
 class HomeAssistantTaskOwner(Protocol):
@@ -91,6 +94,7 @@ class HomeAssistantWaterSafetyHost:
         self._unsubscribe: Unsubscribe | None = None
         self._deadline_handle: object | None = None
         self._callback_tasks: set[asyncio.Task[Any]] = set()
+        self._cleanup_tasks: dict[str, asyncio.Task[BaseException | None]] = {}
         self._accepting = True
         self._initialized = False
         self._startup_observations: deque[MoistureObservation] | None = None
@@ -187,11 +191,7 @@ class HomeAssistantWaterSafetyHost:
 
             def record_failure(step: str, error: BaseException) -> None:
                 nonlocal cancellation
-                self._logger.error(
-                    "Water Safety cleanup step failed (%s); continuing teardown",
-                    step,
-                    exc_info=(type(error), error, error.__traceback__),
-                )
+                self._log_cleanup_failure(step, error)
                 if isinstance(error, asyncio.CancelledError) and cancellation is None:
                     cancellation = error
 
@@ -204,41 +204,81 @@ class HomeAssistantWaterSafetyHost:
                 else:
                     self._unsubscribe = None
 
-            if not self._executor.closed:
-                try:
-                    await self._async_submit_runtime(self._cancel_deadline)
-                except BaseException as error:
-                    record_failure("current deadline cancellation", error)
-
-            if not self._executor.closed:
-                try:
-                    await self._async_submit_runtime(self._scheduler.cancel_all)
-                except BaseException as error:
-                    record_failure("scheduler cancel_all", error)
-
-            callback_tasks = [task for task in self._callback_tasks if task is not asyncio.current_task()]
-            if callback_tasks:
-                try:
-                    await asyncio.gather(*callback_tasks, return_exceptions=True)
-                except BaseException as error:
-                    record_failure("callback task draining", error)
-
-            if not self._executor.closed:
-                try:
-                    await self._executor.async_close()
-                except BaseException as error:
-                    record_failure("runtime executor close", error)
-
+            callback_tasks = {task for task in self._callback_tasks if task is not asyncio.current_task()}
             for task in callback_tasks:
-                if task.done():
+                task.cancel("Water Safety host teardown")
+            if callback_tasks:
+                done, pending = await asyncio.wait(
+                    callback_tasks,
+                    timeout=CALLBACK_TASK_TERMINATION_TIMEOUT_SECONDS,
+                )
+                for task in done:
                     self._callback_tasks.discard(task)
+                    if task.cancelled():
+                        continue
+                    error = task.exception()
+                    if error is not None:
+                        record_failure("callback task completion", error)
+                if pending:
+                    self._logger.error(
+                        "Water Safety cleanup step timed out (callback task cancellation) after %.3f seconds; "
+                        "%d owned task(s) remain retryable",
+                        CALLBACK_TASK_TERMINATION_TIMEOUT_SECONDS,
+                        len(pending),
+                    )
+
+            if self._deadline_handle is not None:
+                if self._executor.closed:
+                    record_failure(
+                        "current deadline cancellation",
+                        RuntimeExecutorClosedError("runtime executor closed before deadline release"),
+                    )
+                else:
+                    completed, error = await self._async_supervise_cleanup(
+                        "current deadline cancellation",
+                        lambda: self._async_submit_runtime(self._cancel_deadline),
+                    )
+                    if completed and error is not None:
+                        record_failure("current deadline cancellation", error)
+
+            if not self._scheduler.released:
+                if self._executor.closed:
+                    record_failure(
+                        "scheduler cancel_all",
+                        RuntimeExecutorClosedError("runtime executor closed before scheduler release"),
+                    )
+                else:
+                    completed, error = await self._async_supervise_cleanup(
+                        "scheduler cancel_all",
+                        lambda: self._async_submit_runtime(self._scheduler.cancel_all),
+                    )
+                    if completed and error is not None:
+                        record_failure("scheduler cancel_all", error)
+
+            runtime_dependencies_released = (
+                not self._callback_tasks
+                and self._deadline_handle is None
+                and self._scheduler.released
+                and not {
+                    "current deadline cancellation",
+                    "scheduler cancel_all",
+                }.intersection(self._cleanup_tasks)
+            )
+            if runtime_dependencies_released and not self._executor.closed:
+                completed, error = await self._async_supervise_cleanup(
+                    "runtime executor close",
+                    self._executor.async_close,
+                )
+                if completed and error is not None:
+                    record_failure("runtime executor close", error)
 
             self._stopping = False
             self._stopped = (
                 self._unsubscribe is None
                 and self._deadline_handle is None
-                and self._scheduler._closed
+                and self._scheduler.released
                 and not self._callback_tasks
+                and not self._cleanup_tasks
                 and self._executor.closed
             )
             if self._stopped:
@@ -246,6 +286,53 @@ class HomeAssistantWaterSafetyHost:
             else:
                 self._logger.warning("Water Safety runtime cleanup remains incomplete; a later stop may retry")
             return cancellation
+
+    async def _async_supervise_cleanup(
+        self,
+        step: str,
+        operation: Callable[[], Awaitable[Any]],
+    ) -> tuple[bool, BaseException | None]:
+        task = self._cleanup_tasks.get(step)
+        if task is None:
+            task = asyncio.create_task(
+                self._async_run_cleanup_operation(step, operation),
+                name=f"Controlel Water Safety cleanup: {step}",
+            )
+            self._cleanup_tasks[step] = task
+        done, _pending = await asyncio.wait(
+            {task},
+            timeout=RESOURCE_CLEANUP_TIMEOUT_SECONDS,
+        )
+        if not done:
+            self._logger.error(
+                "Water Safety cleanup step timed out (%s) after %.3f seconds; the operation remains supervised",
+                step,
+                RESOURCE_CLEANUP_TIMEOUT_SECONDS,
+            )
+            return False, None
+        return True, task.result()
+
+    async def _async_run_cleanup_operation(
+        self,
+        step: str,
+        operation: Callable[[], Awaitable[Any]],
+    ) -> BaseException | None:
+        task = asyncio.current_task()
+        try:
+            await operation()
+        except BaseException as error:
+            return error
+        finally:
+            if task is not None and self._cleanup_tasks.get(step) is task:
+                self._cleanup_tasks.pop(step, None)
+        return None
+
+    def _log_cleanup_failure(self, step: str, error: BaseException) -> None:
+        self._logger.error(
+            "Water Safety cleanup step failed (%s); continuing teardown",
+            step,
+            exc_info=(type(error), error, error.__traceback__),
+        )
 
     async def silence(self) -> WaterSafetyProcessingResult:
         return await self._process(lambda: self._runtime.silence(silenced_at=datetime.now(UTC)))

@@ -37,15 +37,14 @@ class _HomeAssistantScheduledTaskHandle(ScheduledTaskHandle):
         self._cancel_callback = cancel_callback
         self._on_finished = on_finished
         self._state_lock = Lock()
+        self._cancelling = False
         self._cancelled = False
 
     def cancel(self) -> None:
         with self._state_lock:
-            if self._cancelled:
+            if self._cancelled or self._cancelling:
                 return
-            self._cancelled = True
-
-        self._on_finished(self)
+            self._cancelling = True
 
         async def async_cancel() -> None:
             self._cancel_callback()
@@ -53,7 +52,15 @@ class _HomeAssistantScheduledTaskHandle(ScheduledTaskHandle):
         try:
             self._bridge.run_coroutine(async_cancel)
         except Exception as error:
+            with self._state_lock:
+                self._cancelling = False
             raise HomeAssistantSchedulerCancellationError(error) from error
+        with self._state_lock:
+            self._cancelling = False
+            if self._cancelled:
+                return
+            self._cancelled = True
+        self._on_finished(self)
 
     def claim_callback(self) -> bool:
         """Claim one live timer callback and reject cancelled or duplicate calls."""
@@ -62,8 +69,9 @@ class _HomeAssistantScheduledTaskHandle(ScheduledTaskHandle):
             if self._cancelled:
                 return False
             self._cancelled = True
+            cancelling = self._cancelling
         self._on_finished(self)
-        return True
+        return not cancelling
 
 
 class HomeAssistantScheduler:
@@ -81,6 +89,13 @@ class HomeAssistantScheduler:
         self._handles_lock = Lock()
         self._handles: set[_HomeAssistantScheduledTaskHandle] = set()
         self._closed = False
+
+    @property
+    def released(self) -> bool:
+        """Return whether scheduling is closed and every owned timer is released."""
+
+        with self._handles_lock:
+            return self._closed and not self._handles
 
     def schedule_at(
         self,
