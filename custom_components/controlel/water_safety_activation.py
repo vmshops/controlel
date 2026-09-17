@@ -35,6 +35,7 @@ from .event_loop_bridge import HomeAssistantEventLoopBridge
 from .scheduler import HomeAssistantScheduler
 from .setup_backend import async_get_setup_backend
 from .water_safety_host import HomeAssistantWaterSafetyHost, build_water_safety_host
+from .water_safety_lifecycle import water_safety_lifecycle_owner
 from .water_safety_persistence import (
     create_water_safety_evidence_store,
     create_water_safety_state_store,
@@ -95,9 +96,10 @@ async def _async_restore_authority(hass: Any, entry: Any) -> bool:
     data = getattr(entry, "runtime_data", None)
     host = getattr(data, "water_safety_host", None)
     if host is not None:
-        await host.async_stop()
-        data.water_safety_host = None
-        data.loaded_water_safety_configuration = None
+        owner = water_safety_lifecycle_owner(hass, entry.entry_id)
+        if await owner.async_stop_host(host):
+            data.water_safety_host = None
+            data.loaded_water_safety_configuration = None
     return False
 
 
@@ -300,6 +302,8 @@ class WaterSafetyActivationService:
         *,
         bridge: HomeAssistantEventLoopBridge | None = None,
     ) -> HomeAssistantWaterSafetyHost:
+        owner = water_safety_lifecycle_owner(hass, entry.entry_id)
+        await owner.async_prepare_for_start()
         bridge = bridge or HomeAssistantEventLoopBridge(hass.loop)
         host_holder: list[HomeAssistantWaterSafetyHost] = []
 
@@ -326,15 +330,17 @@ class WaterSafetyActivationService:
             logger=LOGGER,
             restored_snapshot=restored_snapshot,
         )
+        owner.register_constructed_host(host)
         host_holder.append(host)
         try:
             await host.async_initialize()
         except BaseException:
             try:
-                await host.async_stop()
+                await owner.async_stop_host(host)
             except BaseException:
                 LOGGER.exception("Water Safety host cleanup after failed initialization did not complete cleanly")
             raise
+        owner.mark_host_active(host)
         return host
 
 

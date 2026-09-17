@@ -113,6 +113,12 @@ class HomeAssistantWaterSafetyHost:
 
         return dict(self._degraded_notification_bindings)
 
+    @property
+    def stopped(self) -> bool:
+        """Return whether every resource owned by this host has been released."""
+
+        return self._stopped
+
     def mark_degraded_notification_bindings(self, degraded: dict[str, str]) -> None:
         """Record notification roles that were omitted because resolution failed."""
 
@@ -304,28 +310,51 @@ class HomeAssistantWaterSafetyHost:
             timeout=RESOURCE_CLEANUP_TIMEOUT_SECONDS,
         )
         if not done:
+            if task.done():
+                return True, self._consume_cleanup_result(step, task, late=False)
             self._logger.error(
                 "Water Safety cleanup step timed out (%s) after %.3f seconds; the operation remains supervised",
                 step,
                 RESOURCE_CLEANUP_TIMEOUT_SECONDS,
             )
+            task.add_done_callback(lambda completed: self._consume_cleanup_result(step, completed, late=True))
             return False, None
-        return True, task.result()
+        return True, self._consume_cleanup_result(step, task, late=False)
 
     async def _async_run_cleanup_operation(
         self,
         step: str,
         operation: Callable[[], Awaitable[Any]],
     ) -> BaseException | None:
-        task = asyncio.current_task()
+        del step
         try:
             await operation()
         except BaseException as error:
             return error
-        finally:
-            if task is not None and self._cleanup_tasks.get(step) is task:
-                self._cleanup_tasks.pop(step, None)
         return None
+
+    def _consume_cleanup_result(
+        self,
+        step: str,
+        task: asyncio.Task[BaseException | None],
+        *,
+        late: bool,
+    ) -> BaseException | None:
+        """Consume one supervised result exactly once before releasing task ownership."""
+
+        try:
+            error = task.result()
+        except BaseException as task_error:
+            error = task_error
+        if self._cleanup_tasks.get(step) is not task:
+            return error
+        self._cleanup_tasks.pop(step, None)
+        if late:
+            if error is None:
+                self._logger.info("Water Safety cleanup step completed after timeout (%s)", step)
+            else:
+                self._log_cleanup_failure(step, error)
+        return error
 
     def _log_cleanup_failure(self, step: str, error: BaseException) -> None:
         self._logger.error(

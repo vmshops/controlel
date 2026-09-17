@@ -64,6 +64,7 @@ class ControlelEntryRuntime:
     host: HomeAssistantControlelHost | None
     config: HomeAssistantIntegrationConfig | None
     water_safety_host: object | None = None
+    water_safety_lifecycle_owner: object | None = None
     loaded_configuration: LoadedRuntimeConfiguration | None = None
     loaded_water_safety_configuration: LoadedRuntimeConfiguration | None = None
     reloading: bool = False
@@ -116,9 +117,13 @@ async def _async_setup_entry(
     """Implement config-entry setup under lifecycle failure reporting."""
     heating_active = active_reference_for_module(entry.data, "heating")
     water_active = active_reference_for_module(entry.data, "water_safety")
+    water_lifecycle_owner = None
     if water_safety_core_available():
         from .water_safety_activation import water_reference_for_runtime
+        from .water_safety_lifecycle import water_safety_lifecycle_owner
 
+        water_lifecycle_owner = water_safety_lifecycle_owner(hass, entry.entry_id)
+        await water_lifecycle_owner.async_retry_pending_cleanup()
         water_active = water_reference_for_runtime(hass, entry)
     if heating_active is None and water_active is not None and staged_candidate_runtime(hass, entry.entry_id) is None:
         return await _async_setup_water_safety_only_entry(hass, entry, water_active)
@@ -138,6 +143,7 @@ async def _async_setup_entry(
             host=None,
             config=None,
             water_safety_host=None,
+            water_safety_lifecycle_owner=water_lifecycle_owner,
             frontend_api_unregister=frontend_api_unregister,
         )
         entry.async_on_unload(frontend_api_unregister)
@@ -353,7 +359,10 @@ async def _async_setup_entry(
     except BaseException:
         try:
             if water_safety_host is not None:
-                await water_safety_host.async_stop()
+                if water_lifecycle_owner is None:
+                    await water_safety_host.async_stop()
+                else:
+                    await water_lifecycle_owner.async_stop_host(water_safety_host)
             if host is not None:
                 host.clear_transient_issues()
                 await host.async_stop()
@@ -393,6 +402,7 @@ async def _async_setup_entry(
     entry.runtime_data = ControlelEntryRuntime(
         host=host,
         water_safety_host=water_safety_host,
+        water_safety_lifecycle_owner=water_lifecycle_owner,
         config=config,
         loaded_configuration=selection.loaded_configuration,
         loaded_water_safety_configuration=(
@@ -413,10 +423,14 @@ async def _async_setup_entry(
         frontend_api_unregister()
         water_safety_action_unregister()
         if water_safety_host is not None:
-            await water_safety_host.async_stop()
+            if water_lifecycle_owner is None:
+                await water_safety_host.async_stop()
+            else:
+                await water_lifecycle_owner.async_stop_host(water_safety_host)
         await host.async_stop()
         entry.runtime_data.host = None
-        entry.runtime_data.water_safety_host = None
+        if water_safety_host is None or water_safety_host.stopped:
+            entry.runtime_data.water_safety_host = None
         entry.runtime_data.frontend_api_unregister = None
         entry.runtime_data.water_safety_action_unregister = None
         raise
@@ -455,6 +469,7 @@ async def _async_setup_water_safety_only_entry(
     from .panel import async_register_controlel_panel
     from .setup_backend import async_get_setup_backend
     from .water_safety_activation import WaterSafetyActivationService
+    from .water_safety_lifecycle import water_safety_lifecycle_owner
 
     await async_get_setup_backend(hass, entry)
     bridge = HomeAssistantEventLoopBridge(hass.loop)
@@ -515,6 +530,7 @@ async def _async_setup_water_safety_only_entry(
         host=None,
         config=None,
         water_safety_host=water_safety_host,
+        water_safety_lifecycle_owner=water_safety_lifecycle_owner(hass, entry.entry_id),
         loaded_water_safety_configuration=(
             _loaded_configuration_from_active(active) if water_safety_host is not None else None
         ),
@@ -540,6 +556,7 @@ async def async_unload_entry(
 ) -> bool:
     """Unload the entry through the host's terminal serialized stop path."""
     runtime_data = entry.runtime_data
+    water_lifecycle_owner = runtime_data.water_safety_lifecycle_owner
     forwarded_platforms = runtime_data.forwarded_platforms
     if forwarded_platforms and not await hass.config_entries.async_unload_platforms(entry, forwarded_platforms):
         return False
@@ -554,9 +571,16 @@ async def async_unload_entry(
         runtime_data.water_safety_action_unregister = None
     host = runtime_data.host
     water_safety_host = runtime_data.water_safety_host
-    if water_safety_host is not None:
+    water_cleanup_complete = True
+    if water_lifecycle_owner is not None:
+        water_cleanup_complete = await water_lifecycle_owner.async_stop_all()
+        if water_safety_host is None or water_safety_host.stopped:
+            runtime_data.water_safety_host = None
+    elif water_safety_host is not None:
         await water_safety_host.async_stop()
-        runtime_data.water_safety_host = None
+        water_cleanup_complete = water_safety_host.stopped
+        if water_cleanup_complete:
+            runtime_data.water_safety_host = None
     if host is not None:
         await host.async_stop()
         runtime_data.host = None
@@ -564,7 +588,7 @@ async def async_unload_entry(
     from .panel import async_remove_controlel_panel
 
     async_remove_controlel_panel(hass)
-    return True
+    return water_cleanup_complete
 
 
 async def async_remove_entry(
