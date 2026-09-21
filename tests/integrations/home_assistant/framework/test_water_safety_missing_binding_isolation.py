@@ -15,7 +15,6 @@ from controlel.application.configuration.water_safety_setup_adapter import (
 )
 from controlel.domain.water_safety import WaterSafetyState
 from controlel.infrastructure.home_assistant import active_reference_for_module
-from custom_components.controlel import async_unload_entry
 from custom_components.controlel import config_flow as cf
 from custom_components.controlel import water_safety_activation as activation
 from custom_components.controlel import water_safety_host as water_host_module
@@ -391,6 +390,7 @@ async def test_activation_cancellation_bounds_uncooperative_callback_and_remains
     assert host._executor.closed is False
     assert host._stopped is False
     assert host._accepting is False
+    assert host.quiescent is True
     assert len(host._callback_tasks) == 1
     callback_task = next(iter(host._callback_tasks))
     assert callback_task.done() is False
@@ -512,78 +512,32 @@ async def test_cleanup_failure_before_deadline_release_retains_dependency_and_re
 
 
 @pytest.mark.asyncio
-async def test_incomplete_real_entry_unload_retains_owner_until_retry(hass, monkeypatch) -> None:
-    monkeypatch.setattr(water_host_module, "CALLBACK_TASK_TERMINATION_TIMEOUT_SECONDS", 0.01)
-    entry = await _empty_entry(hass, title="Water cleanup owner unload")
-    await _activate_new_water(hass, entry)
-    host = entry.runtime_data.water_safety_host
-    owner = water_safety_lifecycle_owner(hass, entry.entry_id)
-    assert owner.active_host is host
-
-    callback_started = asyncio.Event()
-    callback_cancelled = asyncio.Event()
-    callback_can_finish = asyncio.Event()
-
-    async def held_callback() -> None:
-        callback_started.set()
-        while not callback_can_finish.is_set():
-            try:
-                await callback_can_finish.wait()
-            except asyncio.CancelledError:
-                callback_cancelled.set()
-
-    callback_task = hass.async_create_task(held_callback(), "Water Safety incomplete unload callback")
-    host._callback_tasks.add(callback_task)
-    callback_task.add_done_callback(host._callback_tasks.discard)
-    await callback_started.wait()
-
-    assert not await async_unload_entry(hass, entry)
-    await callback_cancelled.wait()
-    assert entry.runtime_data.water_safety_host is host
-    assert owner.active_host is None
-    assert owner.pending_cleanup_hosts == (host,)
-    assert host._executor.closed is False
-    assert host.stopped is False
-
-    callback_can_finish.set()
-    await callback_task
-    assert await async_unload_entry(hass, entry)
-    assert owner.pending_cleanup_hosts == ()
-    assert host._executor.closed is True
-    assert host.stopped is True
-    assert await hass.config_entries.async_unload(entry.entry_id)
-
-
-@pytest.mark.asyncio
-async def test_reload_does_not_duplicate_water_host_while_predecessor_cleanup_is_pending(
+async def test_ha_lifecycle_retains_quiescent_cleanup_without_failed_unload_and_recovers(
     hass,
     monkeypatch,
 ) -> None:
-    monkeypatch.setattr(water_host_module, "CALLBACK_TASK_TERMINATION_TIMEOUT_SECONDS", 0.01)
+    monkeypatch.setattr(water_host_module, "RESOURCE_CLEANUP_TIMEOUT_SECONDS", 0.01)
     entry, _moisture, _phone = await _activate_heating_and_water_with_notification(
         hass,
-        title="Water cleanup owner reload",
-        notify_name="cleanup_owner_reload",
-        platform="cleanup-owner-reload",
+        title="Water HA lifecycle recovery",
+        notify_name="ha_lifecycle_recovery",
+        platform="ha-lifecycle-recovery",
     )
     water_host = entry.runtime_data.water_safety_host
     heating_host = entry.runtime_data.host
     owner = water_safety_lifecycle_owner(hass, entry.entry_id)
-    callback_started = asyncio.Event()
-    callback_can_finish = asyncio.Event()
+    close_started = asyncio.Event()
+    close_can_finish = asyncio.Event()
+    original_close = water_host._executor.async_close
 
-    async def held_callback() -> None:
-        callback_started.set()
-        while not callback_can_finish.is_set():
-            try:
-                await callback_can_finish.wait()
-            except asyncio.CancelledError:
-                pass
+    async def held_close() -> None:
+        close_started.set()
+        await close_can_finish.wait()
+        await original_close()
 
-    callback_task = hass.async_create_task(held_callback(), "Water Safety reload duplicate guard")
-    water_host._callback_tasks.add(callback_task)
-    callback_task.add_done_callback(water_host._callback_tasks.discard)
-    await callback_started.wait()
+    monkeypatch.setattr(water_host._executor, "async_close", held_close)
+    output_request = AsyncMock(wraps=water_host._output_port.request)
+    monkeypatch.setattr(water_host._output_port, "request", output_request)
 
     original_build = activation.build_water_safety_host
     created_after_pending = 0
@@ -594,22 +548,135 @@ async def test_reload_does_not_duplicate_water_host_while_predecessor_cleanup_is
         return original_build(*args, **kwargs)
 
     monkeypatch.setattr(activation, "build_water_safety_host", count_builds)
-    assert not await async_unload_entry(hass, entry)
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await close_started.wait()
+    assert entry.state is config_entries.ConfigEntryState.NOT_LOADED
+    assert entry.state is not config_entries.ConfigEntryState.FAILED_UNLOAD
     assert created_after_pending == 0
     assert owner.pending_cleanup_hosts == (water_host,)
+    assert owner.pending_cleanup_is_quiescent is True
+    assert water_host.quiescent is True
+    assert water_host._output_port.quiescent is True
     assert water_host.stopped is False
     assert heating_host.stopped is True
+    assert water_host._unsubscribe is None
+    assert water_host._deadline_handle is None
+    assert water_host._callback_tasks == set()
+    assert water_host._scheduler.released is True
+    action_registry = hass.data.get("controlel_water_safety_v1_action_registry")
+    assert action_registry is None or entry.entry_id not in action_registry.handlers
 
-    callback_can_finish.set()
-    await callback_task
+    with pytest.raises(RuntimeError, match="quiescent"):
+        await water_host.async_frontend_api_water_safety_action("silence")
+    scheduled_callbacks: list[str] = []
+    water_host.submit_scheduled_callback(lambda: scheduled_callbacks.append("ran"))
+    output_count = output_request.await_count
+    hass.states.async_set(water_host._mapper.entity_id, "on")
+    await hass.async_block_till_done()
+    assert scheduled_callbacks == []
+    assert output_request.await_count == output_count
+
     assert await hass.config_entries.async_reload(entry.entry_id)
     await hass.async_block_till_done()
+    assert entry.state is config_entries.ConfigEntryState.LOADED
+    assert created_after_pending == 0
+    assert owner.pending_cleanup_hosts == (water_host,)
+    assert entry.runtime_data.water_safety_host is None
+    assert "prior host remains lifecycle-owned" in entry.runtime_data.water_safety_startup_failure
+    assert entry.runtime_data.water_safety_action_unregister is None
+    assert action_registry is None or entry.entry_id not in action_registry.handlers
+    pending_heating_host = entry.runtime_data.host
+    assert pending_heating_host is not None
+    assert pending_heating_host is not heating_host
+    assert pending_heating_host.accepting is True
+
+    cleanup_task = water_host._cleanup_tasks["runtime executor close"]
+    close_can_finish.set()
+    await cleanup_task
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.state is config_entries.ConfigEntryState.LOADED
     assert created_after_pending == 1
     assert owner.pending_cleanup_hosts == ()
     assert owner.active_host is entry.runtime_data.water_safety_host
     assert entry.runtime_data.water_safety_host is not water_host
+    assert water_host.stopped is True
+    assert pending_heating_host.stopped is True
     assert entry.runtime_data.host is not None
     assert entry.runtime_data.host.accepting is True
+
+
+@pytest.mark.asyncio
+async def test_ordinary_initialization_failure_retains_quiescent_host_for_real_reload(
+    hass,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(water_host_module, "RESOURCE_CLEANUP_TIMEOUT_SECONDS", 0.01)
+    entry, _moisture, _phone = await _activate_heating_and_water_with_notification(
+        hass,
+        title="Water initialization failure recovery",
+        notify_name="initialization_failure_recovery",
+        platform="initialization-failure-recovery",
+    )
+    owner = water_safety_lifecycle_owner(hass, entry.entry_id)
+    original_build = activation.build_water_safety_host
+    close_started = asyncio.Event()
+    close_can_finish = asyncio.Event()
+    failure_injected = False
+
+    def fail_one_initialization_after_resources(*args, **kwargs):
+        nonlocal failure_injected
+        host = original_build(*args, **kwargs)
+        if failure_injected:
+            return host
+        failure_injected = True
+        original_submit = host._async_submit_runtime
+        original_close = host._executor.async_close
+        failed = False
+
+        async def fail_after_deadline_allocation(operation, *operation_args):
+            nonlocal failed
+            result = await original_submit(operation, *operation_args)
+            if not failed and getattr(operation, "__name__", "") == "_reschedule_deadline":
+                failed = True
+                raise RuntimeError("ordinary initialization failure after resources")
+            return result
+
+        async def held_close() -> None:
+            close_started.set()
+            await close_can_finish.wait()
+            await original_close()
+
+        monkeypatch.setattr(host, "_async_submit_runtime", fail_after_deadline_allocation)
+        monkeypatch.setattr(host._executor, "async_close", held_close)
+        return host
+
+    monkeypatch.setattr(activation, "build_water_safety_host", fail_one_initialization_after_resources)
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await close_started.wait()
+    await hass.async_block_till_done()
+    assert entry.state is config_entries.ConfigEntryState.LOADED
+    assert entry.runtime_data.host is not None
+    assert entry.runtime_data.host.accepting is True
+    assert entry.runtime_data.water_safety_host is None
+    assert "ordinary initialization failure after resources" in entry.runtime_data.water_safety_startup_failure
+    assert entry.runtime_data.water_safety_action_unregister is None
+    (failed_host,) = owner.pending_cleanup_hosts
+    assert failed_host.quiescent is True
+    assert failed_host.stopped is False
+
+    cleanup_task = failed_host._cleanup_tasks["runtime executor close"]
+    close_can_finish.set()
+    await cleanup_task
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.state is config_entries.ConfigEntryState.LOADED
+    assert owner.pending_cleanup_hosts == ()
+    assert failed_host.stopped is True
+    assert owner.active_host is entry.runtime_data.water_safety_host
+    assert entry.runtime_data.water_safety_host is not failed_host
+    assert entry.runtime_data.water_safety_startup_failure is None
 
 
 @pytest.mark.asyncio

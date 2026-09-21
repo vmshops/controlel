@@ -15,6 +15,9 @@ class WaterSafetyHost(Protocol):
     @property
     def stopped(self) -> bool: ...
 
+    @property
+    def quiescent(self) -> bool: ...
+
     async def async_stop(self) -> None: ...
 
 
@@ -93,6 +96,13 @@ class WaterSafetyLifecycleOwner:
         if active is not None:
             await self.async_stop_host(active)
         return await self.async_retry_pending_cleanup()
+
+    @property
+    def pending_cleanup_is_quiescent(self) -> bool:
+        """Return whether every retained host is logically unable to do new work."""
+
+        self._prune_stopped_hosts()
+        return all(host.quiescent for host in self._pending_cleanup_hosts)
 
     def _prune_stopped_hosts(self) -> None:
         active = self._active_host

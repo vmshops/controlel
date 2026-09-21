@@ -389,16 +389,17 @@ async def _async_setup_entry(
         ),
     )
 
-    async def _water_safety_action(action: str) -> dict[str, object]:
-        if water_safety_host is None:
-            raise RuntimeError("Water Safety is not configured for this entry")
-        return await water_safety_host.async_frontend_api_water_safety_action(action)
+    water_safety_action_unregister = None
+    if water_safety_host is not None:
 
-    water_safety_action_unregister = register_water_safety_action_handler_v1(
-        hass,
-        entry.entry_id,
-        _water_safety_action,
-    )
+        async def _water_safety_action(action: str) -> dict[str, object]:
+            return await water_safety_host.async_frontend_api_water_safety_action(action)
+
+        water_safety_action_unregister = register_water_safety_action_handler_v1(
+            hass,
+            entry.entry_id,
+            _water_safety_action,
+        )
     entry.runtime_data = ControlelEntryRuntime(
         host=host,
         water_safety_host=water_safety_host,
@@ -421,7 +422,8 @@ async def _async_setup_entry(
         await async_recover_interrupted_activation(hass, entry, setup_backend, selection)
     except BaseException:
         frontend_api_unregister()
-        water_safety_action_unregister()
+        if water_safety_action_unregister is not None:
+            water_safety_action_unregister()
         if water_safety_host is not None:
             if water_lifecycle_owner is None:
                 await water_safety_host.async_stop()
@@ -435,7 +437,8 @@ async def _async_setup_entry(
         entry.runtime_data.water_safety_action_unregister = None
         raise
     entry.async_on_unload(frontend_api_unregister)
-    entry.async_on_unload(water_safety_action_unregister)
+    if water_safety_action_unregister is not None:
+        entry.async_on_unload(water_safety_action_unregister)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
     from .panel import async_register_controlel_panel
@@ -571,15 +574,16 @@ async def async_unload_entry(
         runtime_data.water_safety_action_unregister = None
     host = runtime_data.host
     water_safety_host = runtime_data.water_safety_host
-    water_cleanup_complete = True
+    water_safe_to_unload = True
     if water_lifecycle_owner is not None:
-        water_cleanup_complete = await water_lifecycle_owner.async_stop_all()
+        await water_lifecycle_owner.async_stop_all()
+        water_safe_to_unload = water_lifecycle_owner.pending_cleanup_is_quiescent
         if water_safety_host is None or water_safety_host.stopped:
             runtime_data.water_safety_host = None
     elif water_safety_host is not None:
         await water_safety_host.async_stop()
-        water_cleanup_complete = water_safety_host.stopped
-        if water_cleanup_complete:
+        water_safe_to_unload = water_safety_host.quiescent
+        if water_safety_host.stopped:
             runtime_data.water_safety_host = None
     if host is not None:
         await host.async_stop()
@@ -588,7 +592,7 @@ async def async_unload_entry(
     from .panel import async_remove_controlel_panel
 
     async_remove_controlel_panel(hass)
-    return water_cleanup_complete
+    return water_safe_to_unload
 
 
 async def async_remove_entry(

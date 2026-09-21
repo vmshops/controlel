@@ -119,6 +119,12 @@ class HomeAssistantWaterSafetyHost:
 
         return self._stopped
 
+    @property
+    def quiescent(self) -> bool:
+        """Return whether the host cannot accept or finish new logical Water work."""
+
+        return not self._accepting and self._startup_observations is None and self._output_port.quiescent
+
     def mark_degraded_notification_bindings(self, degraded: dict[str, str]) -> None:
         """Record notification roles that were omitted because resolution failed."""
 
@@ -172,6 +178,10 @@ class HomeAssistantWaterSafetyHost:
             self._logger.info("Water Safety runtime started")
 
     async def async_stop(self) -> None:
+        # Close every logical entry point synchronously with the stop request.
+        # Physical resource cleanup remains bounded and may finish on a later retry.
+        self._output_port.quiesce()
+        self._accepting = False
         cleanup_task = asyncio.create_task(self._async_stop_owned_resources())
         cancellation: asyncio.CancelledError | None = None
         while not cleanup_task.done():
@@ -377,6 +387,7 @@ class HomeAssistantWaterSafetyHost:
         )
 
     async def test_notification(self) -> WaterSafetyProcessingResult:
+        self._require_accepting()
         self._require_safe_test()
         if not self._config.notification_target_roles:
             raise RuntimeError("Water Safety has no configured notification targets")
@@ -402,6 +413,7 @@ class HomeAssistantWaterSafetyHost:
         )
 
     async def test_siren(self) -> WaterSafetyProcessingResult:
+        self._require_accepting()
         self._require_safe_test()
         if not self._config.siren_target_roles:
             raise RuntimeError("Water Safety has no configured siren targets")
@@ -471,6 +483,8 @@ class HomeAssistantWaterSafetyHost:
         task.add_done_callback(self._callback_tasks.discard)
 
     async def _async_process_state(self, state: StateLike | None) -> None:
+        if not self._accepting:
+            return
         observation = self._observation_for_state(state)
         if observation is not None:
             await self._process(partial(self._runtime.observe, observation))
@@ -496,9 +510,11 @@ class HomeAssistantWaterSafetyHost:
                 raise
 
     async def _process(self, operation: Callable[[], WaterSafetyProcessingResult]) -> WaterSafetyProcessingResult:
+        self._require_accepting()
         result = await self._async_submit_runtime(operation)
         self._refresh_diagnostics()
-        await self._async_submit_runtime(self._reschedule_deadline)
+        if self._accepting:
+            await self._async_submit_runtime(self._reschedule_deadline)
         return result
 
     async def _async_submit_runtime(self, operation: Callable[..., Any], *args: object) -> Any:
@@ -506,6 +522,8 @@ class HomeAssistantWaterSafetyHost:
 
     def _reschedule_deadline(self) -> None:
         self._cancel_deadline()
+        if not self._accepting:
+            return
         deadline = self._runtime.next_deadline
         if deadline is None:
             return
@@ -551,6 +569,10 @@ class HomeAssistantWaterSafetyHost:
             raise RuntimeError("Water Safety test actions are not allowed while WET")
         if state is WaterSafetyState.DISABLED or not self._runtime.snapshot.processing_enabled:
             raise RuntimeError("Water Safety test actions are not allowed while disabled")
+
+    def _require_accepting(self) -> None:
+        if not self._accepting:
+            raise RuntimeError("Water Safety is quiescent and cannot accept new actions")
 
     def _require_observation(self, state: StateLike | None):
         mapping = self._mapper.map_state(state)

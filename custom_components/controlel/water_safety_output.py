@@ -95,8 +95,27 @@ class HomeAssistantWaterSafetyOutputPort:
         self._bridge = bridge
         self._logger = logger or logging.getLogger(__name__)
         self._area_name = area_name.strip() if isinstance(area_name, str) and area_name.strip() else None
+        self._quiescent = False
+
+    @property
+    def quiescent(self) -> bool:
+        """Return whether new physical output requests are permanently blocked."""
+
+        return self._quiescent
+
+    def quiesce(self) -> None:
+        """Permanently reject new physical output requests from this host."""
+
+        self._quiescent = True
 
     def request(self, command: WaterOutputCommand) -> WaterOutputCommandResult:
+        if self._quiescent:
+            return WaterOutputCommandResult(
+                command_id=command.command_id,
+                occurred_at=datetime.now(UTC),
+                outcome=WaterOutputOutcome.FAILED,
+                failure_code="water_safety_host_quiescent",
+            )
         try:
             if command.output_kind is WaterOutputKind.NOTIFICATION:
                 self._bridge.run_coroutine(lambda: self._async_notify(command))

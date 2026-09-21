@@ -182,3 +182,26 @@ async def test_valve_close_requests_are_truthful_and_failures_are_isolated(hass,
     assert len(notifications) == 1
     assert "unavailable" in caplog.text
     assert "service request failed" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_quiescent_output_port_rejects_new_actuation_without_calling_ha(hass) -> None:
+    calls: list[str] = []
+
+    async def valve_handler(call) -> None:
+        calls.append(call.data[ATTR_ENTITY_ID])
+
+    hass.services.async_register("valve", "close_valve", valve_handler)
+    hass.states.async_set("valve.utility_main", "open")
+    port = HomeAssistantWaterSafetyOutputPort(hass, HomeAssistantEventLoopBridge(hass.loop))
+
+    port.quiesce()
+    result = await hass.async_add_executor_job(
+        port.request,
+        _valve_command("valve.utility_main", sequence=1),
+    )
+
+    assert port.quiescent is True
+    assert result.outcome is WaterOutputOutcome.FAILED
+    assert result.failure_code == "water_safety_host_quiescent"
+    assert calls == []
