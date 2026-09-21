@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from unittest.mock import AsyncMock
 
 import pytest
@@ -13,6 +14,11 @@ from controlel.application.configuration.water_safety_setup_adapter import (
     DEFAULT_NOTIFICATION_ROLE,
     WATER_SAFETY_SENSOR_ROLE,
 )
+from controlel.application.runtime.heat_demand_evaluation_result import (
+    HeatDemandEvaluationResult,
+    HeatDemandEvaluationTrigger,
+)
+from controlel.application.water_safety import WaterOutputOutcome
 from controlel.domain.water_safety import WaterSafetyState
 from controlel.infrastructure.home_assistant import active_reference_for_module
 from custom_components.controlel import config_flow as cf
@@ -21,7 +27,10 @@ from custom_components.controlel import water_safety_host as water_host_module
 from custom_components.controlel.diagnostics import async_get_config_entry_diagnostics
 from custom_components.controlel.event_loop_bridge import HomeAssistantEventLoopBridge
 from custom_components.controlel.lifecycle_diagnostics import lifecycle_failures_for_entry
-from custom_components.controlel.water_safety_lifecycle import water_safety_lifecycle_owner
+from custom_components.controlel.water_safety_lifecycle import (
+    WATER_SAFETY_LIFECYCLE_OWNERS_KEY,
+    water_safety_lifecycle_owner,
+)
 
 from .test_config_flow import (
     _activate_new_heating,
@@ -35,13 +44,24 @@ from .test_config_flow import (
     _register_water_candidates,
     _water_drafts,
 )
-from .test_water_safety_release_blockers import SENSOR, _active_entry
+from .test_water_safety_output import _notification_command, _spy_output_port_ha_dispatch
+from .test_water_safety_release_blockers import SENSOR, _active_entry, _host
 
 
 async def _reload_loaded(hass, entry) -> None:
     assert await hass.config_entries.async_reload(entry.entry_id)
     await hass.async_block_till_done()
     assert entry.state is config_entries.ConfigEntryState.LOADED
+
+
+def _spy_ha_service_dispatch(port) -> list[tuple[str, str]]:
+    return _spy_output_port_ha_dispatch(port)
+
+
+def _frontend_water_module(hass, entry):
+    registry = hass.data["controlel_frontend_api_v1_registry"]
+    overview = registry.get(entry.entry_id).overview()
+    return next(module for module in overview.modules if module.module_id == "water_safety")
 
 
 async def _activate_heating_and_water_with_notification(hass, *, title: str, notify_name: str, platform: str):
@@ -536,8 +556,6 @@ async def test_ha_lifecycle_retains_quiescent_cleanup_without_failed_unload_and_
         await original_close()
 
     monkeypatch.setattr(water_host._executor, "async_close", held_close)
-    output_request = AsyncMock(wraps=water_host._output_port.request)
-    monkeypatch.setattr(water_host._output_port, "request", output_request)
 
     original_build = activation.build_water_safety_host
     created_after_pending = 0
@@ -548,6 +566,7 @@ async def test_ha_lifecycle_retains_quiescent_cleanup_without_failed_unload_and_
         return original_build(*args, **kwargs)
 
     monkeypatch.setattr(activation, "build_water_safety_host", count_builds)
+    dispatched = _spy_ha_service_dispatch(water_host._output_port)
 
     assert await hass.config_entries.async_unload(entry.entry_id)
     await close_started.wait()
@@ -571,11 +590,21 @@ async def test_ha_lifecycle_retains_quiescent_cleanup_without_failed_unload_and_
         await water_host.async_frontend_api_water_safety_action("silence")
     scheduled_callbacks: list[str] = []
     water_host.submit_scheduled_callback(lambda: scheduled_callbacks.append("ran"))
-    output_count = output_request.await_count
+    dispatch_count = len(dispatched)
     hass.states.async_set(water_host._mapper.entity_id, "on")
     await hass.async_block_till_done()
     assert scheduled_callbacks == []
-    assert output_request.await_count == output_count
+    assert len(dispatched) == dispatch_count
+    hass.states.async_set(water_host._mapper.entity_id, "off")
+    await hass.async_block_till_done()
+    old_dispatch_count = len(dispatched)
+    old_port_result = await hass.async_add_executor_job(
+        water_host._output_port.request,
+        _notification_command(),
+    )
+    assert old_port_result.outcome is WaterOutputOutcome.FAILED
+    assert old_port_result.failure_code == "water_safety_host_quiescent"
+    assert len(dispatched) == old_dispatch_count
 
     assert await hass.config_entries.async_reload(entry.entry_id)
     await hass.async_block_till_done()
@@ -590,6 +619,19 @@ async def test_ha_lifecycle_retains_quiescent_cleanup_without_failed_unload_and_
     assert pending_heating_host is not None
     assert pending_heating_host is not heating_host
     assert pending_heating_host.accepting is True
+    heating_result = await pending_heating_host.async_reevaluate()
+    assert isinstance(heating_result, HeatDemandEvaluationResult)
+    assert heating_result.trigger is HeatDemandEvaluationTrigger.MANUAL
+    assert heating_result.building_heat_demand is not None
+    pending_water_module = _frontend_water_module(hass, entry)
+    assert pending_water_module.status == "error"
+    assert pending_water_module.reason == "water_safety_startup_failed"
+    pending_readiness = (await async_get_config_entry_diagnostics(hass, entry))["configuration_readiness"][
+        "water_safety"
+    ]
+    assert pending_readiness["runtime_loaded"] is False
+    assert "prior host remains lifecycle-owned" in pending_readiness["startup_failure"]
+    old_output_port = water_host._output_port
 
     cleanup_task = water_host._cleanup_tasks["runtime executor close"]
     close_can_finish.set()
@@ -600,11 +642,35 @@ async def test_ha_lifecycle_retains_quiescent_cleanup_without_failed_unload_and_
     assert created_after_pending == 1
     assert owner.pending_cleanup_hosts == ()
     assert owner.active_host is entry.runtime_data.water_safety_host
-    assert entry.runtime_data.water_safety_host is not water_host
+    replacement = entry.runtime_data.water_safety_host
+    assert replacement is not water_host
+    assert replacement._output_port is not old_output_port
+    assert old_output_port.quiescent is True
+    assert replacement._output_port.quiescent is False
     assert water_host.stopped is True
     assert pending_heating_host.stopped is True
     assert entry.runtime_data.host is not None
     assert entry.runtime_data.host.accepting is True
+    recovered_water_module = _frontend_water_module(hass, entry)
+    assert recovered_water_module.status == "active"
+    assert recovered_water_module.reason is None
+    recovered_readiness = (await async_get_config_entry_diagnostics(hass, entry))["configuration_readiness"][
+        "water_safety"
+    ]
+    assert recovered_readiness["runtime_loaded"] is True
+    assert recovered_readiness["startup_failure"] is None
+    recovered_water = hass.data["controlel_frontend_api_v1_registry"].get(entry.entry_id).water_safety()
+    assert recovered_water.processing_enabled is True
+    assert recovered_water.state == WaterSafetyState.OK.value
+    replacement_dispatch = _spy_ha_service_dispatch(replacement._output_port)
+    issued = await replacement.test_notification()
+    assert issued.output_results[0].outcome is WaterOutputOutcome.ACCEPTED
+    assert any(item[0] == "notify" for item in replacement_dispatch)
+    retained_dispatch = len(dispatched)
+    retained = await hass.async_add_executor_job(old_output_port.request, _notification_command())
+    assert retained.outcome is WaterOutputOutcome.FAILED
+    assert retained.failure_code == "water_safety_host_quiescent"
+    assert len(dispatched) == retained_dispatch
 
 
 @pytest.mark.asyncio
@@ -717,3 +783,177 @@ async def test_water_only_missing_required_binding_reloads_and_unloads_without_r
     assert entry.runtime_data.host is None
     assert entry.runtime_data.water_safety_host is None
     assert WATER_SAFETY_SENSOR_ROLE in entry.runtime_data.water_safety_startup_failure
+
+
+@pytest.mark.asyncio
+async def test_ha_dispatch_crossing_unload_does_not_actuate(hass, monkeypatch) -> None:
+    hass.states.async_set(SENSOR, "off")
+    hass.services.async_register("notify", "mobile_app_phone", lambda call: None)
+    host = _host(hass)
+    await host.async_initialize()
+    dispatched = _spy_ha_service_dispatch(host._output_port)
+    admitted = asyncio.Event()
+    resume = asyncio.Event()
+    retired = asyncio.Event()
+    original_dispatch = host._output_port._async_dispatch_ha_service
+    original_quiesce = host._output_port.quiesce
+
+    async def pause_then_dispatch(*args, **kwargs):
+        admitted.set()
+        await resume.wait()
+        return await original_dispatch(*args, **kwargs)
+
+    def quiesce_and_signal() -> None:
+        original_quiesce()
+        retired.set()
+
+    monkeypatch.setattr(host._output_port, "_async_dispatch_ha_service", pause_then_dispatch)
+    monkeypatch.setattr(host._output_port, "quiesce", quiesce_and_signal)
+    notifying = hass.async_create_task(host.test_notification(), "Water dispatch-crossing-unload request")
+    stopping = None
+    result = None
+    try:
+        async with asyncio.timeout(1):
+            await admitted.wait()
+            stopping = hass.async_create_task(host.async_stop(), "Water dispatch-crossing-unload stop")
+            await retired.wait()
+            resume.set()
+            result = await notifying
+            await stopping
+    finally:
+        resume.set()
+        if stopping is not None:
+            await stopping
+        elif not host.stopped:
+            await host.async_stop()
+
+    assert result.output_results[0].outcome is WaterOutputOutcome.FAILED
+    assert result.output_results[0].failure_code == "water_safety_host_quiescent"
+    assert dispatched == []
+    assert host._output_port.quiescent is True
+
+
+@pytest.mark.asyncio
+async def test_queued_logical_action_after_retirement_does_not_mutate(hass, monkeypatch) -> None:
+    hass.states.async_set(SENSOR, "off")
+    host = _host(hass)
+    await host.async_initialize()
+    dispatched = _spy_ha_service_dispatch(host._output_port)
+    occupy_started = threading.Event()
+    occupy_release = threading.Event()
+    logical_admitted = asyncio.Event()
+    retired = asyncio.Event()
+    cleanup_ran = asyncio.Event()
+    silence_calls: list[str] = []
+    original_silence = host._runtime.silence
+    original_cancel_all = host._scheduler.cancel_all
+    original_quiesce = host._output_port.quiesce
+    original_submit = host._async_submit_runtime
+
+    def occupy() -> None:
+        occupy_started.set()
+        occupy_release.wait()
+
+    def tracked_silence(*args, **kwargs):
+        silence_calls.append("silence")
+        return original_silence(*args, **kwargs)
+
+    def tracked_cancel_all() -> None:
+        try:
+            original_cancel_all()
+        finally:
+            hass.loop.call_soon_threadsafe(cleanup_ran.set)
+
+    def quiesce_and_signal() -> None:
+        original_quiesce()
+        retired.set()
+
+    async def submit_and_signal(operation, *args):
+        if operation is not occupy:
+            logical_admitted.set()
+        return await original_submit(operation, *args)
+
+    monkeypatch.setattr(host._runtime, "silence", tracked_silence)
+    monkeypatch.setattr(host._scheduler, "cancel_all", tracked_cancel_all)
+    monkeypatch.setattr(host._output_port, "quiesce", quiesce_and_signal)
+    occupy_task = hass.async_create_task(host._async_submit_runtime(occupy), "Water occupy executor")
+    stopping = None
+    silence_task = None
+    try:
+        await hass.async_add_executor_job(occupy_started.wait)
+        monkeypatch.setattr(host, "_async_submit_runtime", submit_and_signal)
+        silence_task = hass.async_create_task(host.silence(), "Water queued logical silence")
+        await logical_admitted.wait()
+        stopping = hass.async_create_task(host.async_stop(), "Water retire queued logical work")
+        await retired.wait()
+        occupy_release.set()
+        async with asyncio.timeout(1):
+            with pytest.raises(RuntimeError, match="quiescent"):
+                await silence_task
+            await cleanup_ran.wait()
+            await stopping
+            await occupy_task
+    finally:
+        occupy_release.set()
+        if silence_task is not None and not silence_task.done():
+            silence_task.cancel()
+        if stopping is not None:
+            await stopping
+        elif not host.stopped:
+            await host.async_stop()
+        if not occupy_task.done():
+            await occupy_task
+
+    assert silence_calls == []
+    assert dispatched == []
+    assert host._scheduler.released is True
+    assert host._executor.closed is True
+    assert host.stopped is True
+
+
+@pytest.mark.asyncio
+async def test_permanent_remove_entry_completes_pending_water_cleanup(hass, monkeypatch) -> None:
+    monkeypatch.setattr(water_host_module, "RESOURCE_CLEANUP_TIMEOUT_SECONDS", 0.01)
+    entry, _moisture, _phone = await _activate_heating_and_water_with_notification(
+        hass,
+        title="Water permanent removal cleanup",
+        notify_name="permanent_remove_cleanup",
+        platform="permanent-remove-cleanup",
+    )
+    water_host = entry.runtime_data.water_safety_host
+    owner = water_safety_lifecycle_owner(hass, entry.entry_id)
+    entry_id = entry.entry_id
+    close_started = asyncio.Event()
+    close_can_finish = asyncio.Event()
+    original_close = water_host._executor.async_close
+
+    async def held_close() -> None:
+        close_started.set()
+        await close_can_finish.wait()
+        await original_close()
+
+    monkeypatch.setattr(water_host._executor, "async_close", held_close)
+    await hass.config_entries.async_remove(entry.entry_id)
+    await close_started.wait()
+    assert hass.config_entries.async_get_entry(entry_id) is None
+    owners = hass.data.get(WATER_SAFETY_LIFECYCLE_OWNERS_KEY)
+    assert owners is not None
+    assert owners.get(entry_id) is owner
+    assert owner.pending_cleanup_hosts == (water_host,)
+    completion = owner.completion_task
+    assert completion is not None
+    assert completion.done() is False
+    assert water_host.stopped is False
+    assert water_host._executor.closed is False
+
+    close_can_finish.set()
+    async with asyncio.timeout(1):
+        await completion
+    assert completion.cancelled() is False
+    assert completion.result() is None
+    assert owner.completion_task is None
+    assert water_host.stopped is True
+    assert water_host._executor.closed is True
+    remaining_owners = hass.data.get(WATER_SAFETY_LIFECYCLE_OWNERS_KEY)
+    assert remaining_owners in (None, {})
+    assert entry_id not in (remaining_owners or {})

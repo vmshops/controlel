@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 
 import pytest
@@ -21,6 +22,32 @@ from custom_components.controlel.water_safety_output import HomeAssistantWaterSa
 
 NOW = datetime(2026, 8, 31, 12, 0, tzinfo=UTC)
 OWNER = WaterOutputOwner(environment_id="home", module_key="water_safety", module_instance_id="utility-water")
+
+
+def _spy_output_port_ha_dispatch(port) -> list[tuple[str, str]]:
+    dispatched: list[tuple[str, str]] = []
+
+    class _ServiceDispatchSpy:
+        def __init__(self, services) -> None:
+            self._services = services
+
+        async def async_call(self, domain, service, *args, **kwargs):
+            dispatched.append((domain, service))
+            return await self._services.async_call(domain, service, *args, **kwargs)
+
+        def __getattr__(self, name):
+            return getattr(self._services, name)
+
+    class _HassDispatchSpy:
+        def __init__(self, hass) -> None:
+            self._hass = hass
+            self.services = _ServiceDispatchSpy(hass.services)
+
+        def __getattr__(self, name):
+            return getattr(self._hass, name)
+
+    port._hass = _HassDispatchSpy(port._hass)
+    return dispatched
 
 
 def _reference(entity_id: str) -> ProviderReference:
@@ -205,3 +232,48 @@ async def test_quiescent_output_port_rejects_new_actuation_without_calling_ha(ha
     assert result.outcome is WaterOutputOutcome.FAILED
     assert result.failure_code == "water_safety_host_quiescent"
     assert calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["notification", "siren", "valve"])
+async def test_admitted_ha_dispatch_is_revoked_when_output_is_retired(hass, monkeypatch, kind) -> None:
+    recorded: list[tuple[str, str]] = []
+
+    async def record(call) -> None:
+        recorded.append((call.domain, call.service))
+
+    if kind == "notification":
+        hass.services.async_register("notify", "phone", record)
+        command = _notification_command()
+    elif kind == "siren":
+        hass.services.async_register("siren", "turn_on", record)
+        hass.states.async_set("siren.hall", "off")
+        command = _siren_command("siren.hall", WaterOutputAction.REQUEST_SIREN_ON, sequence=1)
+    else:
+        hass.services.async_register("valve", "close_valve", record)
+        hass.states.async_set("valve.utility_main", "open")
+        command = _valve_command("valve.utility_main", sequence=1)
+
+    port = HomeAssistantWaterSafetyOutputPort(hass, HomeAssistantEventLoopBridge(hass.loop))
+    dispatched = _spy_output_port_ha_dispatch(port)
+    admitted = asyncio.Event()
+    resume = asyncio.Event()
+    original_dispatch = port._async_dispatch_ha_service
+
+    async def pause_then_dispatch(*args, **kwargs):
+        admitted.set()
+        await resume.wait()
+        return await original_dispatch(*args, **kwargs)
+
+    monkeypatch.setattr(port, "_async_dispatch_ha_service", pause_then_dispatch)
+    job = hass.async_add_executor_job(port.request, command)
+    await admitted.wait()
+    port.quiesce()
+    resume.set()
+    result = await job
+
+    assert port.quiescent is True
+    assert result.outcome is WaterOutputOutcome.FAILED
+    assert result.failure_code == "water_safety_host_quiescent"
+    assert dispatched == []
+    assert recorded == []

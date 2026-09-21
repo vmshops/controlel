@@ -46,6 +46,13 @@ CALLBACK_TASK_TERMINATION_TIMEOUT_SECONDS = 1.0
 RESOURCE_CLEANUP_TIMEOUT_SECONDS = 1.0
 
 
+class WaterSafetyHostRetiredError(RuntimeError):
+    """Logical Water work was invalidated because the host is quiescent."""
+
+    def __init__(self) -> None:
+        super().__init__("Water Safety is quiescent and cannot accept new actions")
+
+
 class HomeAssistantTaskOwner(Protocol):
     def async_create_task(
         self,
@@ -96,6 +103,7 @@ class HomeAssistantWaterSafetyHost:
         self._callback_tasks: set[asyncio.Task[Any]] = set()
         self._cleanup_tasks: dict[str, asyncio.Task[BaseException | None]] = {}
         self._accepting = True
+        self._logical_generation = 0
         self._initialized = False
         self._startup_observations: deque[MoistureObservation] | None = None
         self._stopping = False
@@ -164,7 +172,7 @@ class HomeAssistantWaterSafetyHost:
                 self._startup_observations = None
                 self._initialized = True
             except BaseException:
-                self._accepting = False
+                self._retire_logical_admission()
                 self._startup_observations = None
                 unsubscribe = self._unsubscribe
                 if unsubscribe is not None:
@@ -181,7 +189,7 @@ class HomeAssistantWaterSafetyHost:
         # Close every logical entry point synchronously with the stop request.
         # Physical resource cleanup remains bounded and may finish on a later retry.
         self._output_port.quiesce()
-        self._accepting = False
+        self._retire_logical_admission()
         cleanup_task = asyncio.create_task(self._async_stop_owned_resources())
         cancellation: asyncio.CancelledError | None = None
         while not cleanup_task.done():
@@ -201,7 +209,7 @@ class HomeAssistantWaterSafetyHost:
         async with self._lifecycle_lock:
             if self._stopped:
                 return None
-            self._accepting = False
+            self._retire_logical_admission()
             self._stopping = True
             cancellation: asyncio.CancelledError | None = None
 
@@ -302,6 +310,11 @@ class HomeAssistantWaterSafetyHost:
             else:
                 self._logger.warning("Water Safety runtime cleanup remains incomplete; a later stop may retry")
             return cancellation
+
+    def incomplete_owned_tasks(self) -> tuple[asyncio.Task[Any], ...]:
+        """Return in-flight callback and cleanup tasks still owned by this host."""
+
+        return tuple(task for task in (*self._cleanup_tasks.values(), *self._callback_tasks) if not task.done())
 
     async def _async_supervise_cleanup(
         self,
@@ -404,7 +417,7 @@ class HomeAssistantWaterSafetyHost:
             custom_message=None,
             repeated=False,
         )
-        result = await self._async_submit_runtime(self._output_port.request, command)
+        result = await self._async_submit_logical(self._output_port.request, command)
         return WaterSafetyProcessingResult(
             previous_state=self._runtime.state,
             state=self._runtime.state,
@@ -427,7 +440,7 @@ class HomeAssistantWaterSafetyHost:
             target_role=role,
             target=self._bindings[role],
         )
-        result = await self._async_submit_runtime(self._output_port.request, command)
+        result = await self._async_submit_logical(self._output_port.request, command)
         return WaterSafetyProcessingResult(
             previous_state=self._runtime.state,
             state=self._runtime.state,
@@ -486,8 +499,12 @@ class HomeAssistantWaterSafetyHost:
         if not self._accepting:
             return
         observation = self._observation_for_state(state)
-        if observation is not None:
+        if observation is None:
+            return
+        try:
             await self._process(partial(self._runtime.observe, observation))
+        except WaterSafetyHostRetiredError:
+            return
 
     def _observation_for_state(self, state: StateLike | None) -> MoistureObservation | None:
         mapping = self._mapper.map_state(state)
@@ -504,21 +521,43 @@ class HomeAssistantWaterSafetyHost:
         if not self._accepting:
             return
         try:
-            await self._async_submit_runtime(callback)
+            await self._async_submit_logical(callback)
+        except WaterSafetyHostRetiredError:
+            return
         except RuntimeExecutorClosedError:
             if not self._stopping and not self._stopped:
                 raise
 
     async def _process(self, operation: Callable[[], WaterSafetyProcessingResult]) -> WaterSafetyProcessingResult:
         self._require_accepting()
-        result = await self._async_submit_runtime(operation)
+        result = await self._async_submit_logical(operation)
         self._refresh_diagnostics()
         if self._accepting:
-            await self._async_submit_runtime(self._reschedule_deadline)
+            try:
+                await self._async_submit_logical(self._reschedule_deadline)
+            except WaterSafetyHostRetiredError:
+                return result
         return result
 
     async def _async_submit_runtime(self, operation: Callable[..., Any], *args: object) -> Any:
         return await self._executor.async_submit(operation, *args)
+
+    async def _async_submit_logical(self, operation: Callable[..., Any], *args: object) -> Any:
+        generation = self._logical_generation
+
+        def execute_if_admitted(*operation_args: object) -> Any:
+            if not self._accepting or generation != self._logical_generation:
+                raise WaterSafetyHostRetiredError()
+            return operation(*operation_args)
+
+        execute_if_admitted.__name__ = getattr(operation, "__name__", execute_if_admitted.__name__)
+        execute_if_admitted.__qualname__ = getattr(operation, "__qualname__", execute_if_admitted.__qualname__)
+        return await self._async_submit_runtime(execute_if_admitted, *args)
+
+    def _retire_logical_admission(self) -> None:
+        if self._accepting:
+            self._logical_generation += 1
+        self._accepting = False
 
     def _reschedule_deadline(self) -> None:
         self._cancel_deadline()
@@ -548,7 +587,10 @@ class HomeAssistantWaterSafetyHost:
                 return
 
             async def async_tick() -> None:
-                await self._process(lambda: self._runtime.tick(datetime.now(UTC)))
+                try:
+                    await self._process(lambda: self._runtime.tick(datetime.now(UTC)))
+                except WaterSafetyHostRetiredError:
+                    return
 
             task = self._hass.async_create_task(async_tick(), "Controlel Water Safety deadline tick")
             self._callback_tasks.add(task)
@@ -572,7 +614,7 @@ class HomeAssistantWaterSafetyHost:
 
     def _require_accepting(self) -> None:
         if not self._accepting:
-            raise RuntimeError("Water Safety is quiescent and cannot accept new actions")
+            raise WaterSafetyHostRetiredError()
 
     def _require_observation(self, state: StateLike | None):
         mapping = self._mapper.map_state(state)

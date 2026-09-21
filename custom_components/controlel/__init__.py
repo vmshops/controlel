@@ -599,8 +599,13 @@ async def async_remove_entry(
     hass: HomeAssistant,
     entry: ControlelConfigEntry,
 ) -> None:
-    """Remove Repairs issues that belong to a deleted config entry."""
+    """Remove Repairs issues and complete any retained Water Safety cleanup."""
     clear_entry_issues(hass, entry.entry_id)
+    if not water_safety_core_available():
+        return
+    from .water_safety_lifecycle import async_complete_removed_entry_cleanup
+
+    await async_complete_removed_entry_cleanup(hass, entry.entry_id)
 
 
 async def async_get_setup_service(
