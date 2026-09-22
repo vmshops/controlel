@@ -24,6 +24,7 @@ from controlel.infrastructure.home_assistant import active_reference_for_module
 from custom_components.controlel import config_flow as cf
 from custom_components.controlel import water_safety_activation as activation
 from custom_components.controlel import water_safety_host as water_host_module
+from custom_components.controlel import water_safety_lifecycle as water_lifecycle_module
 from custom_components.controlel.diagnostics import async_get_config_entry_diagnostics
 from custom_components.controlel.event_loop_bridge import HomeAssistantEventLoopBridge
 from custom_components.controlel.lifecycle_diagnostics import lifecycle_failures_for_entry
@@ -94,6 +95,53 @@ async def _activate_heating_and_water_with_notification(hass, *, title: str, not
     assert active_reference_for_module(entry.data, "heating") is not None
     assert active_reference_for_module(entry.data, "heating").canonical_revision_id == heating.canonical_revision_id
     return entry, moisture, phone
+
+
+def _gate_removed_entry_retry_sleep(monkeypatch):
+    started = asyncio.Event()
+    allowed = asyncio.Event()
+
+    async def gated_delay() -> None:
+        started.set()
+        await allowed.wait()
+
+    monkeypatch.setattr(water_lifecycle_module, "_async_removed_entry_retry_delay", gated_delay)
+    return started, allowed
+
+
+def _assert_live_removed_entry_continuation(hass, entry_id, owner) -> None:
+    assert owner.released is False
+    assert owner.pending_cleanup_hosts or owner.active_host is not None
+    owners = hass.data.get(WATER_SAFETY_LIFECYCLE_OWNERS_KEY)
+    assert owners is not None
+    assert owners.get(entry_id) is owner
+    completion = owner.completion_task
+    assert completion is not None
+    assert completion.done() is False
+
+
+def _assert_removed_entry_fully_released(hass, entry_id, owner, host, completion) -> None:
+    assert host.stopped is True
+    assert owner.released is True
+    assert owner.pending_cleanup_hosts == ()
+    assert owner.active_host is None
+    assert owner.completion_task is None
+    assert completion.done() is True
+    assert completion.cancelled() is False
+    assert completion.result() is None
+    remaining_owners = hass.data.get(WATER_SAFETY_LIFECYCLE_OWNERS_KEY)
+    assert remaining_owners in (None, {})
+    assert entry_id not in (remaining_owners or {})
+
+
+async def _wait_until(predicate, *, timeout: float = 1.0) -> None:
+    async with asyncio.timeout(timeout):
+        while not predicate():
+            await asyncio.sleep(0)
+
+
+def _caplog_contains(caplog, text: str) -> bool:
+    return any(text in rec.getMessage() for rec in caplog.records)
 
 
 @pytest.mark.asyncio
@@ -933,27 +981,290 @@ async def test_permanent_remove_entry_completes_pending_water_cleanup(hass, monk
         await original_close()
 
     monkeypatch.setattr(water_host._executor, "async_close", held_close)
-    await hass.config_entries.async_remove(entry.entry_id)
-    await close_started.wait()
-    assert hass.config_entries.async_get_entry(entry_id) is None
-    owners = hass.data.get(WATER_SAFETY_LIFECYCLE_OWNERS_KEY)
-    assert owners is not None
-    assert owners.get(entry_id) is owner
-    assert owner.pending_cleanup_hosts == (water_host,)
-    completion = owner.completion_task
-    assert completion is not None
-    assert completion.done() is False
-    assert water_host.stopped is False
-    assert water_host._executor.closed is False
+    try:
+        await hass.config_entries.async_remove(entry.entry_id)
+        await close_started.wait()
+        assert hass.config_entries.async_get_entry(entry_id) is None
+        _assert_live_removed_entry_continuation(hass, entry_id, owner)
+        assert owner.pending_cleanup_hosts == (water_host,)
+        completion = owner.completion_task
+        assert water_host.stopped is False
+        assert water_host._executor.closed is False
 
-    close_can_finish.set()
-    async with asyncio.timeout(1):
-        await completion
-    assert completion.cancelled() is False
-    assert completion.result() is None
-    assert owner.completion_task is None
-    assert water_host.stopped is True
-    assert water_host._executor.closed is True
-    remaining_owners = hass.data.get(WATER_SAFETY_LIFECYCLE_OWNERS_KEY)
-    assert remaining_owners in (None, {})
-    assert entry_id not in (remaining_owners or {})
+        close_can_finish.set()
+        async with asyncio.timeout(1):
+            await completion
+        _assert_removed_entry_fully_released(hass, entry_id, owner, water_host, completion)
+        assert water_host._executor.closed is True
+    finally:
+        close_can_finish.set()
+
+
+@pytest.mark.asyncio
+async def test_permanent_remove_child_cleanup_cancellation_keeps_supervisor_alive(
+    hass,
+    monkeypatch,
+    caplog,
+) -> None:
+    monkeypatch.setattr(water_host_module, "RESOURCE_CLEANUP_TIMEOUT_SECONDS", 0.01)
+    monkeypatch.setattr(water_lifecycle_module, "REMOVED_ENTRY_CLEANUP_RETRY_DELAY_SECONDS", 0.01)
+    entry, _moisture, _phone = await _activate_heating_and_water_with_notification(
+        hass,
+        title="Water child cleanup cancellation",
+        notify_name="child_cleanup_cancel",
+        platform="child-cleanup-cancel",
+    )
+    water_host = entry.runtime_data.water_safety_host
+    owner = water_safety_lifecycle_owner(hass, entry.entry_id)
+    entry_id = entry.entry_id
+    original_close = water_host._executor.async_close
+    first_close_started = asyncio.Event()
+    allow_retry_close = asyncio.Event()
+    close_attempts = 0
+
+    async def first_close_waits_for_child_cancel() -> None:
+        nonlocal close_attempts
+        close_attempts += 1
+        if close_attempts == 1:
+            first_close_started.set()
+            await asyncio.Event().wait()
+        await allow_retry_close.wait()
+        await original_close()
+
+    monkeypatch.setattr(water_host._executor, "async_close", first_close_waits_for_child_cancel)
+    try:
+        await hass.config_entries.async_remove(entry.entry_id)
+        await first_close_started.wait()
+        completion = owner.completion_task
+        assert hass.config_entries.async_get_entry(entry_id) is None
+        _assert_live_removed_entry_continuation(hass, entry_id, owner)
+        assert completion is owner.completion_task
+        child_cleanup = water_host._cleanup_tasks["runtime executor close"]
+        assert child_cleanup.done() is False
+        assert water_host.stopped is False
+        assert water_host._executor.closed is False
+
+        child_cleanup.cancel("child executor close cancelled")
+        async with asyncio.timeout(1):
+            await asyncio.wait({child_cleanup})
+        assert child_cleanup.cancelled() or child_cleanup.result() is not None
+        _assert_live_removed_entry_continuation(hass, entry_id, owner)
+        assert water_host.stopped is False
+        assert water_host._executor.closed is False
+        assert "runtime executor close" in caplog.text
+        assert "child executor close cancelled" in caplog.text
+        assert "cancelled before host release" not in caplog.text
+        assert "Task exception was never retrieved" not in caplog.text
+
+        allow_retry_close.set()
+        async with asyncio.timeout(1):
+            await completion
+        _assert_removed_entry_fully_released(hass, entry_id, owner, water_host, completion)
+        assert close_attempts >= 2
+        assert water_host._executor.closed is True
+        assert "cancelled before host release" not in caplog.text
+        assert "Task exception was never retrieved" not in caplog.text
+    finally:
+        allow_retry_close.set()
+
+
+@pytest.mark.asyncio
+async def test_permanent_remove_child_cancellation_blocks_dependent_executor_close(
+    hass,
+    monkeypatch,
+    caplog,
+) -> None:
+    monkeypatch.setattr(water_host_module, "RESOURCE_CLEANUP_TIMEOUT_SECONDS", 0.01)
+    monkeypatch.setattr(water_lifecycle_module, "REMOVED_ENTRY_CLEANUP_RETRY_DELAY_SECONDS", 0.01)
+    entry, _moisture, _phone = await _activate_heating_and_water_with_notification(
+        hass,
+        title="Water child cancellation dependency",
+        notify_name="child_cancel_dependency",
+        platform="child-cancel-dependency",
+    )
+    water_host = entry.runtime_data.water_safety_host
+    owner = water_safety_lifecycle_owner(hass, entry.entry_id)
+    entry_id = entry.entry_id
+    original_run = water_host._async_run_cleanup_operation
+    original_close = water_host._executor.async_close
+    first_scheduler_started = asyncio.Event()
+    allow_scheduler_retry = asyncio.Event()
+    scheduler_attempts = 0
+    executor_close_attempts = 0
+
+    async def run_scheduler_until_child_cancelled(step: str, operation):
+        nonlocal scheduler_attempts
+        if step == "scheduler cancel_all":
+            scheduler_attempts += 1
+            if scheduler_attempts == 1:
+                first_scheduler_started.set()
+                await asyncio.Event().wait()
+            await allow_scheduler_retry.wait()
+        return await original_run(step, operation)
+
+    async def tracked_close() -> None:
+        nonlocal executor_close_attempts
+        executor_close_attempts += 1
+        await original_close()
+
+    monkeypatch.setattr(water_host, "_async_run_cleanup_operation", run_scheduler_until_child_cancelled)
+    monkeypatch.setattr(water_host._executor, "async_close", tracked_close)
+    try:
+        await hass.config_entries.async_remove(entry.entry_id)
+        await first_scheduler_started.wait()
+        completion = owner.completion_task
+        assert hass.config_entries.async_get_entry(entry_id) is None
+        _assert_live_removed_entry_continuation(hass, entry_id, owner)
+        child_cleanup = water_host._cleanup_tasks["scheduler cancel_all"]
+        assert child_cleanup.done() is False
+        assert water_host.stopped is False
+        assert water_host._scheduler.released is False
+        assert water_host._executor.closed is False
+        assert executor_close_attempts == 0
+
+        child_cleanup.cancel("child scheduler cancel_all cancelled")
+        async with asyncio.timeout(1):
+            await asyncio.wait({child_cleanup})
+        _assert_live_removed_entry_continuation(hass, entry_id, owner)
+        assert water_host.stopped is False
+        assert water_host._scheduler.released is False
+        assert water_host._executor.closed is False
+        assert executor_close_attempts == 0
+        assert "scheduler cancel_all" in caplog.text
+        assert "child scheduler cancel_all cancelled" in caplog.text
+        assert "cancelled before host release" not in caplog.text
+
+        allow_scheduler_retry.set()
+        async with asyncio.timeout(1):
+            await completion
+        _assert_removed_entry_fully_released(hass, entry_id, owner, water_host, completion)
+        assert water_host._scheduler.released is True
+        assert executor_close_attempts >= 1
+        assert water_host._executor.closed is True
+        assert scheduler_attempts >= 2
+    finally:
+        allow_scheduler_retry.set()
+
+
+@pytest.mark.asyncio
+async def test_permanent_remove_supervisor_cancellation_is_not_child_retry(
+    hass,
+    monkeypatch,
+    caplog,
+) -> None:
+    monkeypatch.setattr(water_host_module, "RESOURCE_CLEANUP_TIMEOUT_SECONDS", 0.01)
+    entry, _moisture, _phone = await _activate_heating_and_water_with_notification(
+        hass,
+        title="Water supervisor cancellation",
+        notify_name="supervisor_cancel",
+        platform="supervisor-cancel",
+    )
+    water_host = entry.runtime_data.water_safety_host
+    owner = water_safety_lifecycle_owner(hass, entry.entry_id)
+    entry_id = entry.entry_id
+    close_started = asyncio.Event()
+    close_can_finish = asyncio.Event()
+    original_close = water_host._executor.async_close
+
+    async def held_close() -> None:
+        close_started.set()
+        await close_can_finish.wait()
+        await original_close()
+
+    monkeypatch.setattr(water_host._executor, "async_close", held_close)
+    try:
+        await hass.config_entries.async_remove(entry.entry_id)
+        await close_started.wait()
+        await _wait_until(
+            lambda: (
+                owner.completion_task is not None
+                and owner.completion_task.done() is False
+                and bool(water_host.incomplete_owned_tasks())
+                and bool(owner.completion_task.get_stack())
+            )
+        )
+        completion = owner.completion_task
+        _assert_live_removed_entry_continuation(hass, entry_id, owner)
+        assert hass.config_entries.async_get_entry(entry_id) is None
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        completion.cancel("true supervisor cancellation")
+        async with asyncio.timeout(1):
+            try:
+                await completion
+            except asyncio.CancelledError:
+                pass
+        assert completion.cancelled() is True
+        assert owner.completion_task is completion
+        assert owner.released is False
+        assert owner.pending_cleanup_hosts == (water_host,)
+        assert water_host.stopped is False
+        owners = hass.data.get(WATER_SAFETY_LIFECYCLE_OWNERS_KEY)
+        assert owners is not None
+        assert owners.get(entry_id) is owner
+        lifecycle_messages = [rec.getMessage() for rec in caplog.records if "water_safety_lifecycle" in rec.name]
+        assert any("cancelled before host release" in message for message in lifecycle_messages), lifecycle_messages
+        assert not _caplog_contains(caplog, "Task exception was never retrieved")
+        await asyncio.sleep(0)
+        assert owner.completion_task is completion
+        assert owner.completion_task.cancelled() is True
+        replacement = owner.ensure_removed_entry_completion(hass, entry_id)
+        assert replacement is completion
+    finally:
+        close_can_finish.set()
+
+
+@pytest.mark.asyncio
+async def test_permanent_remove_retries_when_cleanup_leaves_no_owned_tasks(
+    hass,
+    monkeypatch,
+    caplog,
+) -> None:
+    retry_started, retry_allowed = _gate_removed_entry_retry_sleep(monkeypatch)
+    entry, _moisture, _phone = await _activate_heating_and_water_with_notification(
+        hass,
+        title="Water no-owned-task retry",
+        notify_name="no_owned_task_retry",
+        platform="no-owned-task-retry",
+    )
+    water_host = entry.runtime_data.water_safety_host
+    owner = water_safety_lifecycle_owner(hass, entry.entry_id)
+    entry_id = entry.entry_id
+    original_close = water_host._executor.async_close
+    allow_close_success = False
+    close_attempts = 0
+
+    async def fail_until_retry_delay() -> None:
+        nonlocal close_attempts
+        close_attempts += 1
+        if not allow_close_success:
+            raise RuntimeError("immediate close failure without owned waiters")
+        await original_close()
+
+    monkeypatch.setattr(water_host._executor, "async_close", fail_until_retry_delay)
+    try:
+        await hass.config_entries.async_remove(entry.entry_id)
+        async with asyncio.timeout(1):
+            await retry_started.wait()
+        completion = owner.completion_task
+        assert hass.config_entries.async_get_entry(entry_id) is None
+        _assert_live_removed_entry_continuation(hass, entry_id, owner)
+        assert water_host.stopped is False
+        assert water_host._executor.closed is False
+        assert water_host.incomplete_owned_tasks() == ()
+        assert close_attempts >= 2
+        assert "without owned waiters" in caplog.text
+        assert "immediate close failure without owned waiters" in caplog.text
+        first_retry_attempts = close_attempts
+
+        allow_close_success = True
+        retry_allowed.set()
+        async with asyncio.timeout(1):
+            await completion
+        _assert_removed_entry_fully_released(hass, entry_id, owner, water_host, completion)
+        assert close_attempts > first_retry_attempts
+        assert water_host._executor.closed is True
+        assert "Task exception was never retrieved" not in caplog.text
+    finally:
+        allow_close_success = True
+        retry_allowed.set()

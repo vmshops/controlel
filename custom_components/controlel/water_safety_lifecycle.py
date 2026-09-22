@@ -9,7 +9,23 @@ from typing import Any, Protocol
 from .const import DOMAIN
 
 WATER_SAFETY_LIFECYCLE_OWNERS_KEY = f"{DOMAIN}_water_safety_lifecycle_owners"
+REMOVED_ENTRY_CLEANUP_RETRY_DELAY_SECONDS = 1.0
 _LOGGER = logging.getLogger(__name__)
+
+
+def _current_task_is_being_cancelled() -> bool:
+    task = asyncio.current_task()
+    return task is not None and task.cancelling() > 0
+
+
+def _home_assistant_is_stopping(hass: Any) -> bool:
+    return bool(getattr(hass, "is_stopping", False))
+
+
+async def _async_removed_entry_retry_delay() -> None:
+    """Wait one bounded interval before retrying incomplete removed-entry cleanup."""
+
+    await asyncio.sleep(REMOVED_ENTRY_CLEANUP_RETRY_DELAY_SECONDS)
 
 
 class WaterSafetyHost(Protocol):
@@ -53,6 +69,13 @@ class WaterSafetyLifecycleOwner:
         """Return the production-owned removed-entry cleanup continuation, if any."""
 
         return self._completion_task
+
+    @property
+    def released(self) -> bool:
+        """Return whether this owner no longer retains an active or pending host."""
+
+        self._prune_stopped_hosts()
+        return self._active_host is None and not self._pending_cleanup_hosts
 
     def register_constructed_host(self, host: WaterSafetyHost) -> None:
         """Own a newly constructed host before initialization can allocate resources."""
@@ -116,11 +139,18 @@ class WaterSafetyLifecycleOwner:
         self._prune_stopped_hosts()
         return all(host.quiescent for host in self._pending_cleanup_hosts)
 
-    def ensure_removed_entry_completion(self, hass: Any, entry_id: str) -> asyncio.Task[Any]:
+    def ensure_removed_entry_completion(self, hass: Any, entry_id: str) -> asyncio.Task[Any] | None:
         """Own one continuation that finishes cleanup without a later reload."""
 
+        self._prune_stopped_hosts()
         task = self._completion_task
+        if self._active_host is None and not self._pending_cleanup_hosts:
+            return task
         if task is not None and not task.done():
+            return task
+        if task is not None and task.cancelled():
+            return task
+        if _home_assistant_is_stopping(hass):
             return task
         self._completion_task = hass.async_create_background_task(
             self._async_complete_removed_entry(hass, entry_id),
@@ -132,7 +162,8 @@ class WaterSafetyLifecycleOwner:
     async def _async_complete_removed_entry(self, hass: Any, entry_id: str) -> None:
         released = False
         try:
-            released = await self._async_run_until_released()
+            await self._async_run_until_released()
+            released = True
         except asyncio.CancelledError:
             _LOGGER.error(
                 "Water Safety removed-entry cleanup was cancelled before host release (entry_id=%s)",
@@ -147,30 +178,37 @@ class WaterSafetyLifecycleOwner:
         finally:
             if released:
                 drop_water_safety_lifecycle_owner(hass, entry_id)
-            if self._completion_task is asyncio.current_task():
+                if self._completion_task is asyncio.current_task():
+                    self._completion_task = None
+            elif (
+                self._completion_task is asyncio.current_task()
+                and not self.released
+                and not _current_task_is_being_cancelled()
+                and not _home_assistant_is_stopping(hass)
+            ):
                 self._completion_task = None
+                self.ensure_removed_entry_completion(hass, entry_id)
 
-    async def _async_run_until_released(self) -> bool:
+    async def _async_run_until_released(self) -> None:
         while True:
-            await self.async_retry_pending_cleanup()
+            try:
+                await self.async_retry_pending_cleanup()
+            except Exception:
+                _LOGGER.exception("Water Safety removed-entry cleanup pass failed; remaining resources stay retryable")
             self._prune_stopped_hosts()
-            if self._active_host is None and not self._pending_cleanup_hosts:
-                return True
+            if self.released:
+                return
             waiters = [
                 task for host in self._owned_hosts() for task in host.incomplete_owned_tasks() if not task.done()
             ]
             if waiters:
                 await asyncio.wait(waiters, return_when=asyncio.FIRST_COMPLETED)
                 continue
-            await self.async_retry_pending_cleanup()
-            self._prune_stopped_hosts()
-            if self._active_host is None and not self._pending_cleanup_hosts:
-                return True
             _LOGGER.error(
-                "Water Safety removed-entry cleanup remains pending without owned waiters; "
-                "the lifecycle owner is retained"
+                "Water Safety removed-entry cleanup remains pending without owned waiters; retrying after %.3f seconds",
+                REMOVED_ENTRY_CLEANUP_RETRY_DELAY_SECONDS,
             )
-            return False
+            await _async_removed_entry_retry_delay()
 
     def _owned_hosts(self) -> tuple[WaterSafetyHost, ...]:
         hosts: list[WaterSafetyHost] = []
@@ -229,7 +267,7 @@ async def async_complete_removed_entry_cleanup(hass: Any, entry_id: str) -> None
     owner = owners[entry_id]
     await owner.async_retry_pending_cleanup()
     owner._prune_stopped_hosts()
-    if owner.active_host is None and not owner.pending_cleanup_hosts:
+    if owner.released:
         drop_water_safety_lifecycle_owner(hass, entry_id)
         return
     owner.ensure_removed_entry_completion(hass, entry_id)

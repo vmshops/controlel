@@ -188,36 +188,40 @@ class HomeAssistantWaterSafetyHost:
     async def async_stop(self) -> None:
         # Close every logical entry point synchronously with the stop request.
         # Physical resource cleanup remains bounded and may finish on a later retry.
+        # Child cleanup CancelledError is a retryable step outcome. Only cancellation
+        # of this async_stop() call itself remains cancellation for the caller.
         self._output_port.quiesce()
         self._retire_logical_admission()
         cleanup_task = asyncio.create_task(self._async_stop_owned_resources())
-        cancellation: asyncio.CancelledError | None = None
+        caller_cancellation: asyncio.CancelledError | None = None
         while not cleanup_task.done():
             try:
                 await asyncio.shield(cleanup_task)
             except asyncio.CancelledError as error:
-                if cancellation is None:
-                    cancellation = error
+                if caller_cancellation is None:
+                    caller_cancellation = error
 
-        cleanup_cancellation = cleanup_task.result()
-        if cancellation is not None:
-            raise cancellation
-        if cleanup_cancellation is not None:
-            raise cleanup_cancellation
+        try:
+            cleanup_task.result()
+        except asyncio.CancelledError as error:
+            self._logger.error(
+                "Water Safety cleanup pass was cancelled; remaining resources stay retryable",
+                exc_info=(type(error), error, error.__traceback__),
+            )
+        if caller_cancellation is not None:
+            raise caller_cancellation
 
-    async def _async_stop_owned_resources(self) -> asyncio.CancelledError | None:
+    async def _async_stop_owned_resources(self) -> None:
         async with self._lifecycle_lock:
             if self._stopped:
-                return None
+                return
             self._retire_logical_admission()
             self._stopping = True
-            cancellation: asyncio.CancelledError | None = None
 
             def record_failure(step: str, error: BaseException) -> None:
-                nonlocal cancellation
                 self._log_cleanup_failure(step, error)
-                if isinstance(error, asyncio.CancelledError) and cancellation is None:
-                    cancellation = error
+
+            self._consume_finished_cleanup_tasks()
 
             unsubscribe = self._unsubscribe
             if unsubscribe is not None:
@@ -296,6 +300,7 @@ class HomeAssistantWaterSafetyHost:
                 if completed and error is not None:
                     record_failure("runtime executor close", error)
 
+            self._consume_finished_cleanup_tasks()
             self._stopping = False
             self._stopped = (
                 self._unsubscribe is None
@@ -309,12 +314,18 @@ class HomeAssistantWaterSafetyHost:
                 self._logger.info("Water Safety runtime stopped")
             else:
                 self._logger.warning("Water Safety runtime cleanup remains incomplete; a later stop may retry")
-            return cancellation
 
     def incomplete_owned_tasks(self) -> tuple[asyncio.Task[Any], ...]:
         """Return in-flight callback and cleanup tasks still owned by this host."""
 
         return tuple(task for task in (*self._cleanup_tasks.values(), *self._callback_tasks) if not task.done())
+
+    def _consume_finished_cleanup_tasks(self) -> None:
+        """Account for cleanup tasks that finished after their supervising wait."""
+
+        for step, task in tuple(self._cleanup_tasks.items()):
+            if task.done():
+                self._consume_cleanup_result(step, task, late=True)
 
     async def _async_supervise_cleanup(
         self,
