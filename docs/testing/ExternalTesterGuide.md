@@ -1,7 +1,7 @@
 # Controlel — External Tester Guide
 
 This guide is for a technically capable Home Assistant user who wants to test
-the Controlel 0.14.1 HACS readiness candidate. You do not need to know how
+the Controlel 0.14.2 release-closure candidate. You do not need to know how
 Controlel works internally.
 Everything you need is explained here, in plain language.
 

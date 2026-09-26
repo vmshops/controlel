@@ -50,5 +50,6 @@ valve reopening is added. Heating control behavior is unchanged.
 
 The immutable integration tag is `v0.14.0`, resolving to
 `fea69d194be1b660658bd15f708df139bee67c57`. The GitHub release includes the
-installable `controlel.zip` HACS asset. Version 0.14.1 is a separate,
-unpublished distribution/metadata readiness candidate.
+installable `controlel.zip` HACS asset. Version 0.14.1 was subsequently
+published as a separate distribution and metadata readiness release. Version
+0.14.2 is a separate, unpublished candidate.

@@ -13,7 +13,7 @@ from tests.integrations.home_assistant.framework.framework_composition import (
 )
 
 ROOT = Path(__file__).parents[4].resolve()
-INTEGRATION_VERSION = "0.14.1"
+INTEGRATION_VERSION = "0.14.2"
 
 
 @pytest.mark.asyncio

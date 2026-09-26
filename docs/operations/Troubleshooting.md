@@ -128,7 +128,7 @@ second.
 
 ## Core dependency installation
 
-Integrations `0.14.0` and the unreleased `0.14.1` candidate require exactly
+Integrations `0.14.0`, `0.14.1`, and the unreleased `0.14.2` candidate require exactly
 `controlel==0.18.0`. Normal supported
 installation lets Home Assistant obtain that dependency automatically; users
 do not need to install it manually. If setup reports a missing core, confirm

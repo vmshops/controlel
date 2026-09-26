@@ -45,15 +45,38 @@ releases:
       - "Published PyPI bytes match the deterministic final artifacts bound to core-v0.18.0."
       - "Heating runtime and canonical configuration v3 behavior from the current mainline are preserved unchanged."
       - "Accepted output requests are command outcomes and do not confirm physical siren or actuator state."
-      - "Published HA 0.14.0 and the repository HA 0.14.1 candidate pin exact public Core 0.18.0."
+      - "Published HA 0.14.0 and published HA 0.14.1 pin exact public Core 0.18.0. The unpublished HA 0.14.2 candidate keeps that pin."
+
+  - release_id: controlel-home_assistant-0.14.2
+    component: home_assistant
+    title: "Controlel Home Assistant integration 0.14.2"
+    version: "0.14.2"
+    status: candidate
+    tag: null
+    commit_sha: null
+    summary: "Accepted Water Safety P0 hotfix candidate; missing notification outputs degrade non-fatally"
+    highlights:
+      - "Missing Water Safety notification outputs degrade non-fatally instead of failing the whole Controlel config entry"
+      - "Accepted candidate checkpoint 574a22fabb6bb4b8999c42c10bc3c23b851af04a passed test-HA and real-home runtime acceptance"
+      - "Heating remained functional on the accepted real-home installation"
+      - "Exact public Core pin remains controlel==0.18.0"
+    compatibility:
+      required_core: "0.18.0"
+      config_entry_version: 1
+      home_assistant: "2026.7.3"
+    notes:
+      - "This candidate contains the already accepted Water Safety P0 behavior. It does not change Core."
+      - "The integration pins exactly public controlel==0.18.0."
+      - "Version 0.14.2 remains unpublished pending separate release approval."
 
   - release_id: controlel-home_assistant-0.14.1
     component: home_assistant
     title: "Controlel Home Assistant integration 0.14.1"
     version: "0.14.1"
-    status: candidate
-    tag: null
-    commit_sha: null
+    status: published
+    tag: "v0.14.1"
+    commit_sha: "0746c5cb0eced2350e1883f5f2cb5514040b9886"
+    tagged_at: "2026-09-07T09:18:11+02:00"
     summary: "Distribution and metadata readiness for HACS default repository submission"
     highlights:
       - "Local HACS brand icon assets at required 1x and 2x dimensions"
@@ -65,9 +88,9 @@ releases:
       config_entry_version: 1
       home_assistant: "2026.7.3"
     notes:
-      - "This candidate changes distribution assets and metadata only; runtime product behavior is unchanged."
+      - "This release changes distribution assets and metadata only; runtime product behavior is unchanged."
       - "The integration pins exactly public controlel==0.18.0."
-      - "Version 0.14.1 remains unpublished pending separate release approval."
+      - "Published as an immutable GitHub/HACS integration release. HACS default-repository inclusion remains pending external review."
 
   - release_id: controlel-core-0.17.0
     component: core

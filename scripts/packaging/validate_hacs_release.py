@@ -104,6 +104,7 @@ EXPECTED_ARCHIVE_FILES = frozenset(
         "water_safety_shutoff_valves.py",
         "water_safety_sirens.py",
         "water_safety_host.py",
+        "water_safety_lifecycle.py",
         "water_safety_moisture.py",
         "water_safety_output.py",
         "water_safety_persistence.py",

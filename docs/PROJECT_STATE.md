@@ -50,6 +50,21 @@ decisions take precedence.
   Codex in the ChatGPT app on that exact worktree and pastes the work prompt.
 - Work is an explicit exception, not the standard coding workflow.
 
+## Accepted candidate / not shipped
+
+### Home Assistant integration 0.14.2
+
+- Release target: Home Assistant integration `0.14.2`.
+- Status: accepted candidate. Not tagged, released, or published.
+- Water Safety P0 hotfix candidate exact SHA:
+  `574a22fabb6bb4b8999c42c10bc3c23b851af04a`.
+- test-HA runtime acceptance: PASS.
+- Real-home runtime acceptance: PASS.
+- Missing notification outputs degrade non-fatally instead of killing the
+  whole Controlel config entry.
+- Heating remained functional on the real installation.
+- Core requirement remains exact public `controlel==0.18.0`.
+
 ## Experimental
 
 ### Companion App telemetry ingestion

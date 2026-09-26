@@ -25,8 +25,8 @@ Core 0.17.0 while preserving Heating and canonical configuration v3 behavior:
   only; it does not confirm the physical output state.
 - Water Safety adaptation, device-specific automation, and Heating redesign are
   outside this release.
-- Published HA 0.14.0 and the repository HA 0.14.1 candidate separately pin
-  exact public Core 0.18.0.
+- Published HA 0.14.0 and published HA 0.14.1 separately pin
+  exact public Core 0.18.0. The unpublished HA 0.14.2 candidate keeps that pin.
 
 ## Published artifacts
 

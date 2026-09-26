@@ -146,10 +146,10 @@ Build and independently validate the fixed-name release candidate from the
 repository root:
 
 ```text
-python scripts/packaging/build_hacs_release.py --version 0.14.1
+python scripts/packaging/build_hacs_release.py --version 0.14.2
 python scripts/packaging/validate_hacs_release.py \
   dist/hacs/controlel.zip \
-  --version 0.14.1 \
+  --version 0.14.2 \
   --checksum dist/hacs/controlel.zip.sha256
 ```
 
@@ -164,9 +164,11 @@ rejection behavior. Generated files remain below ignored `dist/hacs/`.
 
 ## Configuration and options development
 
-Core `0.18.0` and integration `0.14.0` are published and immutable. Integration
-candidate `0.14.1` preserves the exact `controlel==0.18.0` dependency while
-preparing distribution metadata for HACS default submission.
+Core `0.18.0` and integrations `0.14.0` and `0.14.1` are published and immutable.
+Integration candidate `0.14.2` preserves the exact `controlel==0.18.0`
+dependency. Missing Water Safety notification outputs degrade non-fatally
+instead of failing the whole config entry. The candidate is not tagged or
+published.
 
 Anomaly v1 extends the passive M31C development boundary with immutable,
 bounded observation state and transition-oriented operational events. New

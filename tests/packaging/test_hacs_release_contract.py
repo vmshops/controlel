@@ -20,7 +20,7 @@ from scripts.packaging.validate_hacs_release import (
 )
 
 ROOT = Path(__file__).parents[2]
-INTEGRATION_VERSION = "0.14.1"
+INTEGRATION_VERSION = "0.14.2"
 
 
 def test_hacs_source_contract_is_exact() -> None:
@@ -182,7 +182,7 @@ def test_source_validator_rejects_invalid_brand_image(tmp_path: Path) -> None:
 def test_release_workflow_is_validation_only_and_uploads_inspection_artifacts() -> None:
     workflow = (ROOT / ".github" / "workflows" / "integration-release-validation.yml").read_text(encoding="utf-8")
 
-    assert "python scripts/packaging/build_hacs_release.py --version 0.14.1" in workflow
+    assert "python scripts/packaging/build_hacs_release.py --version 0.14.2" in workflow
     assert "python scripts/packaging/validate_hacs_release.py" in workflow
     assert "category: integration" in workflow
     assert "ignore: brands" not in workflow

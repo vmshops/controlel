@@ -101,7 +101,7 @@ def test_shipped_core_and_ha_release_contracts() -> None:
 
     assert core_version == "0.18.0"
     assert manifest["requirements"] == ["controlel==0.18.0"]
-    assert manifest["version"] == "0.14.1"
+    assert manifest["version"] == "0.14.2"
     assert manifest["issue_tracker"] == "https://github.com/vmshops/controlel/issues"
 
 
@@ -324,7 +324,8 @@ def test_release_metadata_records_published_versions_and_ha_candidate_boundary()
     normalized_published_note = " ".join(published_note.split())
     core_note = (ROOT / "docs" / "releases" / "core-0.14.0.md").read_text(encoding="utf-8")
     integration_note = (ROOT / "docs" / "releases" / "home-assistant-0.14.0.md").read_text(encoding="utf-8")
-    candidate_note = (ROOT / "docs" / "releases" / "home-assistant-0.14.1.md").read_text(encoding="utf-8")
+    published_patch_note = (ROOT / "docs" / "releases" / "home-assistant-0.14.1.md").read_text(encoding="utf-8")
+    candidate_note = (ROOT / "docs" / "releases" / "home-assistant-0.14.2.md").read_text(encoding="utf-8")
     previous_integration_note = (ROOT / "docs" / "releases" / "home-assistant-0.13.0.md").read_text(encoding="utf-8")
 
     assert "release_id: controlel-core-0.18.0" in metadata
@@ -336,6 +337,7 @@ def test_release_metadata_records_published_versions_and_ha_candidate_boundary()
     assert "release_id: controlel-core-0.12.0" in metadata
     assert "release_id: controlel-home_assistant-0.14.0" in metadata
     assert "release_id: controlel-home_assistant-0.14.1" in metadata
+    assert "release_id: controlel-home_assistant-0.14.2" in metadata
     assert "release_id: controlel-home_assistant-0.13.0" in metadata
     assert "release_id: controlel-home_assistant-0.12.0" in metadata
     assert metadata.count('version: "0.18.0"') == 1
@@ -344,6 +346,7 @@ def test_release_metadata_records_published_versions_and_ha_candidate_boundary()
     assert metadata.count('version: "0.15.0"') == 1
     assert metadata.count('version: "0.14.0"') == 2
     assert metadata.count('version: "0.14.1"') == 1
+    assert metadata.count('version: "0.14.2"') == 1
     assert metadata.count('version: "0.13.0"') == 2
     assert metadata.count('version: "0.12.0"') == 2
     assert metadata.count("status: published") >= 7
@@ -399,8 +402,11 @@ def test_release_metadata_records_published_versions_and_ha_candidate_boundary()
     assert "Both public files match" in core_note
     assert "canonical configuration v3" in integration_note.casefold()
     assert "Status: published" in integration_note
+    assert "Status: published" in published_patch_note
+    assert "v0.14.1" in published_patch_note
     assert "Status: candidate" in candidate_note
     assert "does not change Core" in candidate_note
+    assert "not yet tagged" in candidate_note
     assert "Frontend API v1" in previous_integration_note
     assert "authenticated read-only WebSocket" in previous_integration_note
     assert "No write APIs" in previous_integration_note

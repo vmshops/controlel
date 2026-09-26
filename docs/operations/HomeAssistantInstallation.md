@@ -17,11 +17,12 @@ Protection history is not persisted. After restart or reload, Controlel reads
 the current sensor value deterministically but does not infer prior command
 history or lockout state from the switch.
 
-Controlel `0.14.0` is the current published integration for one heating zone,
+Controlel `0.14.1` is the current published integration for one heating zone,
 one primary temperature sensor, and one shared heat source. It requires the
 published immutable core package `controlel==0.18.0`. Repository version
-`0.14.1` is an unreleased HACS default-submission readiness candidate and does
-not change runtime behavior or the Core dependency.
+`0.14.2` is an unreleased candidate and keeps that Core dependency. Missing
+Water Safety notification outputs degrade non-fatally instead of failing the
+whole config entry.
 
 Integration `0.11.0` uses published immutable Core `0.10.0`. It retains the
 thread-safe entity publication and runtime-supervision host binding needed for
