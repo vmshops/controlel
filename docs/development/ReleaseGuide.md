@@ -1,6 +1,6 @@
 # Release guide
 
-## Core 0.18.0 / HA 0.14.2 candidate boundary
+## Core 0.18.0 / HA 0.14.2 published boundary
 
 Core 0.18.0 is public and immutable. It packages module-scoped active-reference
 persistence/resolution, Water shutoff contracts, activation-ready optional
@@ -9,8 +9,8 @@ isolation while preserving Heating and canonical configuration v3 behavior.
 UNKNOWN and UNAVAILABLE remain never dry evidence, and accepted output requests
 never claim physical output state.
 
-HA 0.14.0 and HA 0.14.1 are published and immutable. The 0.14.2 candidate keeps
-the exact requirement `controlel==0.18.0`. The reusable
+HA 0.14.0, HA 0.14.1, and HA 0.14.2 are published and immutable. HA 0.14.2
+keeps the exact requirement `controlel==0.18.0`. The reusable
 `home-assistant-published-core.yml` workflow downloads the manifest's exact
 PyPI wheel, verifies SHA-256/size, installs it, checks installed file bytes and
 all integration Core imports, and runs both HA suites. The HACS release-artifact
@@ -320,7 +320,7 @@ Controlel uses distinct release states:
    out-of-checkout installation checks.
 4. **Published core package** is currently immutable `controlel==0.18.0` on
    PyPI.
-5. **Home Assistant exact dependency pin** for the `0.14.2` candidate is
+5. **Home Assistant exact dependency pin** for published integration `0.14.2` is
    `"requirements": ["controlel==0.18.0"]`; the public Core gate is satisfied.
 6. **HACS readiness** additionally requires integration release packaging and
    HACS metadata. A verified or published core wheel alone does not provide
@@ -333,10 +333,9 @@ The distribution name and Python import package are both `controlel`. Versions
 `0.9.0` through `0.18.0` are publicly available on PyPI and immutable. PyPI
 versions are immutable; corrections always require a higher version.
 
-The current public core release is immutable `0.18.0`. Integrations `0.14.0`
-and `0.14.1` are published; the separate `0.14.2` candidate keeps the same Core
-pin. Its composition checks install and verify the public package rather than
-repository source.
+The current public core release is immutable `0.18.0`. Integrations `0.14.0`,
+`0.14.1`, and `0.14.2` are published and keep the same Core pin. Composition
+checks install and verify the public package rather than repository source.
 
 The first core release is `0.1.0`. The single authoritative release
 version is the static `project.version` in `pyproject.toml`. Runtime access uses
@@ -345,8 +344,7 @@ version is the static `project.version` in `pyproject.toml`. Runtime access uses
 `0.0.0+uninstalled`; it never pretends to be a release.
 
 The custom-component manifest version is a separate integration version.
-Integration `0.14.1` is the current published release; the implementation is
-prepared as unpublished candidate `0.14.2` at its separate release boundary.
+Integration `0.14.2` is the current published release at tag `v0.14.2`.
 Neither version is a second source for the core package version.
 
 ## Permanent tag namespaces
@@ -661,7 +659,7 @@ must not upload rebuilt artifacts for an already published version.
 
 ## Home Assistant dependency contract
 
-The `0.14.2` candidate pins exactly `controlel==0.18.0`. Its adapter and
+Published integration `0.14.2` pins exactly `controlel==0.18.0`. Its adapter and
 framework public-package jobs install with `--no-cache-dir`, verify both public
 artifact identities and the installed Setup and Frontend API v1 surfaces, and
 never install the repository as a distribution. Repository Core source is
@@ -674,7 +672,8 @@ the declared core automatically.
 Integration releases use a separate version stream:
 
 - manifest and `INTEGRATION_VERSION`: `0.14.2`;
-- future integration tag: `v0.14.2`;
+- integration tag: `v0.14.2` (published at commit
+  `4adc942732e80ad7e90f341bce46fb1d36b12351`);
 - GitHub Release name:
   `Controlel Home Assistant Integration v0.14.2`;
 - HACS asset: `controlel.zip`;

@@ -26,6 +26,25 @@ decisions take precedence.
 - HACS default-repository submission is external/pending review and is not
   considered shipped default-HACS inclusion until upstream accepts it.
 
+### Home Assistant integration 0.14.2
+
+- Status: implemented / shipped.
+- Public release tag: `v0.14.2`.
+- Published release commit:
+  `4adc942732e80ad7e90f341bce46fb1d36b12351`.
+- Published HACS ZIP SHA-256:
+  `c33c8d10032b867bb18474f22ba236ce347ae5049f941e6b1a8b49757bb35191`.
+- Required Core remains the existing public release `controlel==0.18.0`.
+  Core was not republished.
+- Accepted Water P0 behavior/runtime checkpoint:
+  `574a22fabb6bb4b8999c42c10bc3c23b851af04a`.
+  That checkpoint is not the published release commit.
+- An unavailable optional Water notification output is degraded and non-fatal.
+  That condition no longer stops the whole Controlel config entry or Heating.
+- Notification reconciliation itself is not solved.
+- Accepted runtime evidence: test HA pass, real-home pass, and reload/restart
+  pass.
+
 ### Development Harness V2
 
 - Status: implemented / shipped.
@@ -50,20 +69,18 @@ decisions take precedence.
   Codex in the ChatGPT app on that exact worktree and pastes the work prompt.
 - Work is an explicit exception, not the standard coding workflow.
 
-## Accepted candidate / not shipped
+## Next active focus
 
-### Home Assistant integration 0.14.2
+Single-Zone Heating production acceptance.
 
-- Release target: Home Assistant integration `0.14.2`.
-- Status: accepted candidate. Not tagged, released, or published.
-- Water Safety P0 hotfix candidate exact SHA:
-  `574a22fabb6bb4b8999c42c10bc3c23b851af04a`.
-- test-HA runtime acceptance: PASS.
-- Real-home runtime acceptance: PASS.
-- Missing notification outputs degrade non-fatally instead of killing the
-  whole Controlel config entry.
-- Heating remained functional on the real installation.
-- Core requirement remains exact public `controlel==0.18.0`.
+Accepted product sequence:
+
+1. R0 release/test harness closure — complete.
+2. HA 0.14.2 release closure — complete.
+3. Single-Zone Heating production acceptance — next active focus.
+4. Multi-Zone Heating 0.15.0 — later; not active implementation.
+5. Shadow/Simulation — later.
+6. Later domains — later.
 
 ## Experimental
 
@@ -102,7 +119,8 @@ Accepted audit checkpoints:
 - CORE-00B: accepted.
 - CORE-00C: next architecture decision checkpoint.
 
-Planned implementation sequence before Multi-Zone:
+Planned implementation sequence before Multi-Zone. This remains accepted
+planned work and is not the current active product focus:
 
 1. Module Lifecycle Isolation V1.
 2. Release Automation V2.
@@ -119,7 +137,8 @@ maturity.
 
 ### Multi-Zone / whole-house Heating
 
-- Accepted/planned after the Core Compatibility Foundation.
+- Accepted/planned after Single-Zone Heating production acceptance.
+- Not active implementation.
 - The shipped single-zone model becomes the one-zone case of the future
   multi-zone architecture.
 - Shared physical topology is separate from domain-specific grouping.
@@ -141,15 +160,20 @@ maturity.
 
 - Heating and Water currently have module-scoped configuration/runtime hosts
   but remain coupled at config-entry setup/unload/reload boundaries. Water
-  failure can unnecessarily affect healthy Heating. This must be resolved
-  before Multi-Zone.
+  failure can unnecessarily affect healthy Heating. A missing optional Water
+  notification output is the accepted non-fatal case shipped in HA 0.14.2;
+  it does not mean module isolation is complete. The remaining coupling must
+  be resolved before Multi-Zone.
 - The public `controlel` PyPI package is built/verified in public CI but is not
   yet published from public CI. This is a known Home Assistant Bronze
   dependency-transparency blocker and a Release Automation V2 target.
 - The HA adapter currently consumes some deep `controlel` package internals.
   A deliberately supported public package facade is planned before CORE-01.
-- The known hassfest `CONFIG_SCHEMA` warning remains non-blocking and is not a
-  Development Harness V2 regression.
+- The known hassfest `CONFIG_SCHEMA` warning remains non-blocking technical
+  debt and is not a Development Harness V2 regression.
+- HACS archive builds are not cross-platform byte-deterministic. Checkout
+  newline conversion can change working-tree bytes. The published Linux
+  `v0.14.2` asset is the verified artifact.
 - HACS default inclusion remains pending external upstream review.
 - `docs/PROJECT_IDEAS.md` has not yet been bootstrapped; preserved ideas remain
   governed by CONTROL until that canonical document is created.
