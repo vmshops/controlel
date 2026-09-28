@@ -20,13 +20,12 @@ The goal is to create a reliable heating controller capable of optimizing comfor
 
 ## Status
 
-Project phase: Home Assistant 0.14.2 release-closure candidate
+Project phase: Home Assistant 0.14.2 published
 
 Published Core package: 0.18.0
-Published Home Assistant integration: 0.14.1
-Repository Home Assistant candidate: 0.14.2
+Published Home Assistant integration: 0.14.2
 
-The 0.14.2 integration candidate pins exact public Core `controlel==0.18.0`. Core
+The published 0.14.2 integration pins exact public Core `controlel==0.18.0`. Core
 0.18.0 packages module-scoped active-reference and Water shutoff contracts and
 isolates Water evidence/snapshot persistence failures from safety outputs. HA
 includes the six Water startup, observation, identity, evidence, activation,
@@ -58,7 +57,7 @@ installation flow is:
 
 The currently published integration manifest makes Home Assistant install exact
 public Core `controlel==0.18.0`; users must not install the core manually.
-The repository candidate `0.14.2` preserves that exact dependency.
+Published integration `0.14.2` preserves that exact dependency.
 Detailed prerequisites, configuration, safety behavior, manual installation,
 upgrades, removal, and current limitations are in the
 [Home Assistant installation guide](docs/operations/HomeAssistantInstallation.md).
@@ -226,8 +225,8 @@ or control influence. Integration `0.11.0` now hosts this pipeline without
 reimplementing activity composition, policy, de-duplication, rate limits, or
 cursor semantics.
 
-The published integration 0.14.1 requires exact public Core 0.18.0. The
-repository's integration 0.14.2 candidate preserves that exact Core pin.
+The published integration 0.14.2 requires exact public Core 0.18.0 and preserves
+that exact Core pin.
 Development tests install a wheel built from the checkout. Release validation
 separately downloads the exact public wheel, verifies its bytes and required
 APIs, and runs the adapter/framework suites. Users of released integrations do
@@ -239,8 +238,8 @@ The isolated, hashed environment is defined by `requirements/ha-test.in` and
 `requirements/ha-test.txt`; setup and suite commands are in the
 [development guide](docs/development/DevelopmentGuide.md). The compatibility
 harness is separate from HACS release validation. HACS metadata and
-deterministic release packaging must pass before the unpublished `0.14.2`
-candidate may be tagged; no default-store publication exists.
+deterministic release packaging validated the published `0.14.2` HACS asset;
+HACS default-repository inclusion remains a separate external review step.
 
 ## Core package artifacts
 

@@ -316,7 +316,7 @@ def test_setup_backend_uses_the_versioned_public_core_surface_without_activation
     assert not hasattr(home_assistant.HeatingSetupHostService, "activate_heating_draft")
 
 
-def test_release_metadata_records_published_versions_and_ha_candidate_boundary() -> None:
+def test_release_metadata_records_published_versions_and_ha_release_boundary() -> None:
     metadata = (ROOT / "release-metadata" / "releases.yaml").read_text(encoding="utf-8")
     current_core_note = (ROOT / "docs" / "releases" / "core-0.18.0.md").read_text(encoding="utf-8")
     normalized_current_core_note = " ".join(current_core_note.split())
@@ -349,8 +349,8 @@ def test_release_metadata_records_published_versions_and_ha_candidate_boundary()
     assert metadata.count('version: "0.14.2"') == 1
     assert metadata.count('version: "0.13.0"') == 2
     assert metadata.count('version: "0.12.0"') == 2
-    assert metadata.count("status: published") >= 7
-    assert metadata.count("status: candidate") >= 2
+    assert metadata.count("status: published") >= 8
+    assert metadata.count("status: candidate") == 1
     assert 'title: "Controlel Core 0.18.0"' in metadata
     assert 'tag: "core-v0.18.0"' in metadata
     assert 'commit_sha: "5ad5eca46046460c711510fbb09011b7db13b924"' in metadata
@@ -384,6 +384,9 @@ def test_release_metadata_records_published_versions_and_ha_candidate_boundary()
     assert "6e59c5fae5098a35069458f5c09b2eed8e837cd9a95b7bd7156865a1acdde6a6" in metadata
     assert 'required_core: "0.18.0"' in metadata
     assert 'required_core: "0.14.0"' in metadata
+    assert 'tag: "v0.14.2"' in metadata
+    assert 'commit_sha: "4adc942732e80ad7e90f341bce46fb1d36b12351"' in metadata
+    assert "c33c8d10032b867bb18474f22ba236ce347ae5049f941e6b1a8b49757bb35191" in metadata
     assert 'tag: "v0.14.0"' in metadata
     assert 'commit_sha: "fea69d194be1b660658bd15f708df139bee67c57"' in metadata
     assert "Status: published" in normalized_current_core_note
@@ -404,9 +407,13 @@ def test_release_metadata_records_published_versions_and_ha_candidate_boundary()
     assert "Status: published" in integration_note
     assert "Status: published" in published_patch_note
     assert "v0.14.1" in published_patch_note
-    assert "Status: candidate" in candidate_note
+    assert "Status: published" in candidate_note
+    assert "v0.14.2" in candidate_note
+    assert "4adc942732e80ad7e90f341bce46fb1d36b12351" in candidate_note
     assert "does not change Core" in candidate_note
-    assert "not yet tagged" in candidate_note
+    assert "c33c8d10032b867bb18474f22ba236ce347ae5049f941e6b1a8b49757bb35191" in candidate_note
+    ha_013_candidate_note = (ROOT / "docs" / "releases" / "home-assistant-0.13.0.md").read_text(encoding="utf-8")
+    assert "Status: candidate" in ha_013_candidate_note
     assert "Frontend API v1" in previous_integration_note
     assert "authenticated read-only WebSocket" in previous_integration_note
     assert "No write APIs" in previous_integration_note

@@ -65,8 +65,8 @@ closes the command executor so a stale generation cannot dispatch.
 
 ## Custom-component packaging
 
-The integration source is `custom_components/controlel`. The `0.14.2` candidate
-declares one config entry and requires published `controlel==0.18.0`.
+The integration source is `custom_components/controlel`. Published integration
+`0.14.2` declares one config entry and requires published `controlel==0.18.0`.
 The integration and core versions are independent, and the core is not
 vendored into the component.
 
@@ -122,10 +122,8 @@ environment and never installs the checkout as a distribution.
 
 For a supported custom-component deployment, Home Assistant can install the
 exact manifest dependency automatically; users do not need to install the core
-manually. The implementation is the unpublished `0.14.2`
-candidate; deterministic release packaging remains a
-separate release-boundary step. No default
-HACS-store entry exists. End-user
+manually. Published integration `0.14.2` is available through GitHub/HACS custom-repository
+installation. No default HACS-store entry exists. End-user
 installation instructions are in
 [HomeAssistantInstallation.md](HomeAssistantInstallation.md).
 
@@ -135,8 +133,8 @@ and re-upload an existing version. See the
 [release guide](../development/ReleaseGuide.md) for its exact source commit and
 published hashes.
 
-Core `0.18.0` is public and immutable. Published integrations `0.14.0` and
-`0.14.1`, and the unreleased `0.14.2` candidate, install exactly `controlel==0.18.0`;
+Core `0.18.0` is public and immutable. Published integrations `0.14.0`,
+`0.14.1`, and `0.14.2` install exactly `controlel==0.18.0`;
 public-package CI verifies the Setup,
 canonical configuration v3, and read-only Frontend API v1 boundaries from that
 installed distribution.

@@ -125,7 +125,7 @@ python3 -m script.hassfest --action validate \
   --integration-path /absolute/path/to/controlel/custom_components/controlel
 ```
 
-The candidate manifest pins exactly public `controlel==0.18.0`. Development CI
+The integration manifest pins exactly public `controlel==0.18.0`. Development CI
 installs a checkout wheel. HACS release validation
 requires the reusable published-Core workflow: it downloads the exact PyPI
 artifact, verifies SHA-256/size and installed bytes, checks required APIs, and
@@ -164,11 +164,10 @@ rejection behavior. Generated files remain below ignored `dist/hacs/`.
 
 ## Configuration and options development
 
-Core `0.18.0` and integrations `0.14.0` and `0.14.1` are published and immutable.
-Integration candidate `0.14.2` preserves the exact `controlel==0.18.0`
+Core `0.18.0` and integrations `0.14.0`, `0.14.1`, and `0.14.2` are published
+and immutable. Integration `0.14.2` preserves the exact `controlel==0.18.0`
 dependency. Missing Water Safety notification outputs degrade non-fatally
-instead of failing the whole config entry. The candidate is not tagged or
-published.
+instead of failing the whole config entry.
 
 Anomaly v1 extends the passive M31C development boundary with immutable,
 bounded observation state and transition-oriented operational events. New
