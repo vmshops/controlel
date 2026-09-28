@@ -93,6 +93,8 @@ async def async_load_water_safety_notifications_editor(
         )
     )
     unavailable = tuple(target for target in selected if target not in available)
+    # Discovery is only a current service snapshot. Preserve the stable saved
+    # identity by default and require an explicit clear or replacement.
     return WaterSafetyNotificationsEditor(
         discovery=discovery,
         current_draft=current_draft,
@@ -247,7 +249,7 @@ def _roles_for_targets(
         if existing is not None and existing not in assigned:
             assigned.append(existing)
             continue
-        if DEFAULT_NOTIFICATION_ROLE not in assigned and DEFAULT_NOTIFICATION_ROLE not in existing_roles.values():
+        if DEFAULT_NOTIFICATION_ROLE not in assigned:
             assigned.append(DEFAULT_NOTIFICATION_ROLE)
             continue
         digest = hashlib.sha256(target.encode("utf-8")).hexdigest()[:12]

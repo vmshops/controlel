@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import deque
-from collections.abc import Callable, Coroutine
+from collections.abc import Awaitable, Callable, Coroutine
 from datetime import UTC, datetime
 from functools import partial
 from typing import Any, Protocol
@@ -41,6 +41,16 @@ type Unsubscribe = Callable[[], None]
 type StateListener = Callable[[StateLike | None, StateLike | None], None]
 type StateSubscriber = Callable[[object, str, StateListener], Unsubscribe]
 type StateGetter = Callable[[str], StateLike | None]
+
+CALLBACK_TASK_TERMINATION_TIMEOUT_SECONDS = 1.0
+RESOURCE_CLEANUP_TIMEOUT_SECONDS = 1.0
+
+
+class WaterSafetyHostRetiredError(RuntimeError):
+    """Logical Water work was invalidated because the host is quiescent."""
+
+    def __init__(self) -> None:
+        super().__init__("Water Safety is quiescent and cannot accept new actions")
 
 
 class HomeAssistantTaskOwner(Protocol):
@@ -91,16 +101,42 @@ class HomeAssistantWaterSafetyHost:
         self._unsubscribe: Unsubscribe | None = None
         self._deadline_handle: object | None = None
         self._callback_tasks: set[asyncio.Task[Any]] = set()
+        self._cleanup_tasks: dict[str, asyncio.Task[BaseException | None]] = {}
         self._accepting = True
+        self._logical_generation = 0
         self._initialized = False
         self._startup_observations: deque[MoistureObservation] | None = None
         self._stopping = False
         self._stopped = False
         self._diagnostics_snapshot: WaterSafetyDiagnosticsSnapshotV1 | None = None
+        self._degraded_notification_bindings: dict[str, str] = {}
 
     @property
     def runtime(self) -> WaterSafetyRuntime:
         return self._runtime
+
+    @property
+    def degraded_notification_bindings(self) -> dict[str, str]:
+        """Role -> resolution status for notification outputs disabled at startup."""
+
+        return dict(self._degraded_notification_bindings)
+
+    @property
+    def stopped(self) -> bool:
+        """Return whether every resource owned by this host has been released."""
+
+        return self._stopped
+
+    @property
+    def quiescent(self) -> bool:
+        """Return whether the host cannot accept or finish new logical Water work."""
+
+        return not self._accepting and self._startup_observations is None and self._output_port.quiescent
+
+    def mark_degraded_notification_bindings(self, degraded: dict[str, str]) -> None:
+        """Record notification roles that were omitted because resolution failed."""
+
+        self._degraded_notification_bindings = dict(degraded)
 
     @property
     def frontend_api_water_safety_evidence(self) -> WaterSafetyDiagnosticsSnapshotV1:
@@ -136,38 +172,230 @@ class HomeAssistantWaterSafetyHost:
                 self._startup_observations = None
                 self._initialized = True
             except BaseException:
-                self._accepting = False
+                self._retire_logical_admission()
                 self._startup_observations = None
-                if self._unsubscribe is not None:
-                    self._unsubscribe()
-                    self._unsubscribe = None
+                unsubscribe = self._unsubscribe
+                if unsubscribe is not None:
+                    try:
+                        unsubscribe()
+                    except BaseException:
+                        self._logger.exception("Water Safety state-listener cleanup after failed initialization failed")
+                    else:
+                        self._unsubscribe = None
                 raise
             self._logger.info("Water Safety runtime started")
 
     async def async_stop(self) -> None:
+        # Close every logical entry point synchronously with the stop request.
+        # Physical resource cleanup remains bounded and may finish on a later retry.
+        # Child cleanup CancelledError is a retryable step outcome. Only cancellation
+        # of this async_stop() call itself remains cancellation for the caller.
+        self._output_port.quiesce()
+        self._retire_logical_admission()
+        cleanup_task = asyncio.create_task(self._async_stop_owned_resources())
+        caller_cancellation: asyncio.CancelledError | None = None
+        while not cleanup_task.done():
+            try:
+                await asyncio.shield(cleanup_task)
+            except asyncio.CancelledError as error:
+                if caller_cancellation is None:
+                    caller_cancellation = error
+
+        try:
+            cleanup_task.result()
+        except asyncio.CancelledError as error:
+            self._logger.error(
+                "Water Safety cleanup pass was cancelled; remaining resources stay retryable",
+                exc_info=(type(error), error, error.__traceback__),
+            )
+        if caller_cancellation is not None:
+            raise caller_cancellation
+
+    async def _async_stop_owned_resources(self) -> None:
         async with self._lifecycle_lock:
             if self._stopped:
                 return
-            self._accepting = False
+            self._retire_logical_admission()
             self._stopping = True
+
+            def record_failure(step: str, error: BaseException) -> None:
+                self._log_cleanup_failure(step, error)
+
+            self._consume_finished_cleanup_tasks()
+
             unsubscribe = self._unsubscribe
-            self._unsubscribe = None
             if unsubscribe is not None:
-                unsubscribe()
-            try:
-                if not self._executor.closed:
-                    await self._async_submit_runtime(self._cancel_deadline)
-                    await self._async_submit_runtime(self._scheduler.cancel_all)
-            except Exception:
-                self._logger.exception("Water Safety scheduler cleanup failed")
-            callback_tasks = [task for task in self._callback_tasks if task is not asyncio.current_task()]
+                try:
+                    unsubscribe()
+                except BaseException as error:
+                    record_failure("state listener unsubscribe", error)
+                else:
+                    self._unsubscribe = None
+
+            callback_tasks = {task for task in self._callback_tasks if task is not asyncio.current_task()}
+            for task in callback_tasks:
+                task.cancel("Water Safety host teardown")
             if callback_tasks:
-                await asyncio.gather(*callback_tasks, return_exceptions=True)
-            if not self._executor.closed:
-                await self._executor.async_close()
+                done, pending = await asyncio.wait(
+                    callback_tasks,
+                    timeout=CALLBACK_TASK_TERMINATION_TIMEOUT_SECONDS,
+                )
+                for task in done:
+                    self._callback_tasks.discard(task)
+                    if task.cancelled():
+                        continue
+                    error = task.exception()
+                    if error is not None:
+                        record_failure("callback task completion", error)
+                if pending:
+                    self._logger.error(
+                        "Water Safety cleanup step timed out (callback task cancellation) after %.3f seconds; "
+                        "%d owned task(s) remain retryable",
+                        CALLBACK_TASK_TERMINATION_TIMEOUT_SECONDS,
+                        len(pending),
+                    )
+
+            if self._deadline_handle is not None:
+                if self._executor.closed:
+                    record_failure(
+                        "current deadline cancellation",
+                        RuntimeExecutorClosedError("runtime executor closed before deadline release"),
+                    )
+                else:
+                    completed, error = await self._async_supervise_cleanup(
+                        "current deadline cancellation",
+                        lambda: self._async_submit_runtime(self._cancel_deadline),
+                    )
+                    if completed and error is not None:
+                        record_failure("current deadline cancellation", error)
+
+            if not self._scheduler.released:
+                if self._executor.closed:
+                    record_failure(
+                        "scheduler cancel_all",
+                        RuntimeExecutorClosedError("runtime executor closed before scheduler release"),
+                    )
+                else:
+                    completed, error = await self._async_supervise_cleanup(
+                        "scheduler cancel_all",
+                        lambda: self._async_submit_runtime(self._scheduler.cancel_all),
+                    )
+                    if completed and error is not None:
+                        record_failure("scheduler cancel_all", error)
+
+            runtime_dependencies_released = (
+                not self._callback_tasks
+                and self._deadline_handle is None
+                and self._scheduler.released
+                and not {
+                    "current deadline cancellation",
+                    "scheduler cancel_all",
+                }.intersection(self._cleanup_tasks)
+            )
+            if runtime_dependencies_released and not self._executor.closed:
+                completed, error = await self._async_supervise_cleanup(
+                    "runtime executor close",
+                    self._executor.async_close,
+                )
+                if completed and error is not None:
+                    record_failure("runtime executor close", error)
+
+            self._consume_finished_cleanup_tasks()
             self._stopping = False
-            self._stopped = True
-            self._logger.info("Water Safety runtime stopped")
+            self._stopped = (
+                self._unsubscribe is None
+                and self._deadline_handle is None
+                and self._scheduler.released
+                and not self._callback_tasks
+                and not self._cleanup_tasks
+                and self._executor.closed
+            )
+            if self._stopped:
+                self._logger.info("Water Safety runtime stopped")
+            else:
+                self._logger.warning("Water Safety runtime cleanup remains incomplete; a later stop may retry")
+
+    def incomplete_owned_tasks(self) -> tuple[asyncio.Task[Any], ...]:
+        """Return in-flight callback and cleanup tasks still owned by this host."""
+
+        return tuple(task for task in (*self._cleanup_tasks.values(), *self._callback_tasks) if not task.done())
+
+    def _consume_finished_cleanup_tasks(self) -> None:
+        """Account for cleanup tasks that finished after their supervising wait."""
+
+        for step, task in tuple(self._cleanup_tasks.items()):
+            if task.done():
+                self._consume_cleanup_result(step, task, late=True)
+
+    async def _async_supervise_cleanup(
+        self,
+        step: str,
+        operation: Callable[[], Awaitable[Any]],
+    ) -> tuple[bool, BaseException | None]:
+        task = self._cleanup_tasks.get(step)
+        if task is None:
+            task = asyncio.create_task(
+                self._async_run_cleanup_operation(step, operation),
+                name=f"Controlel Water Safety cleanup: {step}",
+            )
+            self._cleanup_tasks[step] = task
+        done, _pending = await asyncio.wait(
+            {task},
+            timeout=RESOURCE_CLEANUP_TIMEOUT_SECONDS,
+        )
+        if not done:
+            if task.done():
+                return True, self._consume_cleanup_result(step, task, late=False)
+            self._logger.error(
+                "Water Safety cleanup step timed out (%s) after %.3f seconds; the operation remains supervised",
+                step,
+                RESOURCE_CLEANUP_TIMEOUT_SECONDS,
+            )
+            task.add_done_callback(lambda completed: self._consume_cleanup_result(step, completed, late=True))
+            return False, None
+        return True, self._consume_cleanup_result(step, task, late=False)
+
+    async def _async_run_cleanup_operation(
+        self,
+        step: str,
+        operation: Callable[[], Awaitable[Any]],
+    ) -> BaseException | None:
+        del step
+        try:
+            await operation()
+        except BaseException as error:
+            return error
+        return None
+
+    def _consume_cleanup_result(
+        self,
+        step: str,
+        task: asyncio.Task[BaseException | None],
+        *,
+        late: bool,
+    ) -> BaseException | None:
+        """Consume one supervised result exactly once before releasing task ownership."""
+
+        try:
+            error = task.result()
+        except BaseException as task_error:
+            error = task_error
+        if self._cleanup_tasks.get(step) is not task:
+            return error
+        self._cleanup_tasks.pop(step, None)
+        if late:
+            if error is None:
+                self._logger.info("Water Safety cleanup step completed after timeout (%s)", step)
+            else:
+                self._log_cleanup_failure(step, error)
+        return error
+
+    def _log_cleanup_failure(self, step: str, error: BaseException) -> None:
+        self._logger.error(
+            "Water Safety cleanup step failed (%s); continuing teardown",
+            step,
+            exc_info=(type(error), error, error.__traceback__),
+        )
 
     async def silence(self) -> WaterSafetyProcessingResult:
         return await self._process(lambda: self._runtime.silence(silenced_at=datetime.now(UTC)))
@@ -183,7 +411,10 @@ class HomeAssistantWaterSafetyHost:
         )
 
     async def test_notification(self) -> WaterSafetyProcessingResult:
+        self._require_accepting()
         self._require_safe_test()
+        if not self._config.notification_target_roles:
+            raise RuntimeError("Water Safety has no configured notification targets")
         role = self._config.notification_target_roles[0]
         command = WaterOutputCommand(
             command_id=f"{self._effective.module_instance_id}:test:notification",
@@ -197,7 +428,7 @@ class HomeAssistantWaterSafetyHost:
             custom_message=None,
             repeated=False,
         )
-        result = await self._async_submit_runtime(self._output_port.request, command)
+        result = await self._async_submit_logical(self._output_port.request, command)
         return WaterSafetyProcessingResult(
             previous_state=self._runtime.state,
             state=self._runtime.state,
@@ -206,6 +437,7 @@ class HomeAssistantWaterSafetyHost:
         )
 
     async def test_siren(self) -> WaterSafetyProcessingResult:
+        self._require_accepting()
         self._require_safe_test()
         if not self._config.siren_target_roles:
             raise RuntimeError("Water Safety has no configured siren targets")
@@ -219,7 +451,7 @@ class HomeAssistantWaterSafetyHost:
             target_role=role,
             target=self._bindings[role],
         )
-        result = await self._async_submit_runtime(self._output_port.request, command)
+        result = await self._async_submit_logical(self._output_port.request, command)
         return WaterSafetyProcessingResult(
             previous_state=self._runtime.state,
             state=self._runtime.state,
@@ -275,9 +507,15 @@ class HomeAssistantWaterSafetyHost:
         task.add_done_callback(self._callback_tasks.discard)
 
     async def _async_process_state(self, state: StateLike | None) -> None:
+        if not self._accepting:
+            return
         observation = self._observation_for_state(state)
-        if observation is not None:
+        if observation is None:
+            return
+        try:
             await self._process(partial(self._runtime.observe, observation))
+        except WaterSafetyHostRetiredError:
+            return
 
     def _observation_for_state(self, state: StateLike | None) -> MoistureObservation | None:
         mapping = self._mapper.map_state(state)
@@ -294,22 +532,48 @@ class HomeAssistantWaterSafetyHost:
         if not self._accepting:
             return
         try:
-            await self._async_submit_runtime(callback)
+            await self._async_submit_logical(callback)
+        except WaterSafetyHostRetiredError:
+            return
         except RuntimeExecutorClosedError:
             if not self._stopping and not self._stopped:
                 raise
 
     async def _process(self, operation: Callable[[], WaterSafetyProcessingResult]) -> WaterSafetyProcessingResult:
-        result = await self._async_submit_runtime(operation)
+        self._require_accepting()
+        result = await self._async_submit_logical(operation)
         self._refresh_diagnostics()
-        await self._async_submit_runtime(self._reschedule_deadline)
+        if self._accepting:
+            try:
+                await self._async_submit_logical(self._reschedule_deadline)
+            except WaterSafetyHostRetiredError:
+                return result
         return result
 
     async def _async_submit_runtime(self, operation: Callable[..., Any], *args: object) -> Any:
         return await self._executor.async_submit(operation, *args)
 
+    async def _async_submit_logical(self, operation: Callable[..., Any], *args: object) -> Any:
+        generation = self._logical_generation
+
+        def execute_if_admitted(*operation_args: object) -> Any:
+            if not self._accepting or generation != self._logical_generation:
+                raise WaterSafetyHostRetiredError()
+            return operation(*operation_args)
+
+        execute_if_admitted.__name__ = getattr(operation, "__name__", execute_if_admitted.__name__)
+        execute_if_admitted.__qualname__ = getattr(operation, "__qualname__", execute_if_admitted.__qualname__)
+        return await self._async_submit_runtime(execute_if_admitted, *args)
+
+    def _retire_logical_admission(self) -> None:
+        if self._accepting:
+            self._logical_generation += 1
+        self._accepting = False
+
     def _reschedule_deadline(self) -> None:
         self._cancel_deadline()
+        if not self._accepting:
+            return
         deadline = self._runtime.next_deadline
         if deadline is None:
             return
@@ -334,7 +598,10 @@ class HomeAssistantWaterSafetyHost:
                 return
 
             async def async_tick() -> None:
-                await self._process(lambda: self._runtime.tick(datetime.now(UTC)))
+                try:
+                    await self._process(lambda: self._runtime.tick(datetime.now(UTC)))
+                except WaterSafetyHostRetiredError:
+                    return
 
             task = self._hass.async_create_task(async_tick(), "Controlel Water Safety deadline tick")
             self._callback_tasks.add(task)
@@ -355,6 +622,10 @@ class HomeAssistantWaterSafetyHost:
             raise RuntimeError("Water Safety test actions are not allowed while WET")
         if state is WaterSafetyState.DISABLED or not self._runtime.snapshot.processing_enabled:
             raise RuntimeError("Water Safety test actions are not allowed while disabled")
+
+    def _require_accepting(self) -> None:
+        if not self._accepting:
+            raise WaterSafetyHostRetiredError()
 
     def _require_observation(self, state: StateLike | None):
         mapping = self._mapper.map_state(state)

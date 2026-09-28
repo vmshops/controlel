@@ -1560,9 +1560,10 @@ async def test_water_unavailable_notification_target_is_reported_truthfully(hass
     edit = await _choose(hass, saved, "water_safety_notifications")
     options = _field(edit, cf.WATER_NOTIFICATION_TARGETS).config["options"]
     assert options == [{"value": phone, "label": f"{phone} (currently unavailable)"}]
+    assert _defaults(edit)[cf.WATER_NOTIFICATION_TARGETS] == [phone]
     rejected = await hass.config_entries.options.async_configure(
         edit["flow_id"],
-        {cf.WATER_NOTIFICATION_TARGETS: [phone], cf.WATER_TEST_NOTIFICATION: False},
+        _defaults(edit),
     )
 
     assert rejected["type"] is data_entry_flow.FlowResultType.FORM

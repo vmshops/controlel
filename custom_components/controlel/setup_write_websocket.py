@@ -620,8 +620,20 @@ async def _activate_water_setup(
 
     runtime_data = getattr(entry, "runtime_data", None)
     existing_host = getattr(runtime_data, "water_safety_host", None) if runtime_data is not None else None
+    from .water_safety_lifecycle import water_safety_lifecycle_owner
+
+    lifecycle_owner = water_safety_lifecycle_owner(hass, entry.entry_id)
     if existing_host is not None:
-        await existing_host.async_stop()
+        cleanup_complete = await lifecycle_owner.async_stop_host(existing_host)
+    else:
+        cleanup_complete = await lifecycle_owner.async_retry_pending_cleanup()
+    if not cleanup_complete:
+        connection.send_error(
+            msg["id"],
+            websocket_api.ERR_HOME_ASSISTANT_ERROR,
+            "Water Safety cleanup is incomplete; activation can be retried after cleanup completes",
+        )
+        return
 
     from .frontend_api import create_frontend_api_provider_v1
     from .frontend_api_websocket import register_frontend_api_provider_v1, register_water_safety_action_handler_v1

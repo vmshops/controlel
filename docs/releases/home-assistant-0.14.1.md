@@ -1,6 +1,6 @@
 # Controlel Home Assistant integration 0.14.1
 
-Status: candidate
+Status: published
 
 ## Summary
 
@@ -22,7 +22,11 @@ only. It does not change Core, Home Assistant runtime behavior, configuration
 schemas, persistence, migrations, heating or water behavior, frontend runtime
 behavior, or source-control safety behavior.
 
-## Candidate gate
+## Published release boundary
 
-Version 0.14.1 is not yet tagged, released, or published. HACS default
-repository submission and any integration release require separate approval.
+The immutable integration tag is `v0.14.1`, resolving to
+`0746c5cb0eced2350e1883f5f2cb5514040b9886`. The GitHub release includes the
+installable `controlel.zip` HACS asset. HACS default-repository submission
+remains external and is not default-store inclusion.
+
+Version 0.14.2 is a separate, unpublished candidate.

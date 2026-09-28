@@ -36,6 +36,7 @@ __all__ = [
     "HomeAssistantWaterSafetyOutputPort",
     "ShutoffValveUnavailableError",
     "SirenUnavailableError",
+    "WaterSafetyOutputRetiredError",
     "default_water_safety_message",
     "default_water_safety_title",
     "water_safety_locale",
@@ -80,6 +81,10 @@ class ShutoffValveUnavailableError(RuntimeError):
     """The configured shutoff valve has no currently usable HA state."""
 
 
+class WaterSafetyOutputRetiredError(RuntimeError):
+    """The output port was retired after admission and before HA dispatch."""
+
+
 class HomeAssistantWaterSafetyOutputPort:
     """Dispatch notification, siren, and valve requests; physical state remains unknown."""
 
@@ -95,8 +100,22 @@ class HomeAssistantWaterSafetyOutputPort:
         self._bridge = bridge
         self._logger = logger or logging.getLogger(__name__)
         self._area_name = area_name.strip() if isinstance(area_name, str) and area_name.strip() else None
+        self._quiescent = False
+
+    @property
+    def quiescent(self) -> bool:
+        """Return whether new physical output requests are permanently blocked."""
+
+        return self._quiescent
+
+    def quiesce(self) -> None:
+        """Permanently reject new physical output requests from this host."""
+
+        self._quiescent = True
 
     def request(self, command: WaterOutputCommand) -> WaterOutputCommandResult:
+        if self._quiescent:
+            return self._retired_result(command)
         try:
             if command.output_kind is WaterOutputKind.NOTIFICATION:
                 self._bridge.run_coroutine(lambda: self._async_notify(command))
@@ -104,6 +123,8 @@ class HomeAssistantWaterSafetyOutputPort:
                 self._bridge.run_coroutine(lambda: self._async_siren(command))
             else:
                 self._bridge.run_coroutine(lambda: self._async_close_shutoff_valve(command))
+        except WaterSafetyOutputRetiredError:
+            return self._retired_result(command)
         except SirenUnavailableError:
             failure_code = "home_assistant_siren_unavailable"
             self._logger.warning(
@@ -148,6 +169,42 @@ class HomeAssistantWaterSafetyOutputPort:
             outcome=WaterOutputOutcome.ACCEPTED,
         )
 
+    def _retired_result(self, command: WaterOutputCommand) -> WaterOutputCommandResult:
+        return WaterOutputCommandResult(
+            command_id=command.command_id,
+            occurred_at=datetime.now(UTC),
+            outcome=WaterOutputOutcome.FAILED,
+            failure_code="water_safety_host_quiescent",
+        )
+
+    async def _async_dispatch_ha_service(
+        self,
+        domain: str,
+        service: str,
+        service_data: dict[str, object] | None = None,
+        *,
+        target: dict[str, str] | None = None,
+    ) -> None:
+        """Revoke dispatch at the last HA-loop boundary before service call."""
+
+        if self._quiescent:
+            raise WaterSafetyOutputRetiredError("Water Safety output port is retired")
+        if target is None:
+            await self._hass.services.async_call(
+                domain,
+                service,
+                service_data,
+                blocking=True,
+            )
+            return
+        await self._hass.services.async_call(
+            domain,
+            service,
+            service_data,
+            blocking=True,
+            target=target,
+        )
+
     async def _async_notify(self, command: WaterOutputCommand) -> None:
         locator = command.target.current_locator
         if locator is None or "." not in locator:
@@ -161,11 +218,10 @@ class HomeAssistantWaterSafetyOutputPort:
             area_name=self._area_name,
         )
         title = default_water_safety_title(self._hass.config.language)
-        await self._hass.services.async_call(
+        await self._async_dispatch_ha_service(
             "notify",
             service,
             {"title": title, "message": message},
-            blocking=True,
         )
 
     async def _async_siren(self, command: WaterOutputCommand) -> None:
@@ -178,19 +234,17 @@ class HomeAssistantWaterSafetyOutputPort:
         domain = entity_id.split(".", 1)[0]
         if domain == "switch":
             service = "turn_on" if command.action is WaterOutputAction.REQUEST_SIREN_ON else "turn_off"
-            await self._hass.services.async_call(
+            await self._async_dispatch_ha_service(
                 domain,
                 service,
-                blocking=True,
                 target={"entity_id": entity_id},
             )
             return
         if domain == "siren":
             service = "turn_on" if command.action is WaterOutputAction.REQUEST_SIREN_ON else "turn_off"
-            await self._hass.services.async_call(
+            await self._async_dispatch_ha_service(
                 domain,
                 service,
-                blocking=True,
                 target={"entity_id": entity_id},
             )
             return
@@ -208,9 +262,8 @@ class HomeAssistantWaterSafetyOutputPort:
         domain = entity_id.split(".", 1)[0]
         if domain != "valve":
             raise ValueError(f"unsupported shutoff valve entity domain: {domain}")
-        await self._hass.services.async_call(
+        await self._async_dispatch_ha_service(
             "valve",
             "close_valve",
-            blocking=True,
             target={"entity_id": entity_id},
         )

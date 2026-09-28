@@ -52,7 +52,7 @@ find "$HA_CONFIG/custom_components/controlel" -type d -name __pycache__ \
 ```
 
 The version check must print `0.18.0`. The development bundle contains Home
-Assistant integration version `0.14.1`. The source manifest requires exactly
+Assistant integration version `0.14.2`. The source manifest requires exactly
 `controlel==0.18.0`, and the generated development bundle preserves exactly
 `controlel==0.18.0`; there is no local dependency rewrite or override to another
 Core version. Start Home Assistant, then run the Setup Wizard smoke flow. A

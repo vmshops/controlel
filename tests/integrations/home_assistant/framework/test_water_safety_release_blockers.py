@@ -16,6 +16,7 @@ from controlel.domain.water_safety import MoistureCondition, WaterSafetyAssessme
 from controlel.infrastructure.home_assistant import ACTIVE_REFERENCE_KEY
 from controlel.infrastructure.home_assistant.water_safety_discovery import async_snapshot_with_notify_services
 from custom_components.controlel import water_safety_activation as activation
+from custom_components.controlel import water_safety_host as water_host_module
 from custom_components.controlel.event_loop_bridge import HomeAssistantEventLoopBridge
 from custom_components.controlel.scheduler import HomeAssistantScheduler
 from custom_components.controlel.water_safety_host import build_water_safety_host
@@ -431,3 +432,80 @@ async def test_failed_or_cancelled_start_removes_early_subscription(hass, monkey
     await hass.async_block_till_done()
     assert not host._callback_tasks
     await host.async_stop()
+
+
+@pytest.mark.asyncio
+async def test_late_cleanup_failure_is_consumed_logged_and_retryable(hass, monkeypatch, caplog) -> None:
+    monkeypatch.setattr(water_host_module, "RESOURCE_CLEANUP_TIMEOUT_SECONDS", 0.01)
+    host = _host(hass)
+    release = asyncio.Event()
+
+    async def fail_late() -> None:
+        await release.wait()
+        raise RuntimeError("late cleanup failure")
+
+    completed, error = await host._async_supervise_cleanup("late failure step", fail_late)
+    assert completed is False
+    assert error is None
+    assert "late failure step" in host._cleanup_tasks
+
+    release.set()
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert host._cleanup_tasks == {}
+    assert "Water Safety cleanup step failed (late failure step)" in caplog.text
+    assert "late cleanup failure" in caplog.text
+    assert "Task exception was never retrieved" not in caplog.text
+
+    completed, error = await host._async_supervise_cleanup("late failure step", _successful_cleanup)
+    assert completed is True
+    assert error is None
+
+
+@pytest.mark.asyncio
+async def test_late_cleanup_cancellation_is_consumed_and_retryable(hass, monkeypatch, caplog) -> None:
+    monkeypatch.setattr(water_host_module, "RESOURCE_CLEANUP_TIMEOUT_SECONDS", 0.01)
+    host = _host(hass)
+    never_release = asyncio.Event()
+
+    async def cancel_late() -> None:
+        await never_release.wait()
+
+    completed, error = await host._async_supervise_cleanup("late cancellation step", cancel_late)
+    assert completed is False
+    assert error is None
+
+    task = host._cleanup_tasks["late cancellation step"]
+    task.cancel("late cleanup cancellation")
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert host._cleanup_tasks == {}
+    assert "Water Safety cleanup step failed (late cancellation step)" in caplog.text
+    assert "late cleanup cancellation" in caplog.text
+    assert "Task exception was never retrieved" not in caplog.text
+
+    completed, error = await host._async_supervise_cleanup("late cancellation step", _successful_cleanup)
+    assert completed is True
+    assert error is None
+
+
+@pytest.mark.asyncio
+async def test_cleanup_completion_at_timeout_boundary_is_consumed(hass, monkeypatch, caplog) -> None:
+    host = _host(hass)
+
+    async def boundary_wait(tasks, *, timeout):
+        del timeout
+        task = next(iter(tasks))
+        await asyncio.shield(task)
+        return set(), {task}
+
+    monkeypatch.setattr(water_host_module.asyncio, "wait", boundary_wait)
+    completed, error = await host._async_supervise_cleanup("timeout boundary step", _successful_cleanup)
+    assert completed is True
+    assert error is None
+    assert host._cleanup_tasks == {}
+    assert "timed out (timeout boundary step)" not in caplog.text
+
+
+async def _successful_cleanup() -> None:
+    return None
