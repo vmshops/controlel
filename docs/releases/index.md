@@ -6,8 +6,8 @@ repository's canonical release metadata (release-metadata/releases.yaml).
 See individual release pages for details and highlights.
 
 - Published Core release: see core-0.18.0.md
-- Home Assistant integration candidate: see home-assistant-0.14.2.md
-- Published Home Assistant integration: see home-assistant-0.14.1.md
+- Published Home Assistant integration: see home-assistant-0.14.2.md
+- Previous published Home Assistant integration: see home-assistant-0.14.1.md
 - Previous published Home Assistant integration: see home-assistant-0.14.0.md
 - Previous published Core release: see core-0.17.0.md
 - Previous published Core release: see core-0.16.0.md

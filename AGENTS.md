@@ -160,7 +160,7 @@ For every task, CONTROL decides and records:
 - the exact worktree and branch
 - the FREE deterministic PowerShell/Git/WSL setup and preflight
 - the verification/test profile
-- the executor, model, and reasoning effort
+- the executor, model, and reasoning effort (see Executor and model routing)
 - the success criteria
 
 Execution order is mandatory:
@@ -190,6 +190,43 @@ The preferred Codex flow is:
 
 For normal development, do not auto-open VS Code and do not create
 executor-managed `Users/.codex` worktrees.
+
+---
+
+# Executor and model routing
+
+CONTROL chooses the executor. For a technical or coding task recommendation,
+state:
+
+PLATFORMA:
+MODEL:
+ÚSILÍ:
+ÚKOL:
+PROČ:
+
+Use the cheapest and smallest model that can reliably do the task. Use Grok
+or Astra when the task is actually complex. Do not pass work between models
+without a new CONTROL decision. Worker and reviewer output is evidence only
+until CONTROL accepts it. Repository, worktree, preflight, no-push, and
+no-merge safety rules remain in force.
+
+- ChatGPT GPT-5.6 Sol: CONTROL, architecture, specifications and contracts,
+  analysis and debugging, safe procedures, acceptance and review.
+- ChatGPT Work / Codex GPT-6 Astra: strongest escalation for exceptionally
+  difficult coding, repo-wide work, or debugging. Not the default.
+- Cursor Grok 4.7: complex multi-file implementation, difficult fixes,
+  migrations and refactors, and autonomous repository or terminal work.
+- Cursor Composer 2.5: normal small and medium implementation, tests, and
+  straightforward fixes or refactors.
+- Cursor Claude Opus 5.5: targeted independent or critical review and a
+  second opinion.
+- Cursor Gemini 3.8 Flash: cheap large-context search, summarization,
+  classification, and mechanical analysis.
+- ModelArk GLM-5.2: bounded module, bug, patch, tests, or limited refactor.
+- local Qwen3-Coder-30B-A3B-Instruct: free non-thinking helper for short,
+  precise, bounded implementation, test, parser, DTO, SQL, shell, PowerShell,
+  diff, or boilerplate tasks. Stop if it starts looping.
+- GitHub Copilot Free: autocomplete and small local coding assistance.
 
 ---
 # When uncertain
@@ -238,8 +275,8 @@ Do not add Windows-specific compatibility hacks for Home Assistant tests, includ
 For source/candidate work, use a dedicated environment bound to one selected
 source worktree; never share an editable Controlel installation across tasks.
 
-Published Core `0.15.0` contains Frontend API v1. Home Assistant 0.13.0
-public-composition tests must install exact `controlel==0.15.0` from PyPI and
+Published Core `0.18.0` is the current public Core release. Home Assistant
+public-composition tests must install exact `controlel==0.18.0` from PyPI and
 verify its published artifact identities and imported public surface.
 Do not bypass, weaken, or rewrite public-composition tests.
 
