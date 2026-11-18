@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Run Home Assistant tests only from an explicitly selected WSL worktree and environment.
+# Run Home Assistant tests only from an explicitly selected Linux worktree and environment.
 set -euo pipefail
 
 usage() {
-  echo "usage: $0 --worktree <wsl-path> --baseline <sha> --profile <checked-out-wheel|source-candidate> --environment <venv> [--validate] [-- <pytest arguments>]" >&2
+  echo "usage: $0 --worktree <linux-path> --baseline <sha> --profile <checked-out-wheel|source-candidate|public> --environment <venv> [--validate] [-- <pytest arguments>]" >&2
   exit 2
 }
 
@@ -22,11 +22,17 @@ done
 [[ -n "$worktree" && -n "$baseline" && -n "$profile" && -n "$environment" ]] || usage
 [[ -d "$worktree/.git" || -f "$worktree/.git" ]] || { echo "worktree is not a Git worktree: $worktree" >&2; exit 1; }
 [[ -x "$environment/bin/python" ]] || { echo "HA environment is unavailable: $environment" >&2; exit 1; }
-[[ "$profile" == "checked-out-wheel" || "$profile" == "source-candidate" ]] || usage
+[[ "$profile" == "checked-out-wheel" || "$profile" == "source-candidate" || "$profile" == "public" ]] || usage
 
-windows_worktree=$(wslpath -w "$worktree")
-head=$(git.exe -C "$windows_worktree" rev-parse HEAD | tr -d '\r')
-git.exe -C "$windows_worktree" merge-base --is-ancestor "$baseline" "$head"
+if [[ -f "$worktree/.git" ]] && grep -qE '^gitdir: [A-Za-z]:' "$worktree/.git"; then
+  # Preserve Windows-created worktree metadata when running inside WSL.
+  windows_worktree=$(wslpath -w "$worktree")
+  head=$(git.exe -C "$windows_worktree" rev-parse HEAD | tr -d '\r')
+  git.exe -C "$windows_worktree" merge-base --is-ancestor "$baseline" "$head"
+else
+  head=$(git -C "$worktree" rev-parse HEAD)
+  git -C "$worktree" merge-base --is-ancestor "$baseline" "$head"
+fi
 lock_hash=$(sha256sum "$worktree/requirements/ha-test.txt" | awk '{print $1}')
 fingerprint="$environment/.controlel-harness-v2.json"
 [[ -f "$fingerprint" ]] || { echo "missing HA environment fingerprint: $fingerprint" >&2; exit 1; }
@@ -57,6 +63,10 @@ if [[ "$profile" == "checked-out-wheel" ]]; then
   "$python" -m pip install --force-reinstall --no-deps "$wheel"
   "$python" scripts/ci/verify_public_core.py --development-wheel "$wheel"
   CONTROLEL_FRAMEWORK_COMPOSITION=checked-out-wheel "$python" -m pytest "$@"
+elif [[ "$profile" == "public" ]]; then
+  # No checkout wheel/source fallback: validate exact manifest pin + PyPI bytes.
+  "$python" scripts/ci/verify_public_core.py
+  CONTROLEL_FRAMEWORK_COMPOSITION=public "$python" -m pytest "$@"
 else
   # Source/candidate is deliberately bound to this one worktree; no installed Core is accepted.
   installed=$("$python" -c 'import importlib.metadata; print(importlib.metadata.version("controlel"))' 2>/dev/null || true)

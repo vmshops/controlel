@@ -1,0 +1,19 @@
+depends_on: [ha-public]
+when:
+  - event: pull_request
+    path: ['src/**', 'custom_components/**', 'tests/**', 'scripts/**', 'requirements/**', 'pyproject.toml', '.woodpecker/**', '.github/workflows/**', 'infra/ci/**', 'hacs.json']
+  - event: push
+    branch: [main, develop]
+    path: ['src/**', 'custom_components/**', 'tests/**', 'scripts/**', 'requirements/**', 'pyproject.toml', '.woodpecker/**', '.github/workflows/**', 'infra/ci/**', 'hacs.json']
+  - event: [manual, tag, release]
+steps:
+  - name: hacs-release-archive
+    image: vmshop-ci/controlel-python:ci02-20261117
+    pull: false
+    commands:
+      - bash scripts/ci/integration-release.sh
+  - name: hassfest
+    image: ghcr.io/home-assistant/hassfest:latest
+    commands:
+      - cd /usr/src/homeassistant
+      - python3 -m script.hassfest --action validate --integration-path "$CI_WORKSPACE/custom_components/controlel"

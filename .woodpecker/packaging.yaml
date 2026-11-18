@@ -1,0 +1,13 @@
+when:
+  - event: pull_request
+    path: ['src/**', 'tests/packaging/**', 'scripts/**', 'requirements/**', 'pyproject.toml', 'README.md', 'LICENSE*', 'MANIFEST.in', '.woodpecker/**', '.github/workflows/**', 'infra/ci/**']
+  - event: push
+    branch: [main, develop]
+    path: ['src/**', 'tests/packaging/**', 'scripts/**', 'requirements/**', 'pyproject.toml', 'README.md', 'LICENSE*', 'MANIFEST.in', '.woodpecker/**', '.github/workflows/**', 'infra/ci/**']
+  - event: [manual, tag, release]
+steps:
+  - name: core-package-and-clean-install
+    image: vmshop-ci/controlel-python:ci02-20261117
+    pull: false
+    commands:
+      - bash scripts/ci/packaging.sh
