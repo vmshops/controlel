@@ -261,6 +261,10 @@ Use WSL/Linux for:
 - Linux/CI reproduction
 - Home Assistant Python integration verification
 
+Shared CI is https://ci.vmshop.cz. Read `docs/development/SharedCI.md` for
+this repository and Transport `docs/CI-AGENTS.md` for the server. Do not treat
+Transport profiles as Controlel profiles.
+
 Run Home Assistant tests from Bionic via the repository runner in WSL; do not
 let the runner infer a worktree from the shell current directory.
 

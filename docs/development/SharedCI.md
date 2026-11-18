@@ -1,32 +1,26 @@
-# Shared Woodpecker CI candidate
+# Shared Woodpecker CI
 
-This candidate onboards `vmshops/controlel` to the existing shared Woodpecker
-server. It does not deploy the integration or contact physical Home Assistant,
-heating, boiler, valve or production devices. All five existing GitHub Actions
-files remain unchanged and active until the coordinator has actual evidence
-for this repository on the exact candidate commit.
+`vmshops/controlel` is activated on https://ci.vmshop.cz as repository 6.
+Agent procedure: [CI-AGENTS.md](https://github.com/marsa99/Transport/blob/main/docs/CI-AGENTS.md).
+Transport FAST/FULL/RELEASE profiles are not this repository's profiles.
 
-## Task contract and evidence
+Manual Woodpecker pipeline 1 on `e236f9287ecd691c601f65f463c65fe92f8a8aa6`
+finished SUCCESS for `core-and-adapters`, `ha-checked-out`, `ha-public`,
+`packaging` and `integration-release` (including hassfest). That run is the
+verified replacement for the mapped GitHub Actions suites. It does not deploy
+and it does not contact physical Home Assistant, heating, boiler, valve or
+production devices.
 
-CONTROL assigned this bounded CI/docs task to the existing Codex worker,
-without changing its model or reasoning configuration. The immutable baseline
-is `26c3bc5a44ee59485c04cff2bcf3208239e3fa70`. WRITE branch:
-`task/ci02-onboarding`; isolated worktree: `work/projects/controlel` under the
-CI-02 workspace, backed by its own `work/project-repos/controlel.git` bare clone.
-No user's checkout, product code, dependency lock, release state or device is
-changed. No push, merge, GitHub/CI mutation or deployment belongs to this worker.
+Push and pull request no longer start the replaced Actions (`tests`,
+`hassfest`, `packaging`, published-core, release archive). Those remain
+`workflow_dispatch`. A pull request still runs only the official `hacs/action`
+job, because Woodpecker does not perform that remote HACS validation. The
+Monday 03:17 UTC schedule of `integration-release-validation.yml` remains.
+Opening this branch as a pull request is the webhook check; push of this
+branch does not match the Woodpecker `main`/`develop` filter.
 
-Before editing, repository `scripts/agent/preflight.ps1` checked the explicit
-anchor, baseline, worktree, branch, WRITE mode, `fast` profile and task Python
-3.14 interpreter, and finished with `=== PREFLIGHT OK ===`. The same preflight
-must precede verification with the exact committed candidate as `ExpectedHead`.
-Acceptance requires a coordinator review and actual Woodpecker runs; local
-syntax/provenance checks are not a successful Core/HA pilot.
-
-As of 2026-11-18, the coordinator reports GitHub
-`GET /repos/vmshops/controlel/hooks` returning 404 during OAuth activation.
-Organization app access is not available. Activation/webhook setup and all live
-Woodpecker workflows are **BLOCKED / NOT RUN**; no FULL result is claimed.
+The 2026-11-18 preparation note that organization OAuth was blocked is
+historical. Grant access was accepted and the manual run above completed.
 
 Local preparation verification: **PASS** for three Linux-only provenance/guard
 tests (`python3 -B scripts/ci/test_harness.py -v`), three existing development
@@ -65,9 +59,8 @@ FULL and RELEASE currently run the same test/check coverage. RELEASE does not
 publish, tag, install on HA, or deploy. It builds inspection files in the
 ephemeral workflow workspace. Durable seven-day inspection-artifact upload
 remains in the unchanged GitHub workflow; no Transport upload token, artifact
-directory or other project's credentials are reused here. The existing weekly
-GitHub schedule remains there as well. A green Woodpecker result covers only
-the mapped checks, not the still-unported HACS action or device validation.
+directory or other project's credentials are reused here. The Monday GitHub schedule remains. A green Woodpecker result covers only
+the mapped checks, not the official HACS action or device validation.
 
 ## Runtime and isolation requirements
 
@@ -139,5 +132,6 @@ that check on GitHub. Do not label complete replacement until it has proof.
 4. Run manual FULL on the exact candidate SHA and inspect all five workflow
    statuses, complete logs and both HA compositions. Repeat RELEASE for its
    actual selected SHA if it will be used as a release gate.
-5. Record remaining HACS/artifact/schedule coverage explicitly. Only after live
-   proof may CONTROL decide whether/how to change the retained Actions.
+5. Record remaining HACS/artifact/schedule coverage explicitly. The mapped
+   Actions are manual after pipeline 1 PASS. The official HACS pull-request
+   job and the Monday schedule stay.

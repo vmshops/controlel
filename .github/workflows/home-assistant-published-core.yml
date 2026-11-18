@@ -1,9 +1,6 @@
 name: Home Assistant published Core compatibility
 
 on:
-  release:
-    types:
-      - published
   workflow_call:
   workflow_dispatch:
 
