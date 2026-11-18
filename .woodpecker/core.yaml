@@ -1,0 +1,13 @@
+when:
+  - event: pull_request
+    path: ['src/**', 'tests/**', 'scripts/**', 'requirements/**', 'pyproject.toml', '.woodpecker/**', '.github/workflows/**', 'infra/ci/**']
+  - event: push
+    branch: [main, develop]
+    path: ['src/**', 'tests/**', 'scripts/**', 'requirements/**', 'pyproject.toml', '.woodpecker/**', '.github/workflows/**', 'infra/ci/**']
+  - event: [manual, tag, release]
+steps:
+  - name: core-and-adapters
+    image: vmshop-ci/controlel-python:ci02-20261117
+    pull: false
+    commands:
+      - bash scripts/ci/core.sh

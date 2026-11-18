@@ -1,0 +1,13 @@
+when:
+  - event: pull_request
+    path: ['src/**', 'custom_components/**', 'tests/**', 'scripts/**', 'requirements/**', 'pyproject.toml', '.woodpecker/**', '.github/workflows/**', 'infra/ci/**', 'hacs.json']
+  - event: push
+    branch: [main, develop]
+    path: ['src/**', 'custom_components/**', 'tests/**', 'scripts/**', 'requirements/**', 'pyproject.toml', '.woodpecker/**', '.github/workflows/**', 'infra/ci/**', 'hacs.json']
+  - event: [manual, tag, release]
+steps:
+  - name: ha-adapter-and-framework-public-core
+    image: vmshop-ci/controlel-python:ci02-20261117
+    pull: false
+    commands:
+      - bash scripts/ci/ha.sh public

@@ -1,0 +1,13 @@
+when:
+  - event: pull_request
+    path: ['src/**', 'custom_components/**', 'tests/**', 'scripts/**', 'requirements/**', 'pyproject.toml', '.woodpecker/**', '.github/workflows/**', 'infra/ci/**']
+  - event: push
+    branch: [main, develop]
+    path: ['src/**', 'custom_components/**', 'tests/**', 'scripts/**', 'requirements/**', 'pyproject.toml', '.woodpecker/**', '.github/workflows/**', 'infra/ci/**']
+  - event: [manual, tag, release]
+steps:
+  - name: ha-adapter-and-framework-checkout-wheel
+    image: vmshop-ci/controlel-python:ci02-20261117
+    pull: false
+    commands:
+      - bash scripts/ci/ha.sh checked-out-wheel

@@ -3,7 +3,7 @@
 set -euo pipefail
 
 usage() {
-  echo "usage: $0 --worktree <wsl-path> --baseline <sha> --profile <checked-out-wheel|source-candidate> --environment <venv>" >&2
+  echo "usage: $0 --worktree <linux-path> --baseline <sha> --profile <checked-out-wheel|source-candidate|public> --environment <venv>" >&2
   exit 2
 }
 
@@ -18,13 +18,18 @@ while (($#)); do
   esac
 done
 [[ -n "$worktree" && -n "$baseline" && -n "$profile" && -n "$environment" ]] || usage
-[[ "$profile" == "checked-out-wheel" || "$profile" == "source-candidate" ]] || usage
+[[ "$profile" == "checked-out-wheel" || "$profile" == "source-candidate" || "$profile" == "public" ]] || usage
 [[ -x "$environment/bin/python" ]] || { echo "HA environment is unavailable: $environment" >&2; exit 1; }
 [[ -d "$worktree/.git" || -f "$worktree/.git" ]] || { echo "worktree is not a Git worktree: $worktree" >&2; exit 1; }
 
-windows_worktree=$(wslpath -w "$worktree")
-head=$(git.exe -C "$windows_worktree" rev-parse HEAD | tr -d '\r')
-git.exe -C "$windows_worktree" merge-base --is-ancestor "$baseline" "$head"
+if [[ -f "$worktree/.git" ]] && grep -qE '^gitdir: [A-Za-z]:' "$worktree/.git"; then
+  windows_worktree=$(wslpath -w "$worktree")
+  head=$(git.exe -C "$windows_worktree" rev-parse HEAD | tr -d '\r')
+  git.exe -C "$windows_worktree" merge-base --is-ancestor "$baseline" "$head"
+else
+  head=$(git -C "$worktree" rev-parse HEAD)
+  git -C "$worktree" merge-base --is-ancestor "$baseline" "$head"
+fi
 lock_hash=$(sha256sum "$worktree/requirements/ha-test.txt" | awk '{print $1}')
 fingerprint="$environment/.controlel-harness-v2.json"
 if [[ -e "$fingerprint" ]]; then
