@@ -13,7 +13,9 @@ production devices.
 
 Push and pull request no longer start the replaced Actions (`tests`,
 `hassfest`, `packaging`, published-core, release archive). Those remain
-`workflow_dispatch`. A pull request still runs only the official `hacs/action`
+`workflow_dispatch`. A published GitHub release still starts
+`home-assistant-published-core.yml`, because the packaging contract requires
+that `release:` trigger. It is not a push or pull request. A pull request still runs only the official `hacs/action`
 job, because Woodpecker does not perform that remote HACS validation. The
 Monday 03:17 UTC schedule of `integration-release-validation.yml` remains.
 Opening this branch as a pull request is the webhook check; push of this
